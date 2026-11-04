@@ -1,0 +1,4 @@
+age_band,gender,smoker,coverage_term,sum_assured_band,ci_benefit,premium_low,premium_high
+25 to 29,Male,No,6 to 10 years,"S$100,001 to 250,000",Yes,520,700
+25 to 29,Female,No,6 to 10 years,"S$100,001 to 250,000",Yes,470,640
+30 to 34,Male,Yes,11 to 20 years,"Up to S$100,000",No,190,260

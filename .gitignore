@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env.local
+.env
+supabase/.temp/
+supabase/.branches/
+tests/e2e/files/
+tests/e2e/shots/
+*.log
+tests/e2e/*.pdf
+tests/e2e/rates-v2.csv
+tests/e2e/auth
+tests/e2e/postgrest

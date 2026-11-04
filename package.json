@@ -1,0 +1,15 @@
+{
+  "name": "policy-management-system",
+  "private": true,
+  "scripts": {
+    "db:start": "supabase start",
+    "db:reset": "supabase db reset",
+    "db:stop": "supabase stop",
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "test:db": "bash tests/test-db.sh"
+  },
+  "devDependencies": {
+    "supabase": "^3.0.0"
+  }
+}
