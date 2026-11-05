@@ -10,9 +10,12 @@ const SAMPLE = [
   ['editor@example.com', 'Content editor'],
 ]
 
+// Sample-login shortcuts only appear against a local Supabase, never a hosted project.
+const LOCAL = /127\.0\.0\.1|localhost/.test(import.meta.env.VITE_SUPABASE_URL ?? '')
+
 export default function Login() {
-  const [email, setEmail] = useState('submitter@example.com')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState(LOCAL ? 'submitter@example.com' : '')
+  const [password, setPassword] = useState(LOCAL ? 'password123' : '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const microsoft = import.meta.env.VITE_ENABLE_MICROSOFT_LOGIN === 'true'
@@ -53,7 +56,7 @@ export default function Login() {
           {error && <div className="error" role="alert">{error}</div>}
           <button className={microsoft ? 'btn' : 'btn primary'} disabled={busy}>Sign in</button>
         </form>
-        {!microsoft && (
+        {!microsoft && LOCAL && (
           <div className="small muted">
             <p style={{ margin: '0 0 6px' }}>Prototype sample logins (password <code>password123</code>):</p>
             <div className="chips">
