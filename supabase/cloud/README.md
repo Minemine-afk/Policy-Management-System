@@ -2,6 +2,15 @@
 
 No Docker or command line needed except for step 8. Use made-up data only until the go-live checklist in the main README is done.
 
+## Reusing an existing project instead (e.g. Finassistant)
+1. Open the paused project and click **Restore**. Wait until it is running.
+2. **Project Settings → General**: note the **Region**. Fine for the prototype if it isn't Singapore,
+   but real client data must live in a Singapore project, and a project's region can't be changed.
+3. SQL Editor → run `0-check-existing-project.sql` (read-only) and send Claude a screenshot.
+   If it lists only the two "(info)" rows, nothing clashes: skip to step 2 below.
+4. Existing users of that project get a DMS profile with no roles, so they see nothing until you assign one.
+5. Turn off public sign-up (step 4) only if the old app no longer needs it.
+
 ## 1. Create the project
 1. Sign in at supabase.com and click **New project**.
 2. Name: `dms-prototype`. Region: **Southeast Asia (Singapore)**. Plan: **Free**.
