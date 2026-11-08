@@ -49,13 +49,17 @@ export function summary(r: { age_band: string; gender: string; smoker: boolean; 
   return `${r.gender}, ${r.age_band}, ${r.smoker ? 'smoker' : 'non-smoker'} · ${r.sum_assured_band} · ${r.coverage_term}`
 }
 
-/** Requests are due one day after submission. Completed and removed requests are never overdue. */
-export function dueInfo(r: { status: string; submitted_at: string }): { overdue: boolean; label: string } | null {
+/** Requests are due two days after submission. Orange: one day or less left. Red: past two days.
+ *  Completed and removed requests are never flagged. */
+export type DueLevel = 'ok' | 'soon' | 'late'
+export function dueInfo(r: { status: string; submitted_at: string }): { level: DueLevel; overdue: boolean; label: string } | null {
   if (r.status === 'completed' || r.status === 'removed') return null
   const hours = (Date.now() - new Date(r.submitted_at).getTime()) / 3_600_000
-  if (hours > 24) {
-    const over = Math.floor(hours - 24)
-    return { overdue: true, label: over >= 24 ? `Overdue by ${Math.floor(over / 24)}d` : `Overdue by ${Math.max(over, 1)}h` }
+  if (hours > 48) {
+    const over = Math.floor(hours - 48)
+    const label = over >= 24 ? `Overdue by ${Math.floor(over / 24)}d` : `Overdue by ${Math.max(over, 1)}h`
+    return { level: 'late', overdue: true, label }
   }
-  return { overdue: false, label: `Due in ${Math.max(Math.ceil(24 - hours), 1)}h` }
+  const left = 48 - hours
+  return { level: left <= 24 ? 'soon' : 'ok', overdue: false, label: left <= 24 ? 'Due in 1d' : 'Due in 2d' }
 }

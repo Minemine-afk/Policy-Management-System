@@ -78,7 +78,7 @@ export default function Backlog() {
               {list.map((r) => {
                 const due = staff ? dueInfo(r) : null
                 return (
-                <tr key={r.id} className={due?.overdue ? 'overdue' : ''}>
+                <tr key={r.id} className={due && due.level !== 'ok' ? 'row-' + due.level : ''}>
                   <td><Link to={`/requests/${r.id}`}><strong>{r.ref}</strong></Link></td>
                   <td><StatusPill status={r.status} /></td>
                   <td>{summary(r)}</td>
@@ -95,7 +95,7 @@ export default function Backlog() {
                     ) : nameOf(people, r.assignee_id)}
                   </td>
                   <td className="num">{daysSince(r.submitted_at)}d</td>
-                  {staff && <td>{due && <span className={`due ${due.overdue ? 'late' : ''}`}>{due.label}</span>}</td>}
+                  {staff && <td>{due && <span className={`due ${due.level}`}>{due.label}</span>}</td>}
                   <td>{fmtDate(r.submitted_at)}</td>
                 </tr>
               )})}

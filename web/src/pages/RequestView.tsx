@@ -66,7 +66,7 @@ export default function RequestView() {
       <div className="row between">
         <div>
           <p className="muted small" style={{ margin: 0 }}><Link to="/board">Board</Link> / {r.ref}</p>
-          <h1>{r.ref} <StatusPill status={r.status} />{!has('introducer') && dueInfo(r) && <span className={`due ${dueInfo(r)!.overdue ? 'late' : ''}`} style={{ marginLeft: 8, fontSize: 14 }}>{dueInfo(r)!.label}</span>}</h1>
+          <h1>{r.ref} <StatusPill status={r.status} />{!has('introducer') && dueInfo(r) && <span className={`due ${dueInfo(r)!.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{dueInfo(r)!.label}</span>}</h1>
         </div>
         <div className="row">
           {has('introducer') && r.introducer_id === profile.id && ['submitted', 'sent_back'].includes(r.status) &&

@@ -50,8 +50,9 @@ const file = (name) => ({ name, mimeType: 'application/pdf', buffer: Buffer.from
   // 2. Ops Olivia: pool, pick up, complete
   let olivia = await session('ops1@example.com')
   await olivia.locator('.cardlet').first().waitFor()
-  await check(olivia.locator('.cardlet.overdue[data-ref="PI-00002"]').getByText(/Overdue by 2d/).isVisible(), 'ops sees a 3-day-old request highlighted (2 days past due) as overdue')
-  await check(sam.locator('.cardlet.overdue').count().then((n) => n === 0), 'introducers do not see overdue flags')
+  await check(olivia.locator('.cardlet.late[data-ref="PI-00002"]').getByText(/Overdue by 1d/).isVisible(), 'ops sees a 3-day-old request highlighted red (1 day past the 2-day limit) as overdue')
+  await check(sam.locator('.cardlet.late, .cardlet.soon').count().then((n) => n === 0), 'introducers do not see overdue flags')
+  await check(olivia.locator('.cardlet.soon[data-ref="PI-00001"]').getByText('Due in 1d').isVisible(), 'a request with one day left is orange')
   await olivia.locator('.cardlet[data-ref="PI-00001"]').getByRole('button', { name: 'Assign to me' }).waitFor()
   ok('pool cards show an Assign to me button for ops')
   await check(olivia.locator('.cardlet').count().then((n) => n === 4), 'ops sees the unassigned pool plus own work (4 cards)')

@@ -54,7 +54,7 @@ export default function Board() {
       </div>
       {staff && visible.some((r) => dueInfo(r)?.overdue) && (
         <div className="notice bad"><strong>{visible.filter((r) => dueInfo(r)?.overdue).length} overdue</strong>
-          <span>Requests open for more than one day are highlighted in red.</span></div>
+          <span>Requests open for more than two days are red. Orange means one day or less is left.</span></div>
       )}
       {msg && <div className="notice warn" role="alert"><strong>{msg}</strong></div>}
       {canMove && <p className="small muted" style={{ margin: 0 }}>Drag a card to another column to change its status.</p>}
@@ -73,13 +73,13 @@ export default function Board() {
               {cards.map((r) => {
                 const due = staff ? dueInfo(r) : null
                 return (
-                <Link key={r.id} to={`/requests/${r.id}`} className={`cardlet${due?.overdue ? ' overdue' : ''}`} data-ref={r.ref}
+                <Link key={r.id} to={`/requests/${r.id}`} className={`cardlet${due && due.level !== 'ok' ? ' ' + due.level : ''}`} data-ref={r.ref}
                   draggable={canMove} onDragStart={(e) => e.dataTransfer.setData('text/plain', r.id)}>
                   <div className="row between"><strong>{r.ref}</strong><span className="small muted">{daysSince(r.submitted_at)}d</span></div>
                   <div className="small">{summary(r)}</div>
                   {!has('introducer') && <div className="small muted">{nameOf(people, r.introducer_id)} · {people[r.introducer_id]?.company}</div>}
                   <div className="small muted">{r.assignee_id ? `Handled by ${nameOf(people, r.assignee_id)}` : 'Unassigned'}</div>
-                  {due && <div className={`due ${due.overdue ? 'late' : ''}`}>{due.label}</div>}
+                  {due && <div className={`due ${due.level}`}>{due.label}</div>}
                   {has('ops') && r.status === 'submitted' && !r.assignee_id && (
                     <button className="btn small primary" onClick={(e) => { e.preventDefault(); e.stopPropagation(); move(r, 'assigned') }}>Assign to me</button>
                   )}
