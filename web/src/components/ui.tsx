@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react'
-import { STATUS_LABEL, money } from '../lib/options'
-import type { PriceRange, RequestStatus } from '../lib/types'
+import { useState, type ReactNode } from 'react'
+import { STATUS_LABEL } from '../lib/options'
+import type { RequestStatus } from '../lib/types'
 
 export function Seg<T extends string | boolean>({ label, value, options, onChange }: {
   label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void
@@ -33,41 +33,35 @@ export function Select({ label, value, options, onChange }: {
   )
 }
 
-const STATUS_TONE: Record<RequestStatus, string> = {
-  draft: 'warn', submitted: 'info', referred_back: 'warn', approved: 'ok', rejected: 'bad', withdrawn: 'grey', expired: 'grey',
+const TONE: Record<RequestStatus, string> = {
+  submitted: 'info', assigned: 'info', in_progress: 'purple', sent_back: 'warn', completed: 'ok', removed: 'grey',
 }
 
 export function StatusPill({ status }: { status: RequestStatus }) {
-  return <span className={`pill ${STATUS_TONE[status]}`}>{STATUS_LABEL[status]}</span>
+  return <span className={`pill ${TONE[status]}`}>{STATUS_LABEL[status]}</span>
 }
 
 export function Fact({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>
 }
 
-export function PriceTable({ rows, premiumType }: { rows: PriceRange[]; premiumType: string }) {
-  if (!rows.length) {
-    return <p className="muted small" style={{ margin: 0 }}>No approved rate table covers this profile yet.</p>
-  }
-  const monthly = premiumType === 'Monthly'
-  const f = (n: number) => money(monthly ? n / 12 : n)
+/** Small dialog asking for a reason, used for send back and remove. */
+export function ReasonDialog({ title, confirmLabel, onConfirm, onCancel }: {
+  title: string; confirmLabel: string; onConfirm: (reason: string) => void; onCancel: () => void
+}) {
+  const [reason, setReason] = useState('')
   return (
-    <div className="tablewrap">
-      <table style={{ minWidth: 480 }}>
-        <thead><tr><th>Insurer</th><th>Product</th><th className="num">Premium range (S$ {monthly ? 'a month' : 'a year'})</th></tr></thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.insurer}>
-              <td>{r.insurer}</td>
-              <td>{r.product_name}<div className="small muted">Rate table v{r.version} · rates as at {r.rates_as_at}</div></td>
-              <td className="num" style={{ fontWeight: 600 }}>{f(r.premium_low)} to {f(r.premium_high)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="overlay" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="card dialog">
+        <h2>{title}</h2>
+        <label className="field">Reason
+          <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+        </label>
+        <div className="row">
+          <button className="btn primary" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>{confirmLabel}</button>
+          <button className="btn" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
     </div>
   )
 }
-
-export const INDICATIVE_NOTE =
-  'Indicative only, not a quote. The insurer sets the final premium after underwriting. Sample figures in this prototype.'

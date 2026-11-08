@@ -14,95 +14,104 @@ grant execute on all functions in schema pg_temp to authenticated;
 
 set role authenticated;
 
--- 1. Submitter sees only own requests
+-- 1. Introducers see only their own requests; client details only for the owner
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 do $$ begin
-  if (select count(*) from policy_requests) <> 3 then raise exception 'submitter should see 3, saw %', (select count(*) from policy_requests); end if;
-  if exists (select 1 from policy_requests where submitter_id <> auth.uid()) then raise exception 'submitter sees others'; end if;
-  raise notice 'ok: submitter sees only own 3 requests';
+  if (select count(*) from pi_requests) <> 3 then raise exception 'introducer 1 should see 3, saw %', (select count(*) from pi_requests); end if;
+  if exists (select 1 from pi_requests where introducer_id <> auth.uid()) then raise exception 'introducer sees others'; end if;
+  if (select count(*) from request_clients) <> 3 then raise exception 'introducer should see own 3 clients'; end if;
+  raise notice 'ok: introducer sees only own requests and clients';
 end $$;
-
--- 2. Submitter cannot set status directly or approve
-select pg_temp.expect_error($$update policy_requests set status = 'approved'$$, 'permission denied');
-select pg_temp.expect_error($$select decide_request((select id from policy_requests where status='submitted' limit 1), 'approve')$$, 'Approver role');
-
--- 3. Submit needs attestation
-select pg_temp.expect_error($$select submit_request((select id from policy_requests where status='draft' limit 1))$$, 'redacted');
-update policy_requests set attested = true where status = 'draft';
-select submit_request((select id from policy_requests where status='draft' limit 1));
+select pg_temp.expect_error($$update pi_requests set status = 'completed'$$, 'permission denied');
+select pg_temp.expect_error($$select change_status('20000000-0000-0000-0000-000000000001', 'completed')$$, 'assigned ops user or bsd');
+select pg_temp.expect_error($$select assign_request('20000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003')$$, 'Only bsd');
+select pg_temp.expect_error($$select add_comment('20000000-0000-0000-0000-000000000001', 'hi', true)$$, 'internal notes');
+select pg_temp.expect_error($$select claim_request('20000000-0000-0000-0000-000000000001')$$, 'Ops only');
 do $$ begin
-  if (select jsonb_array_length(price_snapshot) from policy_requests where age_band='25 to 29' and submitter_id = auth.uid()) <> 3
-  then raise exception 'expected 3 insurer price ranges'; end if;
-  raise notice 'ok: submit froze 3 price ranges';
+  if exists (select 1 from request_comments where internal) then raise exception 'introducer sees internal comments'; end if;
+  if exists (select 1 from request_documents d join pi_requests r on r.id = d.request_id where d.kind = 'pi_output' and r.status <> 'completed') then raise exception 'introducer sees PIs before completion'; end if;
+  raise notice 'ok: introducer cannot see internal comments';
 end $$;
 
--- 4. Alex (submitter + approver) sees others' submitted requests but cannot decide own
+-- 2. Create and edit
+select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}',
+                      '{"client_name":"[Sample] Client Golf","nric":"S0000007G"}');
+select pg_temp.expect_error($$select create_request('{"gender":"Male"}', '{"client_name":"x"}')$$, 'Fill in');
+select pg_temp.expect_error($$select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', '{"client_name":""}')$$, 'client name');
+do $$ begin
+  if (select count(*) from pi_requests) <> 4 then raise exception 'new request not visible'; end if;
+  raise notice 'ok: introducer created a request';
+end $$;
+select pg_temp.expect_error($$select update_request('20000000-0000-0000-0000-000000000004', '{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', null)$$, 'Not your request');
+select pg_temp.expect_error($$select resubmit_request('20000000-0000-0000-0000-000000000001')$$, 'sent back');
+
+-- 3. Introducer 2 cannot see introducer 1's data
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 do $$ begin
-  if (select count(*) from policy_requests where submitter_id <> auth.uid()) <> 3 then raise exception 'approver should see 3 of Sam''s submitted'; end if;
-  if exists (select 1 from policy_requests where status = 'draft' and submitter_id <> auth.uid()) then raise exception 'approver sees drafts'; end if;
-  raise notice 'ok: approver sees submitted requests, not drafts';
+  if exists (select 1 from pi_requests where introducer_id <> auth.uid()) then raise exception 'introducer 2 sees introducer 1'; end if;
+  if exists (select 1 from request_clients where owner_id <> auth.uid()) then raise exception 'introducer 2 sees others clients'; end if;
+  if exists (select 1 from profiles where role = 'introducer' and id <> auth.uid()) then raise exception 'introducer sees other introducer profiles'; end if;
+  raise notice 'ok: introducers are isolated from each other';
 end $$;
-select pg_temp.expect_error($$select decide_request((select id from policy_requests where submitter_id = auth.uid()), 'approve')$$, 'own request');
-
--- 5. Reason required to reject / refer back
-select pg_temp.expect_error($$select decide_request((select id from policy_requests where age_band='40 to 44'), 'reject', '  ')$$, 'reason is required');
-select decide_request((select id from policy_requests where age_band='40 to 44'), 'refer_back', 'Please attach the needs analysis');
-select decide_request((select id from policy_requests where age_band='30 to 34'), 'approve');
-select pg_temp.expect_error($$select decide_request((select id from policy_requests where age_band='30 to 34'), 'reject', 'x')$$, 'not awaiting');
-
--- 6. Approvers cannot read private case refs or the audit log
+-- Dana resubmits her sent-back request
+select resubmit_request('20000000-0000-0000-0000-000000000004', 'Confirmed: 100k');
 do $$ begin
-  if exists (select 1 from request_private_refs) then raise exception 'approver sees private refs'; end if;
-  if exists (select 1 from audit_log) then raise exception 'non-admin sees audit log'; end if;
-  raise notice 'ok: private refs and audit log hidden from approver';
+  if (select status from pi_requests where ref = 'PI-00004') <> 'in_progress' then raise exception 'resubmit should go back to in_progress'; end if;
+  raise notice 'ok: resubmit returns to in_progress';
 end $$;
 
--- 7. Admin sees everything; rate table needs a second admin
-select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
-do $$ begin
-  if (select count(*) from policy_requests) <> 4 then raise exception 'admin should see 4'; end if;
-  if (select count(*) from audit_log) = 0 then raise exception 'audit log empty'; end if;
-  raise notice 'ok: admin sees all 4 requests and the audit log';
-end $$;
-insert into rate_tables (insurer, product_name, version, rates_as_at, uploaded_by)
-  values ('[Sample Insurer A]', 'Term plan + CI rider', 2, '2026-11-01', auth.uid());
-select pg_temp.expect_error($$select approve_rate_table((select id from rate_tables where version = 2))$$, 'second admin');
-select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
-select approve_rate_table((select id from rate_tables where version = 2));
-do $$ begin
-  if (select status from rate_tables where insurer = '[Sample Insurer A]' and version = 1) <> 'retired' then raise exception 'old table not retired'; end if;
-  raise notice 'ok: second admin approved v2, v1 retired';
-end $$;
-select pg_temp.expect_error($$select admin_update_user(auth.uid(), '{approver}', true)$$, 'own admin');
-
--- 8. Inactive users see nothing
-reset role;
-update profiles set active = false where email = 'submitter@example.com';
-set role authenticated;
-select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
-do $$ begin
-  if exists (select 1 from policy_requests) or exists (select 1 from introducers) then raise exception 'inactive user sees data'; end if;
-  raise notice 'ok: deactivated user sees nothing';
-end $$;
-
--- 9. Knowledge bank search
+-- 4. Ops: pool plus own assignments; no client details; claim
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if not exists (select 1 from kb_documents where search @@ websearch_to_tsquery('english', 'critical illness')) then raise exception 'search failed'; end if;
-  if (select count(*) from kb_documents where tags && '{term}') < 3 then raise exception 'tag match failed'; end if;
-  raise notice 'ok: knowledge bank search and tag match';
+  if (select count(*) from pi_requests) <> 4 then raise exception 'ops 1 should see pool(2) + own(2), saw %', (select count(*) from pi_requests); end if;
+  if exists (select 1 from request_clients) then raise exception 'ops sees client details'; end if;
+  if not exists (select 1 from request_comments where internal) then raise exception 'ops should see internal notes'; end if;
+  raise notice 'ok: ops sees pool and own work, never client details';
 end $$;
-select pg_temp.expect_error($$insert into kb_documents (title, doc_type) values ('x', 'Product')$$, 'row-level security');
+select claim_request((select id from pi_requests where ref = 'PI-00001'));
+select pg_temp.expect_error($$select claim_request((select id from pi_requests where ref = 'PI-00001'))$$, 'unassigned pool');
+select change_status((select id from pi_requests where ref = 'PI-00001'), 'in_progress');
+select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00001'), 'completed')$$, 'Upload at least one PI');
+select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00001'), 'sent_back', ' ')$$, 'reason is required');
+select add_document((select id from pi_requests where ref = 'PI-00001'), 'pi_output', (select id::text from pi_requests where ref = 'PI-00001') || '/pi.pdf', 'pi.pdf');
+select pg_temp.expect_error($$select add_document((select id from pi_requests where ref = 'PI-00001'), 'attachment', (select id::text from pi_requests where ref = 'PI-00001') || '/x.pdf', 'x.pdf')$$, 'cannot upload');
+select change_status((select id from pi_requests where ref = 'PI-00001'), 'completed');
+select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00001'), 'in_progress')$$, 'cannot move');
+select pg_temp.expect_error($$select remove_request((select id from pi_requests where ref = 'PI-00002'), 'x')$$, 'Only bsd');
+select pg_temp.expect_error($$select change_status('20000000-0000-0000-0000-000000000004', 'completed')$$, 'assigned ops user or bsd');
 
--- 10. Report unredacted hides the file
-reset role;
-insert into request_documents (request_id, storage_path, file_name, uploaded_by)
-  select id, id || '/form.pdf', 'form.pdf', submitter_id from policy_requests where age_band = '30 to 34';
-set role authenticated;
-select report_unredacted((select id from request_documents limit 1), 'NRIC visible page 1');
+-- 5. Introducer 1 now sees the finished PI
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 do $$ begin
-  if exists (select 1 from request_documents) then raise exception 'reported file still visible to approver'; end if;
-  raise notice 'ok: reported file hidden from approver';
+  if (select count(*) from request_documents where kind = 'pi_output') <> 3 then raise exception 'introducer should see 3 PIs on completed requests, saw %', (select count(*) from request_documents where kind = 'pi_output'); end if;
+  raise notice 'ok: PIs reach the introducer once completed';
 end $$;
-\echo ALL ACCESS RULE TESTS PASSED
+
+-- 6. Bsd sees all, assigns, removes; cannot read client details
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+do $$ begin
+  if (select count(*) from pi_requests) <> 7 then raise exception 'bsd should see all 7, saw %', (select count(*) from pi_requests); end if;
+  if exists (select 1 from request_clients) then raise exception 'bsd sees client details'; end if;
+  raise notice 'ok: bsd sees every request but not client details';
+end $$;
+select assign_request((select id from pi_requests where ref = 'PI-00002'), '00000000-0000-0000-0000-000000000004');
+select pg_temp.expect_error($$select assign_request((select id from pi_requests where ref = 'PI-00002'), '00000000-0000-0000-0000-000000000001')$$, 'ops user');
+select pg_temp.expect_error($$select assign_request((select id from pi_requests where ref = 'PI-00001'), '00000000-0000-0000-0000-000000000004')$$, 'cannot be reassigned');
+select pg_temp.expect_error($$select remove_request((select id from pi_requests where ref = 'PI-00002'), '')$$, 'reason is required');
+select remove_request((select id from pi_requests where ref = 'PI-00002'), 'Client withdrew');
+select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00002'), 'in_progress')$$, 'removed');
+select pg_temp.expect_error($$select admin_update_user('00000000-0000-0000-0000-000000000005', 'ops', true)$$, 'own bsd');
+select admin_update_user('00000000-0000-0000-0000-000000000004', 'ops', false);
+do $$ begin
+  if (select count(*) from audit_log where action = 'request.removed') < 1 then raise exception 'removal not audited'; end if;
+  raise notice 'ok: assign, remove and user changes work and are audited';
+end $$;
+select pg_temp.expect_error($$delete from audit_log$$, 'permission denied');
+
+-- 7. Ops 2 deactivated: sees nothing
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
+do $$ begin
+  if (select count(*) from pi_requests) <> 0 then raise exception 'deactivated user still sees requests'; end if;
+  raise notice 'ok: deactivated user sees nothing';
+end $$;
+do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

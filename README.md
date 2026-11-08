@@ -1,17 +1,22 @@
-# Distribution Management System (prototype)
+# PI Request Tracker (prototype)
 
-Internal web app for a Singapore insurance distribution agency:
+Internal web app for a Singapore insurance distribution agency. It tracks **policy illustration (PI) requests**
+from submission to delivery, in the style of a simple Jira or Taiga board.
 
-1. **Introducers**: directory sortable by date added and last active, filterable by speciality and status.
-2. **Policy requests**: a term-life form built from fixed categories generates an anonymised request
-   with indicative premium ranges from approved rate tables. Submitters, approvers and admins have separate access.
-3. **Knowledge bank**: store and look up product, onboarding and process documents (search reads inside PDFs).
+- **Introducers** submit a request through a form (client details plus the banded profile fields) and follow
+  its progress. When ops finish, the PIs appear on the request. Each introducer sees only their own clients and requests.
+- **Ops** pick requests from an unassigned pool or get them assigned, prepare the PIs outside the portal,
+  upload them back, and mark the request completed. They can send a request back to the introducer with a reason.
+- **BSD** (temporary name; the admin role) sees every request, assigns or reassigns it to an ops user,
+  removes requests, manages users and reads the audit log.
 
-The system never stores client identity. Documents are uploaded already redacted, and each upload is
-checked for NRIC, phone and email patterns before it is stored.
+Statuses: Submitted, Assigned, In progress, Sent back, Completed, Removed. Views: Board (drag cards between
+columns), Backlog (filterable table), and a request page with comments (shared or internal), files and an activity timeline.
 
-> **Prototype.** All names, introducers and premiums are made-up sample data. Do not put real client
-> documents in it until the go-live checklist below is done.
+> **Prototype.** All names and clients are made-up sample data. Real client details are personal data under
+> PDPA: do not enter any until the go-live checklist below is done.
+
+**Not built yet:** the PDF comparison tool for ops (3 PI PDFs in, Excel comparison table out). It is phase 3 of the plan.
 
 ## Stack
 
@@ -19,8 +24,8 @@ checked for NRIC, phone and email patterns before it is stored.
 |---|---|
 | Front end | React + TypeScript (Vite) in `web/` |
 | Database, login, files | Supabase (PostgreSQL with row-level security, Auth, Storage) in `supabase/` |
-| Sign-in | Email + password for the prototype; Microsoft (Entra ID) ready in `supabase/config.toml` |
-| Hosting (later) | Cloudflare Pages for `web/`, Supabase project in Singapore (ap-southeast-1) |
+| Sign-in | Email and password. Accounts are created by BSD in the Supabase dashboard; public sign-up is off |
+| Hosting | Cloudflare Pages for `web/`, Supabase project in Singapore (ap-southeast-1) |
 
 ## Run it on your computer
 
@@ -41,56 +46,48 @@ npm run dev                 # open http://127.0.0.1:5173
 
 ### Sample logins (password `password123`)
 
-| Email | Roles | Try this |
+| Email | Role | Try this |
 |---|---|---|
-| submitter@example.com | Submitter | Fill the form, upload a PDF, submit |
-| approver@example.com | Submitter + Approver | See that your own request is greyed out in the queue |
-| approver2@example.com | Approver | Approve, refer back, reject, report an unredacted file |
-| admin@example.com | Admin | All requests, users and roles, rate tables, audit log |
-| admin2@example.com | Admin + Approver | Approve a rate table uploaded by the other admin |
-| editor@example.com | Content editor | Upload and archive knowledge-bank documents |
+| introducer1@example.com | Introducer (Sam) | Submit a request, attach a file, see your clients |
+| introducer2@example.com | Introducer (Dana) | Reply to a request that ops sent back |
+| ops1@example.com | Ops (Olivia) | Pick up a request, upload PIs, complete it, drag cards |
+| ops2@example.com | Ops (Omar) | See only your own work and the unassigned pool |
+| bsd@example.com | BSD (Pat) | Backlog of everything, assign, remove, users, audit log |
 
 ## What the database enforces
 
 These rules live in `supabase/migrations/` and hold even if someone bypasses the screens:
 
-- A request's status only changes through `submit_request`, `decide_request` and `withdraw_request`.
-- Nobody can approve their own request; Reject and Refer back need a reason.
-- Submitting needs the redaction confirmation and no blocked or reported files.
-- Approvers see submitted requests only (never drafts) and never the submitter's private case reference.
-- A file reported as unredacted is hidden from approvers at once and logged for admins.
-- A rate table only goes live when a different admin approves it; the old version is retired.
-- Deactivated users see nothing; new Microsoft sign-ins get no access until an admin assigns a role.
-- Every decision, document view, role change and rate-table change is written to the audit log.
-- Price ranges are frozen onto the request when it is submitted.
+- Requests change only through database functions (`create_request`, `claim_request`, `assign_request`,
+  `change_status`, `resubmit_request`, `remove_request`, ...). Nobody can edit the status directly.
+- Client name, NRIC and contact are readable only by the introducer who submitted the request. Ops and BSD never see them.
+- An introducer sees only their own requests. Ops see the unassigned pool and their own assignments. BSD sees all.
+- Internal comments and internal events never reach introducers. PIs reach the introducer only once the request is completed.
+- Sending back or removing needs a reason. Completing needs at least one uploaded PI. Only BSD assigns, reassigns and removes.
+- Deactivated users see nothing. Removal keeps the record. Every status change, assignment, removal, document view
+  and user change is written to an append-only audit log.
 
 ## Tests
 
 ```bash
-npm run test:db     # access-rule tests on plain PostgreSQL (set PGURL); no Docker needed
+PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # access-rule tests on plain PostgreSQL
 ```
 
-`tests/e2e/` holds the browser walkthrough used to check the full flow (see its README).
+`tests/e2e/` holds the browser walkthrough (27 checks) that was used to verify the full flow; see its README.
 
-## Rate tables
+## Put it online (sample data only)
 
-Admins upload one CSV per insurer when the insurer changes its rates (not per request).
-Columns: `age_band, gender, smoker, coverage_term, sum_assured_band, ci_benefit, premium_low, premium_high`
-(annual S$). Band labels must match the form exactly; see `docs/rate-table-template.csv`.
-
-## Turning on Microsoft sign-in
-
-1. A Microsoft 365 admin creates an app registration (single tenant) with redirect URI
-   `http://127.0.0.1:54321/auth/v1/callback` (local) and later your Supabase project's callback URL.
-2. Set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_URL` (`https://login.microsoftonline.com/<tenant-id>`),
-   set `enabled = true` under `[auth.external.azure]` in `supabase/config.toml`, and restart Supabase.
-3. Set `VITE_ENABLE_MICROSOFT_LOGIN=true` in `web/.env.local`. Remove the sample users before go-live.
+1. Supabase: follow `supabase/cloud/README.md` (about 15 minutes, Singapore region).
+2. Cloudflare Pages: connect the GitHub repo, set **Root directory** `web`, **Build command** `npm run build`,
+   **Output directory** `dist`, and add the variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+   Then add the Pages URL in Supabase under Authentication, URL Configuration.
+3. Search engines are told to stay away (`robots.txt`, a `noindex` tag and an `X-Robots-Tag` header), but this is
+   not access control: the app itself requires login.
 
 ## Not done yet (before real client data)
 
-- Server-side redaction check, PDF flattening and metadata removal (today's check runs in the browser and can be bypassed).
-- Daily job for `expire_stale_requests()` (pg_cron) and email notifications to approvers.
-- Supabase Pro (backups, no pausing), Microsoft sign-in only, MFA through Entra, sample users removed.
-- MAS outsourcing assessment, PDPA review, compliance sign-off on the approval step, and a professional security test.
-- Real rate tables from each insurer, and confirmed term variants and riders.
-- Make this repository private.
+- Phase 2: invite and password-reset emails sent from the app, deactivation review. (MFA skipped for now by decision.)
+- Phase 3: PDF comparison tool for ops (pdf.js text extraction, per-insurer rules, optional AI fallback that can be switched off, ExcelJS export).
+- Daily reminders for stale requests, email notifications.
+- Supabase Pro (backups, no pausing), sample users removed, MAS outsourcing assessment, PDPA review, compliance
+  sign-off, and a professional security test. Make this GitHub repository private.

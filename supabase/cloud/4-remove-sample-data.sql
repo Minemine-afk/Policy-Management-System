@@ -1,6 +1,4 @@
--- Removes the sample introducers, rate tables and knowledge-bank entries from 2-sample-data.sql.
+-- Removes the sample requests created by 3-sample-data.sql (and their comments, events and files rows).
 begin;
-delete from public.introducers where name like '[Sample]%';
-delete from public.rate_tables where insurer like '[Sample%';
-delete from public.kb_documents where title like '[Sample]%';
+delete from public.pi_requests where id in (select request_id from public.request_clients where client_name like '[Sample]%');
 commit;

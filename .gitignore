@@ -11,3 +11,5 @@ tests/e2e/*.pdf
 tests/e2e/rates-v2.csv
 tests/e2e/auth
 tests/e2e/postgrest
+tests/e2e/gotrue
+tests/e2e/migrations

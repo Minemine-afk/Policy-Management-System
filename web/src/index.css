@@ -94,3 +94,19 @@ td.num, th.num { text-align: right; }
   main.page { padding-top: 20px; }
   .card { padding: 18px; }
 }
+
+/* Tracker additions */
+main.page.wide { max-width: 1480px; }
+.pill.purple { color: #4B2E83; background: #EDE7F8; }
+.board { display: grid; grid-template-columns: repeat(5, minmax(220px, 1fr)); gap: 12px; align-items: flex-start; overflow-x: auto; }
+.column { background: var(--line-soft); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 160px; }
+.column .count { background: #fff; border-radius: 999px; padding: 0 8px; margin-left: 4px; }
+.cardlet { display: flex; flex-direction: column; gap: 4px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; text-decoration: none; color: var(--ink); }
+.cardlet:hover { border-color: var(--brand); }
+.overlay { position: fixed; inset: 0; background: rgba(15, 27, 45, .45); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.dialog { width: 100%; max-width: 460px; }
+.comments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.comments li { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+.comments li.internal { background: var(--warn-soft); border-color: #F0D9A8; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
+@media (max-width: 900px) { .board { grid-template-columns: repeat(5, 240px); } }

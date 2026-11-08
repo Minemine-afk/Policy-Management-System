@@ -1,31 +1,23 @@
-export type Role = 'submitter' | 'approver' | 'content_editor' | 'admin'
+export type Role = 'introducer' | 'ops' | 'bsd'
 
 export interface Profile {
   id: string
   full_name: string
   email: string
-  roles: Role[]
+  company: string
+  role: Role | null
   active: boolean
   created_at: string
 }
 
-export type RequestStatus =
-  | 'draft' | 'submitted' | 'referred_back' | 'approved' | 'rejected' | 'withdrawn' | 'expired'
+export type RequestStatus = 'submitted' | 'assigned' | 'in_progress' | 'sent_back' | 'completed' | 'removed'
 
-export interface PriceRange {
-  insurer: string
-  product_name: string
-  version: number
-  rates_as_at: string
-  premium_low: number
-  premium_high: number
-}
-
-export interface PolicyRequest {
+export interface PiRequest {
   id: string
   ref: string
-  submitter_id: string
+  introducer_id: string
   status: RequestStatus
+  assignee_id: string | null
   plan_category: string
   product: string
   age_band: string
@@ -35,67 +27,57 @@ export interface PolicyRequest {
   sum_assured_band: string
   premium_type: string
   ci_benefit: boolean
-  introducer_id: string | null
-  attested: boolean
-  submitted_at: string | null
-  decided_by: string | null
-  decided_at: string | null
-  decision: string | null
-  decision_reason: string | null
-  price_snapshot: PriceRange[] | null
+  remarks: string | null
+  status_reason: string | null
+  submitted_at: string
+  completed_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface RequestClient {
+  request_id: string
+  client_name: string
+  nric: string | null
+  contact: string | null
+}
+
+export interface RequestComment {
+  id: string
+  request_id: string
+  author_id: string
+  body: string
+  internal: boolean
+  created_at: string
+}
+
+export interface RequestEvent {
+  id: number
+  request_id: string
+  actor_id: string | null
+  kind: string
+  from_status: RequestStatus | null
+  to_status: RequestStatus | null
+  detail: string | null
+  at: string
 }
 
 export interface RequestDocument {
   id: string
   request_id: string
+  kind: 'attachment' | 'pi_output'
   storage_path: string
   file_name: string
-  scan: 'clean' | 'blocked' | 'reported'
-  scan_notes: string | null
-  hidden: boolean
   uploaded_by: string
   uploaded_at: string
 }
 
-export interface Introducer {
-  id: string
-  name: string
-  entity_type: string
-  uen_or_ref: string | null
-  specialities: string[]
-  status: 'active' | 'suspended' | 'terminated'
-  date_added: string
-  last_active: string | null
-  agreement_expiry: string | null
-  disclosure_on_file: boolean
-  contact_person: string | null
-  notes: string | null
-}
-
-export interface KbDocument {
-  id: string
-  title: string
-  doc_type: string
-  insurer: string | null
-  tags: string[]
-  description: string | null
-  storage_path: string | null
-  file_name: string | null
-  version: number
-  archived: boolean
-  updated_at: string
-}
-
-export interface RateTable {
-  id: string
-  insurer: string
-  product_name: string
-  version: number
-  rates_as_at: string
-  status: 'pending' | 'approved' | 'retired'
-  uploaded_by: string | null
-  approved_by: string | null
-  uploaded_at: string
+export interface AuditRow {
+  id: number
+  at: string
+  actor_id: string | null
+  action: string
+  entity: string
+  entity_id: string | null
+  details: Record<string, unknown>
 }

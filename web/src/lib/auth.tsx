@@ -8,12 +8,9 @@ interface AuthState {
   profile: Profile | null
   loading: boolean
   has: (r: Role) => boolean
-  refresh: () => Promise<void>
 }
 
-const Ctx = createContext<AuthState>({
-  session: null, profile: null, loading: true, has: () => false, refresh: async () => {},
-})
+const Ctx = createContext<AuthState>({ session: null, profile: null, loading: true, has: () => false })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -32,19 +29,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await loadProfile(data.session)
       setLoading(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s)
-      loadProfile(s)
-    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => { setSession(s); loadProfile(s) })
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  const has = (r: Role) => !!profile?.active && profile.roles.includes(r)
-  return (
-    <Ctx.Provider value={{ session, profile, loading, has, refresh: () => loadProfile(session) }}>
-      {children}
-    </Ctx.Provider>
-  )
+  const has = (r: Role) => !!profile?.active && profile.role === r
+  return <Ctx.Provider value={{ session, profile, loading, has }}>{children}</Ctx.Provider>
 }
 
 export const useAuth = () => useContext(Ctx)

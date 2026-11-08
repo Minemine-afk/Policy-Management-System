@@ -10,6 +10,7 @@
     "test:db": "bash tests/test-db.sh"
   },
   "devDependencies": {
-    "supabase": "^3.0.0"
+    "supabase": "^3.0.0",
+    "pg": "^8.23.1"
   }
 }
