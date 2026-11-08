@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
-import { EVENT_LABEL, fmtDate, fmtDateTime } from '../lib/options'
+import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime } from '../lib/options'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
 import { Fact, ReasonDialog, StatusPill } from '../components/ui'
 import Files from '../components/Files'
@@ -66,13 +66,13 @@ export default function RequestView() {
       <div className="row between">
         <div>
           <p className="muted small" style={{ margin: 0 }}><Link to="/board">Board</Link> / {r.ref}</p>
-          <h1>{r.ref} <StatusPill status={r.status} /></h1>
+          <h1>{r.ref} <StatusPill status={r.status} />{!has('introducer') && dueInfo(r) && <span className={`due ${dueInfo(r)!.overdue ? 'late' : ''}`} style={{ marginLeft: 8, fontSize: 14 }}>{dueInfo(r)!.label}</span>}</h1>
         </div>
         <div className="row">
           {has('introducer') && r.introducer_id === profile.id && ['submitted', 'sent_back'].includes(r.status) &&
             <Link className="btn" to={`/requests/${r.id}/edit`}>Edit request</Link>}
           {has('ops') && r.status === 'submitted' && !r.assignee_id &&
-            <button className="btn primary" onClick={() => call('claim_request', { p_request: r.id })}>Pick up</button>}
+            <button className="btn primary" onClick={() => call('claim_request', { p_request: r.id })}>Assign to me</button>}
           {staffActs && r.status === 'assigned' && <button className="btn primary" onClick={() => move('in_progress')}>Start work</button>}
           {staffActs && ['assigned', 'in_progress'].includes(r.status) && <button className="btn" onClick={() => setDialog('send_back')}>Send back to introducer</button>}
           {staffActs && r.status === 'in_progress' && <button className="btn primary" disabled={!piCount} title={piCount ? '' : 'Upload a PI first'} onClick={() => move('completed')}>Mark completed</button>}

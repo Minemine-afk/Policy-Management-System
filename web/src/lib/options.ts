@@ -48,3 +48,14 @@ export function daysSince(s: string | null) {
 export function summary(r: { age_band: string; gender: string; smoker: boolean; sum_assured_band: string; coverage_term: string }) {
   return `${r.gender}, ${r.age_band}, ${r.smoker ? 'smoker' : 'non-smoker'} · ${r.sum_assured_band} · ${r.coverage_term}`
 }
+
+/** Requests are due one day after submission. Completed and removed requests are never overdue. */
+export function dueInfo(r: { status: string; submitted_at: string }): { overdue: boolean; label: string } | null {
+  if (r.status === 'completed' || r.status === 'removed') return null
+  const hours = (Date.now() - new Date(r.submitted_at).getTime()) / 3_600_000
+  if (hours > 24) {
+    const over = Math.floor(hours - 24)
+    return { overdue: true, label: over >= 24 ? `Overdue by ${Math.floor(over / 24)}d` : `Overdue by ${Math.max(over, 1)}h` }
+  }
+  return { overdue: false, label: `Due in ${Math.max(Math.ceil(24 - hours), 1)}h` }
+}

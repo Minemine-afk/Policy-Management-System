@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useRequests } from '../lib/requests'
 import { nameOf, usePeople } from '../lib/people'
-import { STATUS_LABEL, daysSince, fmtDate, summary } from '../lib/options'
+import { STATUS_LABEL, daysSince, dueInfo, fmtDate, summary } from '../lib/options'
 import { StatusPill } from '../components/ui'
 
 export default function Backlog() {
@@ -28,6 +28,13 @@ export default function Backlog() {
   async function assign(id: string, user: string) {
     setError('')
     const { error } = await supabase.rpc('assign_request', { p_request: id, p_user: user })
+    if (error) setError(error.message)
+    reload()
+  }
+
+  async function claim(id: string) {
+    setError('')
+    const { error } = await supabase.rpc('claim_request', { p_request: id })
     if (error) setError(error.message)
     reload()
   }
@@ -65,11 +72,13 @@ export default function Backlog() {
         <div className="tablewrap">
           <table>
             <thead><tr>
-              <th>Ref</th><th>Status</th><th>Profile</th>{staff && <th>Introducer</th>}<th>Handled by</th><th className="num">Age</th><th>Submitted</th>
+              <th>Ref</th><th>Status</th><th>Profile</th>{staff && <th>Introducer</th>}<th>Handled by</th><th className="num">Age</th>{staff && <th>Due</th>}<th>Submitted</th>
             </tr></thead>
             <tbody>
-              {list.map((r) => (
-                <tr key={r.id}>
+              {list.map((r) => {
+                const due = staff ? dueInfo(r) : null
+                return (
+                <tr key={r.id} className={due?.overdue ? 'overdue' : ''}>
                   <td><Link to={`/requests/${r.id}`}><strong>{r.ref}</strong></Link></td>
                   <td><StatusPill status={r.status} /></td>
                   <td>{summary(r)}</td>
@@ -81,12 +90,15 @@ export default function Backlog() {
                         <option value="">Unassigned</option>
                         {ops.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
                       </select>
+                    ) : has('ops') && r.status === 'submitted' && !r.assignee_id ? (
+                      <button className="btn small primary" onClick={() => claim(r.id)}>Assign to me</button>
                     ) : nameOf(people, r.assignee_id)}
                   </td>
                   <td className="num">{daysSince(r.submitted_at)}d</td>
+                  {staff && <td>{due && <span className={`due ${due.overdue ? 'late' : ''}`}>{due.label}</span>}</td>}
                   <td>{fmtDate(r.submitted_at)}</td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
           {!list.length && <div className="empty">No requests match.</div>}

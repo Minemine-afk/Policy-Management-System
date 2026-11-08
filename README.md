@@ -10,6 +10,9 @@ from submission to delivery, in the style of a simple Jira or Taiga board.
 - **BSD** (temporary name; the admin role) sees every request, assigns or reassigns it to an ops user,
   removes requests, manages users and reads the audit log.
 
+Ops can assign a pooled request to themselves (**Assign to me**). Requests are due one day after submission:
+ops and BSD see them highlighted in red, with the time overdue, until they are completed or removed.
+
 Statuses: Submitted, Assigned, In progress, Sent back, Completed, Removed. Views: Board (drag cards between
 columns), Backlog (filterable table), and a request page with comments (shared or internal), files and an activity timeline.
 

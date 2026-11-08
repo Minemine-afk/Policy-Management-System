@@ -110,3 +110,7 @@ main.page.wide { max-width: 1480px; }
 .comments li.internal { background: var(--warn-soft); border-color: #F0D9A8; }
 .timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
 @media (max-width: 900px) { .board { grid-template-columns: repeat(5, 240px); } }
+.due { font-size: 12px; font-weight: 600; color: var(--muted); }
+.due.late { color: #fff; background: var(--bad); border-radius: 999px; padding: 2px 10px; align-self: flex-start; display: inline-block; }
+.cardlet.overdue { border-color: var(--bad); border-left: 4px solid var(--bad); background: var(--bad-soft); }
+tr.overdue td { background: var(--bad-soft); }
