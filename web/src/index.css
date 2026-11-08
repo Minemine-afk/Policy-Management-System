@@ -118,3 +118,8 @@ main.page.wide { max-width: 1480px; }
 .cardlet.soon { border-color: #E9A23B; border-left: 4px solid #E9A23B; background: #FFF1DC; }
 tr.row-late td { background: var(--bad-soft); }
 tr.row-soon td { background: #FFF1DC; }
+table.compare th, table.compare td { min-width: 220px; }
+table.compare th:first-child, table.compare td:first-child { min-width: 180px; }
+table.compare input[type=text] { height: 38px; }
+td.empty-cell { background: var(--bad-soft); }
+td.edited-cell { background: var(--warn-soft); }

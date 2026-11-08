@@ -107,6 +107,7 @@ do $$ begin
   raise notice 'ok: assign, remove and user changes work and are audited';
 end $$;
 select pg_temp.expect_error($$delete from audit_log$$, 'permission denied');
+select pg_temp.expect_error($$select log_event('fake', 'x', 'y')$$, 'permission denied');
 
 -- 7. Ops 2 deactivated: sees nothing
 select pg_temp.as_user('00000000-0000-0000-0000-000000000004');

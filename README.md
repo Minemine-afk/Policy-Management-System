@@ -19,7 +19,12 @@ columns), Backlog (filterable table), and a request page with comments (shared o
 > **Prototype.** All names and clients are made-up sample data. Real client details are personal data under
 > PDPA: do not enter any until the go-live checklist below is done.
 
-**Not built yet:** the PDF comparison tool for ops (3 PI PDFs in, Excel comparison table out). It is phase 3 of the plan.
+**Compare PIs (ops and BSD):** add up to three PI PDFs, or open it from a request to load that request's PIs.
+The text is read in the browser with pdf.js (nothing is sent anywhere), key fields are matched by label rules in
+`web/src/lib/piExtract.ts`, ops check and correct every value side by side, then export an Excel comparison with
+ExcelJS (a Comparison sheet plus a Sources sheet showing where each value came from and what was changed by hand).
+The rules were tested only on made-up sample PIs. Real insurer PIs will need per-insurer rules (`INSURER_RULES`).
+Scanned PDFs (images) can't be read yet; they would need OCR. There is no AI fallback yet.
 
 ## Stack
 
@@ -90,7 +95,7 @@ PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # acces
 ## Not done yet (before real client data)
 
 - Phase 2: invite and password-reset emails sent from the app, deactivation review. (MFA skipped for now by decision.)
-- Phase 3: PDF comparison tool for ops (pdf.js text extraction, per-insurer rules, optional AI fallback that can be switched off, ExcelJS export).
+- PDF comparison: tune the rules on real PIs from each insurer, fill your own Excel template instead of the default layout, optional AI fallback (switchable off), OCR for scanned PDFs.
 - Daily reminders for stale requests, email notifications.
 - Supabase Pro (backups, no pausing), sample users removed, MAS outsourcing assessment, PDPA review, compliance
   sign-off, and a professional security test. Make this GitHub repository private.

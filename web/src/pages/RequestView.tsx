@@ -127,6 +127,9 @@ export default function RequestView() {
 
           <Files title="Attachments" hint="Files the introducer adds to the request." requestId={r.id} kind="attachment" docs={docs}
             canUpload={canUploadAttachment} userId={profile.id} onChange={load} />
+          {!has('introducer') && piCount >= 2 && (
+            <div><Link className="btn" to={`/compare?request=${r.id}`}>Compare these PIs</Link></div>
+          )}
           {introducerSeesPi && (
             <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal. The introducer sees them once the request is completed.'}
               requestId={r.id} kind="pi_output" docs={docs} canUpload={canUploadPi} userId={profile.id} onChange={load} />

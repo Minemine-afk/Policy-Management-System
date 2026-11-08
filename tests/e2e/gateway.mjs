@@ -73,6 +73,13 @@ async function storage(req, res) {
       const tok = sign({ url: `${bucket}/${name}`, exp: Math.floor(Date.now() / 1000) + (body.expiresIn || 60) })
       return json(res, 200, { signedURL: `/object/sign/${bucket}/${rest.map(encodeURIComponent).join('/')}?token=${tok}` })
     }
+    if (parts[0] === 'object' && req.method === 'GET') {
+      const [bucket, ...rest] = parts.slice(parts[1] === 'authenticated' ? 2 : 1); const name = rest.join('/')
+      const { rows } = await asUser(claims, (c) => c.query('select 1 from storage.objects where bucket_id=$1 and name=$2', [bucket, name]))
+      if (!rows.length) return json(res, 400, { statusCode: '404', error: 'not_found', message: 'Object not found' })
+      res.writeHead(200, { ...cors, 'content-type': 'application/octet-stream' })
+      return res.end(fs.readFileSync(path.join(FILES, bucket, name)))
+    }
     if (parts[0] === 'object' && req.method === 'POST') {
       const [bucket, ...rest] = parts.slice(1); const name = rest.join('/')
       const buf = await readBody(req)

@@ -10,6 +10,36 @@ const bad = (m) => { failed++; console.log('FAIL', m) }
 const check = async (cond, m) => ((await cond) ? ok(m) : bad(m))
 const file = (name) => ({ name, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 sample ' + name) })
 
+// Minimal one-page PDF with text placed at [x, y] (points). Sample PIs below are made up.
+function pdf(items) {
+  const esc = (t) => t.replace(/([()\\])/g, '\\$1')
+  const stream = items.map(([x, y, t]) => `BT /F1 11 Tf ${x} ${y} Td (${esc(t)}) Tj ET`).join('\n')
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]
+  let out = '%PDF-1.4\n'; const offs = []
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n` })
+  const x = out.length
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('')
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`
+  return Buffer.from(out, 'latin1')
+}
+const rows = (start, pairs, valueX) => pairs.flatMap(([a, b], i) => valueX ? [[72, start - i * 20, a], [valueX, start - i * 20, b]] : [[72, start - i * 20, a]])
+const PI_A = pdf([[72, 760, '[SAMPLE] Great Eastern Life - Policy Illustration'], ...rows(700, [
+  ['Plan Name: GREAT Term Protector'], ['Life Assured: XXXXX'], ['Age Next Birthday: 35   Gender: Female'], ['Smoker Status: Non-Smoker'],
+  ['Basic Sum Assured: S$500,000'], ['Critical Illness Sum Assured: S$200,000'], ['Policy Term: To Age 65'], ['Premium Payment Term: 30 years'],
+  ['Annual Premium: S$1,234.50'], ['Monthly Premium: S$105.20'], ['Total Premiums Payable: S$37,035.00'], ['Riders: Early CI Rider']])])
+const PI_B = pdf([[72, 760, '[SAMPLE] AIA Singapore - Benefit Illustration'], ...rows(700, [
+  ['Product Name', 'AIA Secure Term'], ['Sex', 'F'], ['ALB', '35'], ['Smoker', 'No'], ['Sum Assured', 'SGD 500,000'],
+  ['Coverage Term', '30 yrs'], ['Premium Term', '30 yrs'], ['Yearly Premium', '1,180.00'], ['Critical Illness Benefit', 'Not included']], 320)])
+const PI_C = pdf([[72, 760, '[SAMPLE] Income Insurance Limited'], ...rows(700, [
+  ['Plan name'], ['Star Term Cover'], ['Death Benefit'], ['$500,000'], ['Benefit term'], ['25 years'], ['Premium (Annual)'], ['$990.40']])])
+const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
+
 ;(async () => {
   const browser = await chromium.launch()
   const errors = []
@@ -65,7 +95,33 @@ const file = (name) => ({ name, mimeType: 'application/pdf', buffer: Buffer.from
   await olivia.getByRole('button', { name: 'Start work' }).click()
   await olivia.getByRole('button', { name: 'Mark completed' }).waitFor()
   await check(olivia.getByRole('button', { name: 'Mark completed' }).isDisabled(), 'cannot complete without a PI')
-  await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles([file('insurer-a.pdf'), file('insurer-b.pdf'), file('insurer-c.pdf')])
+  await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles([piFile('insurer-a.pdf', PI_A), piFile('insurer-b.pdf', PI_B), piFile('insurer-c.pdf', PI_C)])
+  await olivia.getByRole('button', { name: 'insurer-c.pdf' }).waitFor()
+
+  // PI comparison: read the three uploaded PIs, check, correct one value, export to Excel
+  await olivia.getByRole('link', { name: 'Compare these PIs' }).click()
+  await olivia.getByLabel('Annual premium for PI 3').waitFor()
+  const val = (f, i) => olivia.getByLabel(`${f} for PI ${i}`).inputValue()
+  await check(olivia.getByLabel('Insurer for PI 1').inputValue().then((v) => v === 'Great Eastern'), 'comparison detects the insurer of PI 1')
+  await check(val('Sum assured (death / TPD)', 1).then((v) => v === '500000.00'), 'reads sum assured from a "Label: value" layout')
+  await check(val('Annual premium', 2).then((v) => v === '1180.00'), 'reads annual premium from a two-column table layout')
+  await check(val('Annual premium', 3).then((v) => v === '990.40'), 'reads annual premium when the value is on the next line')
+  await check(val('Critical illness cover', 2).then((v) => v === 'No'), 'reads "Not included" as No')
+  await check(val('Policy term', 1).then((v) => v === 'To age 65'), 'reads "To Age 65" as a policy term')
+  await check(olivia.getByRole('button', { name: 'Export to Excel' }).isDisabled(), 'export needs the values-checked box')
+  await olivia.getByLabel('Life assured age for PI 3').fill('35')
+  await olivia.screenshot({ path: SHOTS + '/8-compare-pis.png', fullPage: true })
+  await olivia.getByText('I have checked these values against the PDFs').click()
+  const [dl] = await Promise.all([olivia.waitForEvent('download'), olivia.getByRole('button', { name: 'Export to Excel' }).click()])
+  const xlsxPath = SHOTS + '/comparison.xlsx'
+  await dl.saveAs(xlsxPath)
+  const ExcelJS = require(__dirname + '/../../web/node_modules/exceljs')
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(xlsxPath)
+  const ws = wb.getWorksheet('Comparison')
+  const rowOf = (label) => { let r = null; ws.eachRow((row) => { if (row.getCell(1).value === label) r = row }); return r }
+  await check(Promise.resolve(ws.getRow(3).getCell(2).value === 'Great Eastern' && rowOf('Annual premium').getCell(3).value === 1180), 'Excel file has insurers as columns and premiums as numbers')
+  await check(Promise.resolve(rowOf('Life assured age').getCell(4).value === '35' && wb.getWorksheet('Sources').rowCount === 37), 'Excel keeps hand corrections and a Sources sheet')
+  await olivia.goBack()
   await olivia.getByRole('button', { name: 'insurer-c.pdf' }).waitFor()
   await olivia.getByLabel('Write a comment').fill('Internal: insurer B needs a loading')
   await olivia.getByText('Internal note (hidden from the introducer)').click()
