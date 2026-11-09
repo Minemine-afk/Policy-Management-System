@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth'
 import { ROLE_LABEL, fmtDateTime, fmtHours, says } from '../lib/options'
 import { forgetSettings } from '../lib/settings'
 import { nameOf, usePeople } from '../lib/people'
+import { auditActionLabel, describeAudit } from '../lib/audit'
 import type { AppSettings, AuditRow, Profile, Role } from '../lib/types'
 
 export default function Admin() {
@@ -236,7 +237,7 @@ function Audit() {
         <label className="field" style={{ maxWidth: 220 }}>Action
           <select value={f.action} onChange={(e) => set({ action: e.target.value })}>
             <option value="">Any</option>
-            {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+            {actions.map((a) => <option key={a} value={a}>{auditActionLabel(a)}</option>)}
           </select>
         </label>
         {filtered && <button type="button" className="btn small" onClick={() => setF(NO_AUDIT_FILTER)}>Clear filters</button>}
@@ -248,13 +249,12 @@ function Audit() {
       </div>
       <div className="tablewrap">
         <table>
-          <thead><tr><th>When</th><th>User</th><th>Role</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+          <thead><tr><th>When</th><th>User</th><th>Role</th><th>What happened</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td>{fmtDateTime(r.at)}</td><td>{whoOf(r.actor_id)}</td><td>{roleOf(r.actor_id)}</td>
-                <td>{r.action}</td><td>{r.entity_id}</td>
-                <td className="small muted">{Object.keys(r.details).length ? JSON.stringify(r.details) : ''}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.at)}</td><td>{whoOf(r.actor_id)}</td><td>{roleOf(r.actor_id)}</td>
+                <td>{describeAudit(r, people)}</td>
               </tr>
             ))}
           </tbody>
