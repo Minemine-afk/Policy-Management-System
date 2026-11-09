@@ -48,7 +48,9 @@ columns), Backlog (filterable table), and a request page with comments (shared o
 > **Prototype.** All names and clients are made-up sample data. Real client details are personal data under
 > PDPA: do not enter any until the go-live checklist below is done.
 
-**Compare PIs (ops only):** add up to three PI PDFs, or open it from a request to load that request's PIs.
+**PI comparison (ops and BSD):** on each request page, under the uploaded PIs. The first three PI PDFs are read straight away,
+with a progress bar (PI, page and percentage); each PI is given up to 60 seconds before it is reported as unreadable, so the
+screen never waits forever. There is no separate Compare PIs page any more (old links open the request).
 The text is read in the browser with pdf.js (nothing is sent anywhere), key fields are matched by label rules in
 `web/src/lib/piExtract.ts`, ops check and correct every value side by side, then export an Excel comparison with
 ExcelJS (a Comparison sheet plus a Sources sheet showing where each value came from and what was changed by hand).

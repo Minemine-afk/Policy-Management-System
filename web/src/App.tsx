@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, NavLink, Route, Routes, useSearchParams } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { supabase } from './lib/supabase'
 import { ROLE_LABEL } from './lib/options'
@@ -8,7 +8,6 @@ import RequestView from './pages/RequestView'
 import Board from './pages/Board'
 import Backlog from './pages/Backlog'
 import Admin from './pages/Admin'
-import Compare from './pages/Compare'
 import Notifications from './pages/Notifications'
 import Account from './pages/Account'
 import { useUnreadCount } from './lib/notifications'
@@ -47,7 +46,6 @@ export default function App() {
           {has('introducer') && <NavLink to="/requests/new" className={cls}>New request</NavLink>}
           <NavLink to="/board" className={cls}>Board</NavLink>
           <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>
-          {has('ops') && <NavLink to="/compare" className={cls}>Compare PIs</NavLink>}
           {has('bsd') && <NavLink to="/admin" className={cls}>Admin</NavLink>}
         </nav>
         <div className="who">
@@ -66,7 +64,7 @@ export default function App() {
         <Route path="/requests/new" element={has('introducer') ? <RequestForm /> : <Navigate to="/board" replace />} />
         <Route path="/requests/:id/edit" element={has('introducer') ? <RequestForm /> : <Navigate to="/board" replace />} />
         <Route path="/requests/:id" element={<RequestView />} />
-        <Route path="/compare" element={has('ops') ? <Compare /> : <Navigate to="/board" replace />} />
+        <Route path="/compare" element={<CompareMoved />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/account" element={<Account />} />
         <Route path="/admin/*" element={has('bsd') ? <Admin /> : <Navigate to="/board" replace />} />
@@ -74,4 +72,11 @@ export default function App() {
       </Routes>
     </>
   )
+}
+
+/** Compare PIs now lives on each request page; old links still land in the right place. */
+function CompareMoved() {
+  const [params] = useSearchParams()
+  const id = params.get('request')
+  return <Navigate to={id ? `/requests/${id}` : '/board'} replace />
 }
