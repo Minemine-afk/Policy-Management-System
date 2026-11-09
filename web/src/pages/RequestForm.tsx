@@ -12,16 +12,15 @@ import { useAuth } from '../lib/auth'
 interface FormState {
   plan_category: string; product: string; age_band: string; gender: string; smoker: boolean
   coverage_term: string; sum_assured_band: string; premium_type: string; ci_benefit: boolean; remarks: string
-  priority: 'normal' | 'urgent'
 }
 const DEFAULTS: FormState = {
   plan_category: 'All', product: 'Term life', age_band: '25 to 29', gender: 'Male', smoker: false,
-  coverage_term: '6 to 10 years', sum_assured_band: 'S$100,001 to 250,000', premium_type: 'Annual', ci_benefit: true, remarks: '', priority: 'normal',
+  coverage_term: '6 to 10 years', sum_assured_band: 'S$100,001 to 250,000', premium_type: 'Annual', ci_benefit: true, remarks: '',
 }
 const pick = (r: PiRequest): FormState => ({
   plan_category: r.plan_category, product: r.product, age_band: r.age_band, gender: r.gender, smoker: r.smoker,
   coverage_term: r.coverage_term, sum_assured_band: r.sum_assured_band, premium_type: r.premium_type, ci_benefit: r.ci_benefit,
-  remarks: r.remarks ?? '', priority: r.priority,
+  remarks: r.remarks ?? '',
 })
 
 interface PastClient { client_name: string; nric: string; contact: string; request: PiRequest }
@@ -51,7 +50,7 @@ export default function RequestForm() {
   useEffect(() => {
     if (!id) return
     ;(async () => {
-      const { data } = await supabase.from('pi_requests').select('*').eq('id', id).single()
+      const { data } = await supabase.from('request_list').select('*').eq('id', id).single()
       if (!data) return
       const r = data as PiRequest
       if (!['submitted', 'sent_back'].includes(r.status)) { nav(`/requests/${r.id}`, { replace: true }); return }
@@ -69,10 +68,10 @@ export default function RequestForm() {
     if (!from) return
     ;(async () => {
       const [{ data }, c] = await Promise.all([
-        supabase.from('pi_requests').select('*').eq('id', from).maybeSingle(),
+        supabase.from('request_list').select('*').eq('id', from).maybeSingle(),
         supabase.from('request_clients').select('*').eq('request_id', from).maybeSingle(),
       ])
-      if (data) { const r = data as PiRequest; setF({ ...pick(r), priority: 'normal' }); setCopiedFrom(r.ref) }
+      if (data) { const r = data as PiRequest; setF(pick(r)); setCopiedFrom(r.ref) }
       if (c.data) setClient({ client_name: c.data.client_name, nric: c.data.nric ?? '', contact: c.data.contact ?? '' })
       setReady(true)
     })()
@@ -84,7 +83,7 @@ export default function RequestForm() {
     ;(async () => {
       const [cl, rq] = await Promise.all([
         supabase.from('request_clients').select('request_id, client_name, nric, contact'),
-        supabase.from('pi_requests').select('*').order('submitted_at', { ascending: false }),
+        supabase.from('request_list').select('*').order('submitted_at', { ascending: false }),
       ])
       const byId = new Map(((rq.data as PiRequest[]) ?? []).map((r) => [r.id, r]))
       const seen = new Map<string, PastClient>()
@@ -101,7 +100,7 @@ export default function RequestForm() {
     const c = past.find((p) => p.client_name === name)
     if (!c) return
     setClient({ client_name: c.client_name, nric: c.nric, contact: c.contact })
-    setF({ ...pick(c.request), priority: 'normal', remarks: '' })
+    setF({ ...pick(c.request), remarks: '' })
     setCopiedFrom(c.request.ref)
   }
 
@@ -165,8 +164,6 @@ export default function RequestForm() {
           <Seg label="Premium type" value={f.premium_type} onChange={(v) => set('premium_type', v)}
             options={PREMIUM_TYPES.map((c) => ({ value: c, label: c }))} />
           <Seg label="Critical illness benefit" value={f.ci_benefit} onChange={(v) => set('ci_benefit', v)} options={yesNo} />
-          <Seg label="Priority" value={f.priority} onChange={(v) => set('priority', v)}
-            options={[{ value: 'normal', label: 'Normal' }, { value: 'urgent', label: 'Urgent' }]} />
         </div>
       </section>
 

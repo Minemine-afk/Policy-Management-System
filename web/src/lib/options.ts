@@ -81,9 +81,9 @@ export function fmtHours(h: number) {
  *  Red: past the due time. Completed and removed requests are never flagged. While a request is sent back
  *  the clock can be paused. */
 export type DueLevel = 'ok' | 'soon' | 'late' | 'paused'
-export function dueInfo(r: { status: string; due_at: string; paused_at?: string | null }, soonHours = 24):
+export function dueInfo(r: { status: string; due_at: string | null; paused_at?: string | null }, soonHours = 24):
   { level: DueLevel; overdue: boolean; label: string } | null {
-  if (r.status === 'completed' || r.status === 'removed') return null
+  if (!r.due_at || r.status === 'completed' || r.status === 'removed') return null
   if (r.paused_at) return { level: 'paused', overdue: false, label: 'Clock paused' }
   const left = (new Date(r.due_at).getTime() - Date.now()) / 3_600_000
   if (left < 0) {
@@ -95,7 +95,9 @@ export function dueInfo(r: { status: string; due_at: string; paused_at?: string 
   return { level: left <= soonHours ? 'soon' : 'ok', overdue: false, label }
 }
 
-/** Urgent first, then the earliest due time. */
-export function byPriorityThenDue(a: { priority: string; due_at: string }, b: { priority: string; due_at: string }) {
-  return (a.priority === 'urgent' ? 0 : 1) - (b.priority === 'urgent' ? 0 : 1) || a.due_at.localeCompare(b.due_at)
+/** Urgent first, then the earliest due time. Introducers get neither field, so their requests sort oldest first. */
+type Sortable = { priority: string | null; due_at: string | null; submitted_at: string }
+export function byPriorityThenDue(a: Sortable, b: Sortable) {
+  return (a.priority === 'urgent' ? 0 : 1) - (b.priority === 'urgent' ? 0 : 1)
+    || (a.due_at ?? a.submitted_at).localeCompare(b.due_at ?? b.submitted_at)
 }

@@ -6,7 +6,7 @@ export function useRequests() {
   const [rows, setRows] = useState<PiRequest[]>([])
   const [loading, setLoading] = useState(true)
   const reload = useCallback(async () => {
-    const { data } = await supabase.from('pi_requests').select('*').order('submitted_at', { ascending: false })
+    const { data } = await supabase.from('request_list').select('*').order('submitted_at', { ascending: false })
     setRows((data as PiRequest[]) ?? [])
     setLoading(false)
   }, [])

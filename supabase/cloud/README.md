@@ -17,6 +17,7 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
 3. **Already ran an earlier `1-setup.sql`?** Don't run it again. Run the upgrade files you haven't run yet, in order:
    - `1b-upgrade.sql` (9 Nov: notifications, new workflow rules, tighter privacy)
    - `1c-upgrade.sql` (10 Nov: urgent flag, deadline settings, reopen, bulk assign, saved filters)
+   - `1d-upgrade.sql` (11 Nov: urgent and due times hidden from introducers, overdue requests marked urgent automatically)
 
    Each is safe to run again if you are not sure whether you ran it.
 4. Run it once only. If it fails part-way nothing is saved (it runs as one transaction); send me the error.

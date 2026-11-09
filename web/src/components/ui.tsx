@@ -70,6 +70,7 @@ export function ReasonDialog({ title, confirmLabel, onConfirm, onCancel, fieldLa
   )
 }
 
-export function UrgentPill() {
-  return <span className="pill bad urgent" title="Marked urgent">Urgent</span>
+/** Ops and bsd only. Overdue requests are urgent automatically. */
+export function UrgentPill({ auto }: { auto?: boolean | null }) {
+  return <span className="pill bad urgent" title={auto ? 'Urgent because it is overdue' : 'Marked urgent'}>Urgent</span>
 }

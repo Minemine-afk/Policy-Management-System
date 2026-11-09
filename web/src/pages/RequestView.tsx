@@ -29,7 +29,7 @@ export default function RequestView() {
   const load = useCallback(async () => {
     if (!id) return
     const [req, cl, cm, ev, dc] = await Promise.all([
-      supabase.from('pi_requests').select('*').eq('id', id).maybeSingle(),
+      supabase.from('request_list').select('*').eq('id', id).maybeSingle(),
       supabase.from('request_clients').select('*').eq('request_id', id).maybeSingle(),
       supabase.from('request_comments').select('*').eq('request_id', id).order('created_at'),
       supabase.from('request_events').select('*').eq('request_id', id).order('at', { ascending: false }),
@@ -55,7 +55,7 @@ export default function RequestView() {
   if (r === null || !profile) return <main className="page"><div className="card">Request not found, or you do not have access.</div></main>
 
   const intro = has('introducer')
-  const who = (id: string | null) => (intro ? (id === profile.id ? 'You' : 'Ops team') : nameOf(people, id))
+  const who = (id: string | null) => (intro ? (id === profile.id ? 'You' : 'Ops team') : id ? nameOf(people, id) : 'Automatic')
   const mineAssigned = has('ops') && r.assignee_id === profile.id
   const staffActs = (mineAssigned || has('bsd')) && r.status !== 'removed'
   const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active)
@@ -70,24 +70,27 @@ export default function RequestView() {
   const introducerSeesPi = !has('introducer') || r.status === 'completed'
   const owner = intro && r.introducer_id === profile.id
   const open = !['completed', 'removed'].includes(r.status)
-  const canFlag = open && (owner || has('bsd') || mineAssigned)
+  const canFlag = open && (has('bsd') || mineAssigned)
   const canReopen = r.status === 'completed' && (owner || has('bsd'))
   const due = !intro ? dueInfo(r, settings.due_soon_hours) : null
+  const urgent = !intro && r.priority === 'urgent'
+  const keepUrgent = urgent && !!due?.overdue
 
   return (
     <main className="page">
       <div className="row between">
         <div>
           <p className="muted small" style={{ margin: 0 }}><Link to="/board">Board</Link> / {r.ref}</p>
-          <h1>{r.ref} <StatusPill status={r.status} />{r.priority === 'urgent' && <> <UrgentPill /></>}{due && <span className={`due ${due.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{due.label}</span>}</h1>
+          <h1>{r.ref} <StatusPill status={r.status} />{urgent && <> <UrgentPill auto={r.urgent_auto} /></>}{due && <span className={`due ${due.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{due.label}</span>}</h1>
         </div>
         <div className="row">
           {has('introducer') && r.introducer_id === profile.id && r.status === 'submitted' &&
             <Link className="btn" to={`/requests/${r.id}/edit`}>Edit request</Link>}
           {owner && <Link className="btn" to={`/requests/new?from=${r.id}`}>Duplicate</Link>}
           {canReopen && <button className="btn" onClick={() => setDialog('reopen')}>Reopen</button>}
-          {canFlag && <button className="btn" onClick={() => call('set_priority', { p_request: r.id, p_priority: r.priority === 'urgent' ? 'normal' : 'urgent' })}>
-            {r.priority === 'urgent' ? 'Remove urgent flag' : 'Mark urgent'}</button>}
+          {canFlag && <button className="btn" disabled={keepUrgent} title={keepUrgent ? 'Overdue requests stay urgent' : undefined}
+            onClick={() => call('set_priority', { p_request: r.id, p_priority: urgent ? 'normal' : 'urgent' })}>
+            {urgent ? 'Remove urgent flag' : 'Mark urgent'}</button>}
           {has('ops') && r.status === 'submitted' && !r.assignee_id &&
             <button className="btn primary" onClick={() => call('claim_request', { p_request: r.id })}>Assign to me</button>}
           {staffActs && r.status === 'assigned' && <button className="btn primary" onClick={() => move('in_progress')}>Start work</button>}
@@ -133,8 +136,8 @@ export default function RequestView() {
               {!intro && <Fact label="Introducer">{nameOf(people, r.introducer_id)}{people[r.introducer_id]?.company ? ` · ${people[r.introducer_id].company}` : ''}</Fact>}
               {!intro && <Fact label="Handled by">{nameOf(people, r.assignee_id)}</Fact>}
               <Fact label="Submitted">{fmtDate(r.submitted_at)}</Fact>
-              {!intro && <Fact label="Due">{open ? fmtDateTime(r.due_at) : '—'}</Fact>}
-              <Fact label="Priority">{r.priority === 'urgent' ? 'Urgent' : 'Normal'}</Fact>
+              {!intro && <Fact label="Due">{open && r.due_at ? fmtDateTime(r.due_at) : '—'}</Fact>}
+              {!intro && <Fact label="Priority">{urgent ? (r.urgent_auto ? 'Urgent (overdue)' : 'Urgent') : 'Normal'}</Fact>}
             </dl>
             {r.remarks && <p style={{ margin: 0 }}><span className="muted small">Remarks</span><br />{r.remarks}</p>}
           </section>
