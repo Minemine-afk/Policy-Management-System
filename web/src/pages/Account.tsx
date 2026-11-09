@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { says } from '../lib/options'
 import { useAuth } from '../lib/auth'
 
 /** Change your own password (for example the temporary one bsd gave you, or after a reset email). */
@@ -19,7 +20,7 @@ export default function Account() {
     setBusy(true)
     const { error } = await supabase.auth.updateUser({ password: pw })
     setBusy(false)
-    if (error) return setError(error.message)
+    if (error) return setError(says(error.message))
     setPw(''); setPw2(''); clearRecovering()
     setMsg('Password changed. Use it next time you sign in.')
   }

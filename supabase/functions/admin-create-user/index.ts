@@ -9,7 +9,7 @@
 //   3. Gives it the chosen role, name and firm by calling admin_update_user AS THE CALLER, so the database
 //      checks bsd again and the audit log records who did it. If that fails, the new login is deleted again.
 //
-// Deploy: see supabase/cloud/README.md ("Let bsd create users"). It uses only fetch, no imports, so it can
+// Deploy: see supabase/cloud/README.md ("Let admins create users"). It uses only fetch, no imports, so it can
 // be pasted into the dashboard editor as one file.
 
 const ROLES = ['introducer', 'ops', 'bsd'] as const
@@ -43,7 +43,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (!me.ok) return reply(401, { error: 'Your session has expired. Sign in again.' })
   const asCaller = { apikey: env.anonKey, authorization: `Bearer ${token}`, 'content-type': 'application/json' }
   const isBsd = await fetch(`${env.url}/rest/v1/rpc/has_role`, { method: 'POST', headers: asCaller, body: JSON.stringify({ r: 'bsd' }) })
-  if (!isBsd.ok || (await isBsd.json()) !== true) return reply(403, { error: 'Only bsd can create users' })
+  if (!isBsd.ok || (await isBsd.json()) !== true) return reply(403, { error: 'Only an admin can create users' })
 
   // Check the form.
   let body: Record<string, unknown>
@@ -56,7 +56,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply(400, { error: 'Enter a valid email address' })
   if (password.length < MIN_PASSWORD) return reply(400, { error: `The temporary password needs at least ${MIN_PASSWORD} characters` })
   if (!fullName) return reply(400, { error: 'Enter the person’s name' })
-  if (!(ROLES as readonly string[]).includes(role)) return reply(400, { error: 'Choose a role: introducer, ops or bsd' })
+  if (!(ROLES as readonly string[]).includes(role)) return reply(400, { error: 'Choose a role: introducer, ops or bsd (admin)' })
 
   // 2. Create the login. Only this call uses the secret key.
   const admin = { apikey: env.serviceKey, authorization: `Bearer ${env.serviceKey}`, 'content-type': 'application/json' }

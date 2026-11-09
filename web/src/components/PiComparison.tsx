@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { says } from '../lib/options'
 import { FIELDS, extract, readPdf, type Found } from '../lib/piExtract'
 import { TEMPLATE_URL, buildWorkbook, isComparisonFile } from '../lib/piExcel'
 import type { PiRequest, RequestDocument } from '../lib/types'
@@ -114,9 +115,9 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       const old = docs.filter((d) => d.kind === 'pi_output' && isComparisonFile(d.file_name) && d.uploaded_by === userId)
       const path = `${req.id}/${Date.now()}-${fileName}`
       const up = await supabase.storage.from('request-docs').upload(path, blob, { contentType: blob.type })
-      if (up.error) throw new Error(up.error.message)
+      if (up.error) throw new Error(says(up.error.message))
       const ins = await supabase.rpc('add_document', { p_request: req.id, p_kind: 'pi_output', p_path: path, p_name: fileName })
-      if (ins.error) { await supabase.storage.from('request-docs').remove([path]); throw new Error(ins.error.message) }
+      if (ins.error) { await supabase.storage.from('request-docs').remove([path]); throw new Error(says(ins.error.message)) }
       for (const d of old) await supabase.rpc('remove_document', { p_document: d.id })
       setSaved(`Saved ${fileName}. The introducer gets it with the PIs when you mark the request completed.`)
       onSaved()

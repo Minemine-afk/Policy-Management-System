@@ -34,11 +34,11 @@ begin
     ('sample.ops3@example.com',        '[Sample] Hui Min Ops',      'ops',        ''),
     ('sample.ops4@example.com',        '[Sample] Imran Ops',        'ops',        ''),
     ('sample.ops5@example.com',        '[Sample] Jia Hui Ops',      'ops',        ''),
-    ('sample.bsd1@example.com',        '[Sample] Kelvin Bsd',       'bsd',        ''),
-    ('sample.bsd2@example.com',        '[Sample] Li Ting Bsd',      'bsd',        ''),
-    ('sample.bsd3@example.com',        '[Sample] Marcus Bsd',       'bsd',        ''),
-    ('sample.bsd4@example.com',        '[Sample] Nadia Bsd',        'bsd',        ''),
-    ('sample.bsd5@example.com',        '[Sample] Oliver Bsd',       'bsd',        '')
+    ('sample.bsd1@example.com',        '[Sample] Kelvin Admin',       'bsd',        ''),
+    ('sample.bsd2@example.com',        '[Sample] Li Ting Admin',      'bsd',        ''),
+    ('sample.bsd3@example.com',        '[Sample] Marcus Admin',       'bsd',        ''),
+    ('sample.bsd4@example.com',        '[Sample] Nadia Admin',        'bsd',        ''),
+    ('sample.bsd5@example.com',        '[Sample] Oliver Admin',       'bsd',        '')
   ) as t(email, full_name, role, company)
   loop
     if not exists (select 1 from auth.users where email = u.email) then

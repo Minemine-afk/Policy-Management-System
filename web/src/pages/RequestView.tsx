@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { isComparisonFile } from '../lib/piExcel'
 import { nameOf, usePeople } from '../lib/people'
-import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime } from '../lib/options'
+import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime, says } from '../lib/options'
 import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
 import { Fact, ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
@@ -47,7 +47,7 @@ export default function RequestView() {
   async function call(fn: string, args: Record<string, unknown>) {
     setError('')
     const { error } = await supabase.rpc(fn, args)
-    if (error) setError(error.message)
+    if (error) setError(says(error.message))
     await load()
     return !error
   }

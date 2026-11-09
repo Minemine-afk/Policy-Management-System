@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { supabase } from '../lib/supabase'
+import { says } from '../lib/options'
 
 const SAMPLE = [
   ['introducer1@example.com', 'Introducer Sam'],
   ['introducer2@example.com', 'Introducer Dana'],
   ['ops1@example.com', 'Ops Olivia'],
   ['ops2@example.com', 'Ops Omar'],
-  ['bsd@example.com', 'BSD Pat'],
+  ['bsd@example.com', 'Admin Pat'],
 ]
 
 // Sample-login shortcuts only appear against a local Supabase, never a hosted project.
@@ -23,7 +24,7 @@ export default function Login() {
     e.preventDefault()
     setBusy(true); setError(''); setInfo('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setError(error.message)
+    if (error) setError(says(error.message))
     setBusy(false)
   }
 
@@ -31,7 +32,7 @@ export default function Login() {
     setError(''); setInfo('')
     if (!email) { setError('Enter your email first'); return }
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
-    if (error) setError(error.message); else setInfo('If that email has an account, a reset link is on its way.')
+    if (error) setError(says(error.message)); else setInfo('If that email has an account, a reset link is on its way.')
   }
 
   return (

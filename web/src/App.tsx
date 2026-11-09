@@ -28,8 +28,8 @@ export default function App() {
           <h1>Waiting for access</h1>
           <p className="muted">
             {profile && !profile.active
-              ? 'Your account has been deactivated. Contact bsd.'
-              : 'You are signed in, but bsd has not given you a role yet.'}
+              ? 'Your account has been deactivated. Contact an admin.'
+              : 'You are signed in, but an admin has not given you a role yet.'}
           </p>
           <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
