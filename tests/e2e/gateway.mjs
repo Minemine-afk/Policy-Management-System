@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import pg from 'pg'
+import { handle as adminCreateUser } from '../../supabase/functions/admin-create-user/index.ts'
 
 const SECRET = 'super-secret-jwt-token-with-at-least-32-characters-long'
 const pool = new pg.Pool({ connectionString: 'postgres://postgres:pw@127.0.0.1:5432/e2e' })
@@ -105,11 +106,22 @@ async function storage(req, res) {
   }
 }
 
+// Runs the real Edge Function code (supabase/functions) the way Supabase would, with its keys.
+const ANON = sign({ role: 'anon', iss: 'supabase-demo', exp: 1983812996 })
+const SERVICE = sign({ role: 'service_role', iss: 'supabase-demo', exp: 1983812996 })
+async function edgeFunction(req, res, fn) {
+  const body = await readBody(req)
+  const r = await fn(new Request('http://x' + req.url, { method: req.method, headers: req.headers, body: body.length ? body : undefined }),
+    { url: 'http://127.0.0.1:54321', anonKey: ANON, serviceKey: SERVICE })
+  res.writeHead(r.status, { ...cors, ...Object.fromEntries(r.headers) }); res.end(Buffer.from(await r.arrayBuffer()))
+}
+
 http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end() }
   if (req.url.startsWith('/rest/v1')) return proxy(req, res, 3000, '/rest/v1')
   if (req.url.startsWith('/auth/v1')) return proxy(req, res, 9999, '/auth/v1')
   if (req.url.startsWith('/storage/v1')) return storage(req, res)
+  if (req.url.startsWith('/functions/v1/admin-create-user')) return edgeFunction(req, res, adminCreateUser)
   json(res, 404, { message: 'unknown route' })
 }).listen(54321, '127.0.0.1', () => console.log('gateway on 54321'))
-console.log('anon key', sign({ role: 'anon', iss: 'supabase-demo', exp: 1983812996 }))
+console.log('anon key', ANON)

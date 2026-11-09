@@ -27,14 +27,38 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
 
 ## 4. Add yourself and testers
 **Authentication** → **Users** → **Add user** → **Create new user**. Enter the email and a password and tick
-**Auto Confirm User**. Make at least one user for each role you want to test (introducer, ops, bsd).
+**Auto Confirm User**. You only need to do this for yourself (the first bsd); once step 4b is done, bsd can add
+everyone else from the website.
 
 ## 5. Give people roles
 New query → paste `2-assign-roles.sql`, change the emails, names and roles, **Run**. The result lists everyone.
 Until this step a new user sees "Waiting for access". Afterwards, BSD can change roles from the Admin page.
 
+## 4b. Let bsd create users from the website (about 5 minutes, once)
+Creating a login needs Supabase's secret key, which must never be in the web app. So the website asks a small
+server function, `admin-create-user`, which runs on Supabase, checks the caller is an active bsd user, creates the
+login and sets the role. No command line needed:
+1. Left menu: **Edge Functions** → **Deploy a new function** → **Via Editor**.
+2. Name it exactly `admin-create-user`.
+3. Delete the example code, paste the whole of `supabase/functions/admin-create-user/index.ts`, click **Deploy**.
+4. Sign in as bsd → **Admin** → **Users and roles** → **Add a user**. Pick the role, keep or change the suggested
+   temporary password, **Create user**, and pass the email and password to the person privately. They can change
+   the password under **Account** (top right) after signing in.
+
+If **Create user** says "Invalid JWT" or "Unauthorized", open the function's **Details** and turn off
+**Verify JWT** (the function checks the caller's sign-in itself), then try again.
+Command-line alternative: `npx supabase functions deploy admin-create-user --project-ref <ref>`.
+
 ## 6. (Optional) Load sample requests
 Run `3-sample-data.sql` after step 5. `4-remove-sample-data.sql` removes them again.
+
+## 6a. (Optional) 15 fake sample users with 3 requests each per introducer
+`3b-sample-users.sql` adds 5 introducers, 5 ops and 5 bsd users (`sample.introducer1@example.com` …
+`sample.bsd5@example.com`, all named "[Sample] …") and 3 requests for each sample introducer (one waiting,
+one in progress with a sample ops user, one completed). **First change `sample_password` near the top**; the script
+refuses to run until you do. All 15 share that password and five are bsd, so pick a strong one.
+`4b-remove-sample-users.sql` removes all of them and their requests again (real users and requests are kept).
+Remove them before any real client data goes in.
 
 ## 6b. (Optional) Deadline checks on a schedule
 Run `5-schedule-deadline-checks.sql` once. It checks deadlines every 15 minutes, so "due soon" and "overdue" notices

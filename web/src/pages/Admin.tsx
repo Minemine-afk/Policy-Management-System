@@ -46,10 +46,10 @@ function Users() {
   const edit = (id: string, patch: Partial<Profile>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)))
 
   return (
+    <>
+    <AddUser onCreated={load} />
     <div className="card">
-      <p className="small muted" style={{ margin: 0 }}>
-        Create accounts in the Supabase dashboard (Authentication → Users). They appear here with no role until you assign one.
-      </p>
+      <h2 style={{ margin: 0 }}>Everyone</h2>
       {error && <div className="error" role="alert">{error}</div>}
       {saved && <div className="small" role="status" style={{ color: 'var(--ok)' }}>{saved}</div>}
       <div className="tablewrap">
@@ -75,6 +75,90 @@ function Users() {
         </table>
       </div>
     </div>
+    </>
+  )
+}
+
+/** A readable temporary password, e.g. "Kite-7342-Moss". */
+function tempPassword() {
+  const words = ['Kite', 'Moss', 'Reef', 'Pine', 'Lark', 'Opal', 'Fern', 'Dune', 'Cove', 'Teal', 'Wren', 'Jade']
+  const n = new Uint32Array(3); crypto.getRandomValues(n)
+  return `${words[n[0] % words.length]}-${1000 + (n[1] % 9000)}-${words[n[2] % words.length]}`
+}
+
+const BLANK = { full_name: '', email: '', role: 'introducer' as Role, company: '', password: '' }
+
+/** bsd creates a login with a role straight away (runs the admin-create-user server function). */
+function AddUser({ onCreated }: { onCreated: () => void }) {
+  const [f, setF] = useState({ ...BLANK, password: tempPassword() })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState<{ email: string; password: string; role: Role } | null>(null)
+  const set = (patch: Partial<typeof f>) => setF((x) => ({ ...x, ...patch }))
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true); setError(''); setDone(null)
+    const { data, error } = await supabase.functions.invoke('admin-create-user', {
+      body: { ...f, company: f.role === 'introducer' ? f.company : '' },
+    })
+    setBusy(false)
+    if (error) {
+      let msg = error.message
+      const ctx = (error as { context?: Response }).context
+      if (ctx && typeof ctx.json === 'function') {
+        try { msg = (await ctx.json()).error ?? msg } catch { /* not JSON */ }
+      } else if (/fetch|send a request|not found/i.test(msg)) {
+        msg = 'Could not reach the user-creation function. It may not be deployed yet (see supabase/cloud/README.md, "Let bsd create users").'
+      }
+      setError(msg)
+      return
+    }
+    setDone({ email: data.email, password: f.password, role: f.role })
+    setF({ ...BLANK, role: f.role, company: f.role === 'introducer' ? f.company : '', password: tempPassword() })
+    onCreated()
+  }
+
+  return (
+    <form className="card" onSubmit={create} aria-label="Add a user">
+      <h2 style={{ margin: 0 }}>Add a user</h2>
+      <p className="small muted" style={{ margin: 0 }}>
+        The account works straight away with the role you pick. Give the person their email and temporary password
+        privately; they can change it under Account after signing in.
+      </p>
+      <div className="grid">
+        <label className="field">Name
+          <input type="text" required value={f.full_name} onChange={(e) => set({ full_name: e.target.value })} />
+        </label>
+        <label className="field">Email
+          <input type="email" required value={f.email} onChange={(e) => set({ email: e.target.value })} />
+        </label>
+        <label className="field">Role
+          <select value={f.role} onChange={(e) => set({ role: e.target.value as Role })}>
+            {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        {f.role === 'introducer' && (
+          <label className="field">Firm
+            <input type="text" value={f.company} onChange={(e) => set({ company: e.target.value })} />
+          </label>
+        )}
+        <label className="field">Temporary password
+          <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+            <input type="text" required minLength={8} value={f.password} onChange={(e) => set({ password: e.target.value })}
+              aria-label="Temporary password" style={{ flex: 1, minWidth: 0 }} />
+            <button type="button" className="btn small" onClick={() => set({ password: tempPassword() })}>New</button>
+          </span>
+        </label>
+      </div>
+      {error && <div className="error" role="alert">{error}</div>}
+      {done && (
+        <div className="small" role="status" style={{ color: 'var(--ok)' }}>
+          Created {done.email} as {ROLE_LABEL[done.role]}. Temporary password: <code>{done.password}</code>
+        </div>
+      )}
+      <div className="row"><button className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Create user'}</button></div>
+    </form>
   )
 }
 

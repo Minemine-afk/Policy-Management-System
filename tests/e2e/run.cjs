@@ -43,13 +43,13 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
 ;(async () => {
   const browser = await chromium.launch()
   const errors = []
-  async function session(email) {
+  async function session(email, password = 'password123') {
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, deviceScaleFactor: 1 })
     const p = await ctx.newPage()
     p.on('pageerror', (e) => errors.push(e.message))
     await p.goto(BASE)
     await p.getByLabel('Email').fill(email)
-    await p.getByLabel('Password').fill('password123')
+    await p.getByLabel('Password').fill(password)
     await p.getByRole('button', { name: 'Sign in', exact: true }).click()
     await p.getByRole('button', { name: 'Sign out' }).waitFor()
     return p
@@ -322,6 +322,65 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await pat.getByRole('link', { name: 'Audit log' }).click()
   await pat.getByText('settings.updated').first().waitFor()
   ok('settings changes are audited')
+
+  // 9. Bsd creates users from the Admin page (runs the admin-create-user function)
+  await pat.getByRole('link', { name: 'Admin' }).click()
+  await pat.getByRole('link', { name: 'Users and roles' }).click()
+  const add = pat.getByRole('form', { name: 'Add a user' })
+  await add.getByLabel('Name').fill('New Introducer')
+  await add.getByLabel('Email').fill('new.introducer@example.com')
+  await add.getByLabel('Role').selectOption('introducer')
+  await add.getByLabel('Firm').fill('[Sample] New Firm')
+  const temp = await add.getByLabel('Temporary password').inputValue()
+  await check(Promise.resolve(temp.length >= 8), 'a temporary password is suggested')
+  await add.getByRole('button', { name: 'Create user' }).click()
+  await add.getByRole('status').filter({ hasText: 'Created new.introducer@example.com as Introducer' }).waitFor()
+  await check(pat.getByLabel('Role for new.introducer@example.com').inputValue().then((v) => v === 'introducer'), 'bsd created an introducer who appears with the role set')
+  await pat.screenshot({ path: SHOTS + '/12-admin-add-user.png', fullPage: true })
+  for (const [i, role] of ['ops', 'bsd'].entries()) {
+    await add.getByLabel('Name').fill(`New ${role} ${i}`)
+    await add.getByLabel('Email').fill(`new.${role}@example.com`)
+    await add.getByLabel('Role').selectOption(role)
+    await add.getByRole('button', { name: 'Create user' }).click()
+    await add.getByRole('status').filter({ hasText: `Created new.${role}@example.com` }).waitFor()
+  }
+  await check(pat.getByLabel('Role for new.bsd@example.com').inputValue().then((v) => v === 'bsd'), 'bsd created ops and bsd users too')
+  await add.getByLabel('Name').fill('Again')
+  await add.getByLabel('Email').fill('new.introducer@example.com')
+  await add.getByRole('button', { name: 'Create user' }).click()
+  await check(add.getByRole('alert').filter({ hasText: 'already has an account' }).waitFor().then(() => true), 'an email that already has an account is refused')
+  await pat.getByRole('link', { name: 'Audit log' }).click()
+  await pat.getByText('user.updated').first().waitFor()
+  ok('user creation is in the audit log')
+
+  // Ops cannot call the function directly
+  const opsTry = await olivia.evaluate(async (base) => {
+    const key = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'))
+    const t = JSON.parse(localStorage.getItem(key)).access_token
+    const r = await fetch(base + '/functions/v1/admin-create-user', { method: 'POST', headers: { authorization: 'Bearer ' + t, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'sneaky@example.com', password: 'Sneaky-123', full_name: 'Sneaky', role: 'bsd' }) })
+    return r.status
+  }, 'http://127.0.0.1:54321')
+  await check(Promise.resolve(opsTry === 403), 'ops cannot create users through the function')
+
+  // The new introducer signs in with the temporary password, sees nothing of others, changes the password
+  const newbie = await session('new.introducer@example.com', temp)
+  await newbie.getByRole('heading', { name: 'Board' }).waitFor()
+  await check(newbie.locator('.cardlet').count().then((n) => n === 0), 'the new introducer sees no one else’s requests')
+  await newbie.getByRole('link', { name: 'Account', exact: true }).click()
+  await newbie.getByLabel('New password', { exact: true }).fill('Changed-Pass-1')
+  await newbie.getByLabel('Repeat new password').fill('Changed-Pass-2')
+  await newbie.getByRole('button', { name: 'Change password' }).click()
+  await check(newbie.getByRole('alert').filter({ hasText: 'do not match' }).isVisible(), 'mismatched new passwords are caught')
+  await newbie.getByLabel('Repeat new password').fill('Changed-Pass-1')
+  await newbie.getByRole('button', { name: 'Change password' }).click()
+  await newbie.getByText('Password changed.').waitFor()
+  await newbie.getByRole('button', { name: 'Sign out' }).click()
+  await newbie.getByLabel('Email').fill('new.introducer@example.com')
+  await newbie.getByLabel('Password').fill('Changed-Pass-1')
+  await newbie.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await newbie.getByRole('button', { name: 'Sign out' }).waitFor()
+  ok('the new user changed their password and signed in with it')
 
   // 7. Non-bsd cannot open admin
   await olivia.goto(BASE + '/admin')
