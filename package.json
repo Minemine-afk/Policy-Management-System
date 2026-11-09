@@ -6,7 +6,7 @@
     "db:reset": "supabase db reset",
     "db:stop": "supabase stop",
     "dev": "npm --prefix web run dev",
-    "build": "npm --prefix web run build",
+    "build": "npm --prefix web ci && npm --prefix web run build && rm -rf dist && cp -r web/dist dist",
     "test:db": "bash tests/test-db.sh"
   },
   "devDependencies": {
