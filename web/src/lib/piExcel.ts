@@ -12,6 +12,9 @@ export interface ExportColumn {
   pages: Record<string, number | null>
 }
 
+/** The comparison file ops save onto a request; the introducer gets it with the PIs. */
+export const isComparisonFile = (name: string) => /pi-comparison\.xlsx$/i.test(name)
+
 export const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/pi-comparison-template.xlsx`
 
 const FORMATS: Record<string, string> = { money: '#,##0.00', years: '0' }

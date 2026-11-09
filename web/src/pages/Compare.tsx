@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/auth'
 import { FIELDS, extract, readPdf, type Found } from '../lib/piExtract'
-import { TEMPLATE_URL, buildWorkbook } from '../lib/piExcel'
+import { TEMPLATE_URL, buildWorkbook, isComparisonFile } from '../lib/piExcel'
 import type { PiRequest, RequestDocument } from '../lib/types'
 
 interface Column {
@@ -30,6 +31,7 @@ async function toColumn(fileName: string, data: ArrayBuffer): Promise<Column> {
 }
 
 export default function Compare() {
+  const { profile } = useAuth()
   const [params] = useSearchParams()
   const requestId = params.get('request')
   const [req, setReq] = useState<PiRequest | null>(null)
@@ -37,6 +39,8 @@ export default function Compare() {
   const [busy, setBusy] = useState(false)
   const [checked, setChecked] = useState(false)
   const [error, setError] = useState('')
+  const [saved, setSaved] = useState('')
+  const [saving, setSaving] = useState(false)
 
   // Opened from a request: load its uploaded PIs straight away.
   useEffect(() => {
@@ -68,29 +72,57 @@ export default function Compare() {
       if (out.length >= MAX) break
       out.push(await toColumn(f.name, await f.arrayBuffer()))
     }
-    setCols(out); setBusy(false)
+    setCols(out); setBusy(false); setSaved('')
   }
 
   const setValue = (i: number, key: string, v: string) => {
-    setChecked(false)
+    setChecked(false); setSaved('')
     setCols((cs) => cs.map((c, j) => (j === i ? { ...c, values: { ...c.values, [key]: v } } : c)))
   }
 
   const missing = cols.reduce((n, c) => n + FIELDS.filter((f) => !c.values[f.key]).length, 0)
 
+  const canSave = !!req && !!profile && req.assignee_id === profile.id && ['assigned', 'in_progress'].includes(req.status)
+  const fileName = `${req ? req.ref + '-' : ''}pi-comparison.xlsx`
+
+  async function makeBlob() {
+    const res = await fetch(TEMPLATE_URL)
+    if (!res.ok) throw new Error(`Could not load the Excel template (${res.status}).`)
+    return buildWorkbook(cols.map((c) => ({
+      fileName: c.fileName, values: c.values, notes: c.notes,
+      edited: Object.fromEntries(FIELDS.map((f) => [f.key, (c.found[f.key]?.value ?? '') !== (c.values[f.key] ?? '')])),
+      pages: Object.fromEntries(FIELDS.map((f) => [f.key, c.found[f.key]?.page ?? null])),
+    })), await res.arrayBuffer())
+  }
+
+  // Saves the Excel onto the request with the PIs, replacing an earlier saved comparison.
+  // The introducer gets it with the PIs when the request is completed.
+  async function saveToRequest() {
+    if (!req || !profile) return
+    setError(''); setSaved(''); setSaving(true)
+    try {
+      const blob = await makeBlob()
+      const old = await supabase.from('request_documents').select('*').eq('request_id', req.id).eq('kind', 'pi_output')
+      const path = `${req.id}/${Date.now()}-${fileName}`
+      const up = await supabase.storage.from('request-docs').upload(path, blob, { contentType: blob.type })
+      if (up.error) throw new Error(up.error.message)
+      const ins = await supabase.rpc('add_document', { p_request: req.id, p_kind: 'pi_output', p_path: path, p_name: fileName })
+      if (ins.error) { await supabase.storage.from('request-docs').remove([path]); throw new Error(ins.error.message) }
+      for (const d of ((old.data as RequestDocument[]) ?? []).filter((x) => isComparisonFile(x.file_name) && x.uploaded_by === profile.id)) {
+        await supabase.rpc('remove_document', { p_document: d.id })
+      }
+      setSaved(`Saved ${fileName} to ${req.ref}. The introducer gets it with the PIs when you mark the request completed.`)
+    } catch (e) { setError((e as Error).message) }
+    setSaving(false)
+  }
+
   async function exportXlsx() {
     setError('')
     try {
-      const res = await fetch(TEMPLATE_URL)
-      if (!res.ok) throw new Error(`Could not load the Excel template (${res.status}).`)
-      const blob = await buildWorkbook(cols.map((c) => ({
-        fileName: c.fileName, values: c.values, notes: c.notes,
-        edited: Object.fromEntries(FIELDS.map((f) => [f.key, (c.found[f.key]?.value ?? '') !== (c.values[f.key] ?? '')])),
-        pages: Object.fromEntries(FIELDS.map((f) => [f.key, c.found[f.key]?.page ?? null])),
-      })), await res.arrayBuffer())
+      const blob = await makeBlob()
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = `${req ? req.ref + '-' : ''}pi-comparison.xlsx`
+      a.download = fileName
       a.click()
       setTimeout(() => URL.revokeObjectURL(a.href), 5000)
     } catch (e) { setError((e as Error).message) }
@@ -179,7 +211,11 @@ export default function Compare() {
             <span>I have checked these values against the PDFs</span>
           </label>
           {error && <div className="error" role="alert">{error}</div>}
-          <div><button className="btn primary" disabled={!checked} onClick={exportXlsx}>Export to Excel</button></div>
+          {saved && <div className="notice" role="status">{saved} <Link to={`/requests/${req?.id}`}>Back to {req?.ref}</Link></div>}
+          <div className="row">
+            {canSave && <button className="btn primary" disabled={!checked || saving} onClick={saveToRequest}>{saving ? 'Saving…' : `Save to ${req?.ref} for the introducer`}</button>}
+            <button className={canSave ? 'btn' : 'btn primary'} disabled={!checked} onClick={exportXlsx}>Export to Excel</button>
+          </div>
         </section>
       )}
     </main>
