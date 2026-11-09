@@ -86,8 +86,8 @@ PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # acces
 ## Put it online (sample data only)
 
 1. Supabase: follow `supabase/cloud/README.md` (about 15 minutes, Singapore region).
-2. Cloudflare Pages: connect the GitHub repo, set **Root directory** `web`, **Build command** `npm run build`,
-   **Output directory** `dist`, and add the variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+2. Cloudflare Pages: connect the GitHub repo, leave **Root directory** empty, set **Build command** `npm run build`,
+   **Output directory** `dist` (the root build installs and builds `web/` itself), and add the variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
    Then add the Pages URL in Supabase under Authentication, URL Configuration.
 3. Search engines are told to stay away (`robots.txt`, a `noindex` tag and an `X-Robots-Tag` header), but this is
    not access control: the app itself requires login.
