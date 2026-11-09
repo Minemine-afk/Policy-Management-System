@@ -29,9 +29,9 @@ function withLimit<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   ]).finally(() => clearTimeout(timer))
 }
 
-/** Ops only: reads the request's uploaded PI PDFs into the comparison Excel template, right on the request page. */
-export default function PiComparison({ req, docs, userId, onSaved }: {
-  req: PiRequest; docs: RequestDocument[]; userId: string; onSaved: () => void
+/** Ops and bsd: reads the request's uploaded PI PDFs into the comparison Excel template, right on the request page. */
+export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
+  req: PiRequest; docs: RequestDocument[]; userId: string; isBsd: boolean; onSaved: () => void
 }) {
   const pdfs = useMemo(() => docs.filter((d) => d.kind === 'pi_output' && d.file_name.toLowerCase().endsWith('.pdf')), [docs])
   const toRead = pdfs.slice(0, MAX)
@@ -84,7 +84,7 @@ export default function PiComparison({ req, docs, userId, onSaved }: {
   }
 
   const missing = cols.reduce((n, c) => n + FIELDS.filter((f) => !c.values[f.key]).length, 0)
-  const canSave = req.assignee_id === userId && ['assigned', 'in_progress'].includes(req.status)
+  const canSave = (isBsd || req.assignee_id === userId) && ['assigned', 'in_progress'].includes(req.status)
   const fileName = `${req.ref}-pi-comparison.xlsx`
   const hasSaved = docs.some((d) => d.kind === 'pi_output' && isComparisonFile(d.file_name))
   const pct = progress ? Math.round(((progress.file + (progress.pages ? progress.page / progress.pages : 0)) / progress.files) * 100) : 100

@@ -160,10 +160,10 @@ export default function RequestView() {
             <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal. They are compared below; save the comparison to this request. The introducer sees the PIs and the comparison once the request is completed.'}
               requestId={r.id} kind="pi_output" docs={docs} canUpload={canUploadPi} userId={profile.id} onChange={load} />
           )}
-          {has('ops') && piPdfCount > 0 && (
+          {(has('ops') || has('bsd')) && piPdfCount > 0 && (
             <>
               {staffActs && r.status === 'in_progress' && completeBlock && piCount > 0 && <div className="small muted">Save the PI comparison to this request before marking it completed.</div>}
-              <PiComparison req={r} docs={docs} userId={profile.id} onSaved={load} />
+              <PiComparison req={r} docs={docs} userId={profile.id} isBsd={has('bsd')} onSaved={load} />
             </>
           )}
 

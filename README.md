@@ -48,7 +48,7 @@ columns), Backlog (filterable table), and a request page with comments (shared o
 > **Prototype.** All names and clients are made-up sample data. Real client details are personal data under
 > PDPA: do not enter any until the go-live checklist below is done.
 
-**PI comparison (ops only):** on each request page, under the uploaded PIs. The first three PI PDFs are read straight away,
+**PI comparison (ops and BSD):** on each request page, under the uploaded PIs. The first three PI PDFs are read straight away,
 with a progress bar (PI, page and percentage); each PI is given up to 60 seconds before it is reported as unreadable, so the
 screen never waits forever. There is no separate Compare PIs page any more (old links open the request).
 The text is read in the browser with pdf.js (nothing is sent anywhere), key fields are matched by label rules in
