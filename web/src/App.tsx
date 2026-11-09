@@ -10,14 +10,17 @@ import Backlog from './pages/Backlog'
 import Admin from './pages/Admin'
 import Compare from './pages/Compare'
 import Notifications from './pages/Notifications'
+import Account from './pages/Account'
 import { useUnreadCount } from './lib/notifications'
 
 export default function App() {
-  const { session, profile, loading, has } = useAuth()
+  const { session, profile, loading, has, recovering } = useAuth()
   const unread = useUnreadCount()
 
   if (loading) return <div className="empty">Loading…</div>
   if (!session) return <Login />
+
+  if (recovering) return <Account />
 
   if (!profile || !profile.active || !profile.role) {
     return (
@@ -52,6 +55,7 @@ export default function App() {
             <span aria-hidden="true">🔔</span>{unread > 0 && <span className="badge">{unread}</span>}
           </NavLink>
           <span>{profile.full_name || profile.email} · {ROLE_LABEL[profile.role]}</span>
+          <NavLink to="/account" className="acct" title="Change your password">Account</NavLink>
           <button onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
       </header>
@@ -64,6 +68,7 @@ export default function App() {
         <Route path="/requests/:id" element={<RequestView />} />
         <Route path="/compare" element={has('ops') ? <Compare /> : <Navigate to="/board" replace />} />
         <Route path="/notifications" element={<Notifications />} />
+        <Route path="/account" element={<Account />} />
         <Route path="/admin/*" element={has('bsd') ? <Admin /> : <Navigate to="/board" replace />} />
         <Route path="*" element={<Navigate to="/board" replace />} />
       </Routes>

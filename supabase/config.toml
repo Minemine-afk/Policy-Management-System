@@ -431,3 +431,7 @@ secret = "env(AZURE_CLIENT_SECRET)"
 url = "env(AZURE_TENANT_URL)"
 redirect_uri = ""
 skip_nonce_check = false
+
+# Lets bsd create users from the Admin page (supabase/functions/admin-create-user).
+[functions.admin-create-user]
+verify_jwt = true

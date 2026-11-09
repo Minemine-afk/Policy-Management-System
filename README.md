@@ -57,7 +57,7 @@ Scanned PDFs (images) can't be read yet; they would need OCR. There is no AI fal
 |---|---|
 | Front end | React + TypeScript (Vite) in `web/` |
 | Database, login, files | Supabase (PostgreSQL with row-level security, Auth, Storage) in `supabase/` |
-| Sign-in | Email and password. Accounts are created by BSD in the Supabase dashboard; public sign-up is off |
+| Sign-in | Email and password. BSD creates accounts on the Admin page (through the `admin-create-user` server function, so no secret key in the browser); public sign-up is off. Users change their password under Account |
 | Hosting | Cloudflare Pages for `web/`, Supabase project in Singapore (ap-southeast-1) |
 
 ## Run it on your computer

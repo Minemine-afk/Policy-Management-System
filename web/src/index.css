@@ -22,6 +22,8 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .topbar nav a.active { color: #fff; font-weight: 600; border-bottom-color: var(--accent); }
 .topbar .who { font-size: 13px; color: var(--nav-muted); display: flex; gap: 12px; align-items: center; }
 .topbar .who button { background: none; border: 1px solid #3A4A60; color: var(--nav-muted); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.topbar .who a.acct { color: var(--nav-muted); text-decoration: none; }
+.topbar .who a.acct:hover, .topbar .who a.acct.active { color: #fff; text-decoration: underline; }
 
 main.page { padding: 32px; max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px; }

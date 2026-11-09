@@ -8,14 +8,18 @@ interface AuthState {
   profile: Profile | null
   loading: boolean
   has: (r: Role) => boolean
+  /** True after the user opened a password-reset link, until they set a new password. */
+  recovering: boolean
+  clearRecovering: () => void
 }
 
-const Ctx = createContext<AuthState>({ session: null, profile: null, loading: true, has: () => false })
+const Ctx = createContext<AuthState>({ session: null, profile: null, loading: true, has: () => false, recovering: false, clearRecovering: () => {} })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [recovering, setRecovering] = useState(false)
 
   async function loadProfile(s: Session | null) {
     if (!s) { setProfile(null); return }
@@ -29,12 +33,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await loadProfile(data.session)
       setLoading(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => { setSession(s); loadProfile(s) })
+    const { data: sub } = supabase.auth.onAuthStateChange((e, s) => {
+      if (e === 'PASSWORD_RECOVERY') setRecovering(true)
+      setSession(s); loadProfile(s)
+    })
     return () => sub.subscription.unsubscribe()
   }, [])
 
   const has = (r: Role) => !!profile?.active && profile.role === r
-  return <Ctx.Provider value={{ session, profile, loading, has }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ session, profile, loading, has, recovering, clearRecovering: () => setRecovering(false) }}>{children}</Ctx.Provider>
 }
 
 export const useAuth = () => useContext(Ctx)
