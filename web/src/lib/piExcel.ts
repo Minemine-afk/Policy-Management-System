@@ -1,60 +1,80 @@
-// Builds the comparison workbook. ExcelJS is loaded only when someone exports.
+// Fills the comparison Excel template (web/public/templates/pi-comparison-template.xlsx).
+// The template has "Field" in A1 and PI1/PI2/PI3 across row 1, and one row per field, matched on the
+// label in column A. To restyle or reorder the rows, edit the template in Excel and keep the labels.
+// ExcelJS is loaded only when someone exports.
 import { FIELDS } from './piExtract'
 
 export interface ExportColumn {
   fileName: string
-  insurer: string
   values: Record<string, string>
+  notes: string[]
   edited: Record<string, boolean>
   pages: Record<string, number | null>
 }
 
-const MONEY_KEYS = new Set(FIELDS.filter((f) => f.kind === 'money').map((f) => f.key))
+/** The comparison file ops save onto a request; the introducer gets it with the PIs. */
+export const isComparisonFile = (name: string) => /pi-comparison\.xlsx$/i.test(name)
 
-export async function buildWorkbook(cols: ExportColumn[], title: string): Promise<Blob> {
+export const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/pi-comparison-template.xlsx`
+
+const FORMATS: Record<string, string> = { money: '#,##0.00', years: '0' }
+
+function cellValue(kind: string, v: string): string | number {
+  if (kind !== 'text' && v.trim() !== '' && !isNaN(Number(v.replace(/,/g, '')))) return Number(v.replace(/,/g, ''))
+  return v
+}
+
+export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer): Promise<Blob> {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'PI Request Tracker'
-  const ws = wb.addWorksheet('Comparison', { views: [{ state: 'frozen', xSplit: 1, ySplit: 3 }] })
+  await wb.xlsx.load(template)
+  const ws = wb.worksheets[0]
+  if (!ws) throw new Error('The Excel template has no sheet.')
 
-  ws.getCell('A1').value = title
-  ws.getCell('A1').font = { bold: true, size: 14 }
-  ws.getCell('A2').value = `Prepared ${new Date().toLocaleString('en-SG')}. Values read from the PI PDFs and checked by ops.`
-  ws.getCell('A2').font = { italic: true, color: { argb: 'FF4A5668' } }
-
-  const header = ws.getRow(3)
-  header.values = ['', ...cols.map((c, i) => c.insurer || `PI ${i + 1}`)]
-  header.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-  header.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B5C75' } } })
-
-  FIELDS.forEach((f, r) => {
-    const row = ws.getRow(4 + r)
-    row.getCell(1).value = f.label
-    row.getCell(1).font = { bold: true }
-    cols.forEach((c, i) => {
-      const cell = row.getCell(2 + i)
-      const v = c.values[f.key] ?? ''
-      if (MONEY_KEYS.has(f.key) && v !== '' && !isNaN(Number(v))) {
-        cell.value = Number(v)
-        cell.numFmt = '"S$"#,##0.00'
-      } else if (f.kind === 'money_or_yes_no' && v !== '' && !isNaN(Number(v))) {
-        cell.value = Number(v)
-        cell.numFmt = '"S$"#,##0.00'
-      } else {
-        cell.value = v
-      }
-      if (!v) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDECEC' } }
-    })
+  // Columns: PI1, PI2, PI3 in row 1.
+  const colOf: number[] = []
+  ws.getRow(1).eachCell((cell, c) => {
+    const m = String(cell.value ?? '').match(/^PI\s*(\d)$/i)
+    if (m) colOf[Number(m[1]) - 1] = c
   })
-  ws.getColumn(1).width = 30
-  cols.forEach((_, i) => { ws.getColumn(2 + i).width = 26 })
+  // Rows: matched on the field label in column A.
+  const norm = (s: unknown) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+  const rowOf: Record<string, number> = {}
+  let lastRow = 1
+  ws.eachRow((row, r) => {
+    const f = FIELDS.find((x) => norm(x.label) === norm(row.getCell(1).value))
+    if (f) { rowOf[f.key] = r; lastRow = Math.max(lastRow, r) }
+  })
+  const missing = FIELDS.filter((f) => !rowOf[f.key]).map((f) => f.label)
+  if (missing.length) throw new Error(`The Excel template is missing these rows: ${missing.join(', ')}`)
+  if (colOf.length < cols.length || colOf.slice(0, cols.length).some((c) => !c)) throw new Error('The Excel template needs PI1, PI2 and PI3 headings in row 1.')
 
+  cols.forEach((c, i) => {
+    for (const f of FIELDS) {
+      const cell = ws.getCell(rowOf[f.key], colOf[i])
+      const v = c.values[f.key] ?? ''
+      cell.value = v === '' ? null : cellValue(f.kind, v)
+      // Keep the template's number format; use ours only when the template has none.
+      if (typeof cell.value === 'number' && (!cell.numFmt || cell.numFmt === 'General')) cell.numFmt = FORMATS[f.kind] ?? 'General'
+    }
+  })
+
+  // Notes under the table, one line per PI (for example a discounted premium).
+  let r = lastRow + 2
+  cols.forEach((c, i) => {
+    for (const n of c.notes) {
+      const cell = ws.getCell(r++, 1)
+      cell.value = `PI${i + 1}: ${n}`
+      cell.font = { color: { argb: 'FF666666' } }
+    }
+  })
+
+  // Audit trail: where each value came from and what ops changed.
   const src = wb.addWorksheet('Sources')
   src.addRow(['Column', 'File', 'Field', 'Value', 'Page found on', 'Changed by hand'])
   src.getRow(1).font = { bold: true }
   cols.forEach((c, i) => FIELDS.forEach((f) => src.addRow([
-    c.insurer || `PI ${i + 1}`, c.fileName, f.label, c.values[f.key] ?? '',
-    c.pages[f.key] ?? '', c.edited[f.key] ? 'Yes' : '',
+    `PI${i + 1}`, c.fileName, f.label, c.values[f.key] ?? '', c.pages[f.key] ?? '', c.edited[f.key] ? 'Yes' : '',
   ])))
   src.columns.forEach((col) => { col.width = 24 })
 

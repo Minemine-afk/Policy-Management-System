@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
+import { isComparisonFile } from '../lib/piExcel'
 import { nameOf, usePeople } from '../lib/people'
 import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime } from '../lib/options'
 import { useSettings } from '../lib/settings'
@@ -60,6 +61,10 @@ export default function RequestView() {
   const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active)
   const move = (to: RequestStatus) => call('change_status', { p_request: r.id, p_to: to })
   const piCount = docs.filter((d) => d.kind === 'pi_output').length
+  const piPdfCount = docs.filter((d) => d.kind === 'pi_output' && d.file_name.toLowerCase().endsWith('.pdf')).length
+  const hasComparison = docs.some((d) => d.kind === 'pi_output' && isComparisonFile(d.file_name))
+  // With two or more PIs, the introducer gets the comparison Excel too, so it must be saved first.
+  const completeBlock = !piCount ? 'Upload a PI first' : piPdfCount >= 2 && !hasComparison ? 'Save the PI comparison to this request first (Compare these PIs)' : ''
   const canUploadAttachment = has('introducer') && r.introducer_id === profile.id && ['submitted', 'assigned', 'in_progress', 'sent_back'].includes(r.status)
   const canUploadPi = (mineAssigned || has('bsd')) && ['assigned', 'in_progress'].includes(r.status)
   const introducerSeesPi = !has('introducer') || r.status === 'completed'
@@ -87,7 +92,7 @@ export default function RequestView() {
             <button className="btn primary" onClick={() => call('claim_request', { p_request: r.id })}>Assign to me</button>}
           {staffActs && r.status === 'assigned' && <button className="btn primary" onClick={() => move('in_progress')}>Start work</button>}
           {staffActs && ['assigned', 'in_progress'].includes(r.status) && <button className="btn" onClick={() => setDialog('send_back')}>Send back to introducer</button>}
-          {staffActs && r.status === 'in_progress' && <button className="btn primary" disabled={!piCount} title={piCount ? '' : 'Upload a PI first'} onClick={() => move('completed')}>Mark completed</button>}
+          {staffActs && r.status === 'in_progress' && <button className="btn primary" disabled={!!completeBlock} title={completeBlock} onClick={() => move('completed')}>Mark completed</button>}
           {has('bsd') && r.status !== 'removed' && <button className="btn danger" onClick={() => setDialog('remove')}>Remove</button>}
         </div>
       </div>
@@ -147,11 +152,14 @@ export default function RequestView() {
 
           <Files title="Attachments" hint="Files the introducer adds to the request." requestId={r.id} kind="attachment" docs={docs}
             canUpload={canUploadAttachment} userId={profile.id} onChange={load} />
-          {has('ops') && piCount >= 2 && (
-            <div><Link className="btn" to={`/compare?request=${r.id}`}>Compare these PIs</Link></div>
+          {has('ops') && piPdfCount >= 2 && (
+            <div className="row">
+              <Link className="btn" to={`/compare?request=${r.id}`}>{hasComparison ? 'Compare these PIs again' : 'Compare these PIs'}</Link>
+              {staffActs && r.status === 'in_progress' && completeBlock && piCount > 0 && <span className="small muted">Save the comparison to this request before marking it completed.</span>}
+            </div>
           )}
           {introducerSeesPi && (
-            <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal. The introducer sees them once the request is completed.'}
+            <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal, then save the PI comparison here from Compare these PIs. The introducer sees the PIs and the comparison once the request is completed.'}
               requestId={r.id} kind="pi_output" docs={docs} canUpload={canUploadPi} userId={profile.id} onChange={load} />
           )}
 

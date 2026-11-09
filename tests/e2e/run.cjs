@@ -10,34 +10,8 @@ const bad = (m) => { failed++; console.log('FAIL', m) }
 const check = async (cond, m) => ((await cond) ? ok(m) : bad(m))
 const file = (name) => ({ name, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 sample ' + name) })
 
-// Minimal one-page PDF with text placed at [x, y] (points). Sample PIs below are made up.
-function pdf(items) {
-  const esc = (t) => t.replace(/([()\\])/g, '\\$1')
-  const stream = items.map(([x, y, t]) => `BT /F1 11 Tf ${x} ${y} Td (${esc(t)}) Tj ET`).join('\n')
-  const objs = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-  ]
-  let out = '%PDF-1.4\n'; const offs = []
-  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n` })
-  const x = out.length
-  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('')
-  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`
-  return Buffer.from(out, 'latin1')
-}
-const rows = (start, pairs, valueX) => pairs.flatMap(([a, b], i) => valueX ? [[72, start - i * 20, a], [valueX, start - i * 20, b]] : [[72, start - i * 20, a]])
-const PI_A = pdf([[72, 760, '[SAMPLE] Great Eastern Life - Policy Illustration'], ...rows(700, [
-  ['Plan Name: GREAT Term Protector'], ['Life Assured: XXXXX'], ['Age Next Birthday: 35   Gender: Female'], ['Smoker Status: Non-Smoker'],
-  ['Basic Sum Assured: S$500,000'], ['Critical Illness Sum Assured: S$200,000'], ['Policy Term: To Age 65'], ['Premium Payment Term: 30 years'],
-  ['Annual Premium: S$1,234.50'], ['Monthly Premium: S$105.20'], ['Total Premiums Payable: S$37,035.00'], ['Riders: Early CI Rider']])])
-const PI_B = pdf([[72, 760, '[SAMPLE] AIA Singapore - Benefit Illustration'], ...rows(700, [
-  ['Product Name', 'AIA Secure Term'], ['Sex', 'F'], ['ALB', '35'], ['Smoker', 'No'], ['Sum Assured', 'SGD 500,000'],
-  ['Coverage Term', '30 yrs'], ['Premium Term', '30 yrs'], ['Yearly Premium', '1,180.00'], ['Critical Illness Benefit', 'Not included']], 320)])
-const PI_C = pdf([[72, 760, '[SAMPLE] Income Insurance Limited'], ...rows(700, [
-  ['Plan name'], ['Star Term Cover'], ['Death Benefit'], ['$500,000'], ['Benefit term'], ['25 years'], ['Premium (Annual)'], ['$990.40']])])
+// Made-up Singapore-style PIs (see sample-pis.cjs). Set PI_SAMPLES to a folder with the two real SG sample PIs to check those too.
+const { PI_A, PI_B, PI_C } = require('./sample-pis.cjs')
 const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
 
 ;(async () => {
@@ -100,19 +74,26 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await check(olivia.getByRole('button', { name: 'Mark completed' }).isDisabled(), 'cannot complete without a PI')
   await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles([piFile('insurer-a.pdf', PI_A), piFile('insurer-b.pdf', PI_B), piFile('insurer-c.pdf', PI_C)])
   await olivia.getByRole('button', { name: 'insurer-c.pdf' }).waitFor()
+  await check(olivia.getByRole('button', { name: 'Mark completed' }).isDisabled(), 'cannot complete 2+ PIs until the comparison is saved to the request')
 
-  // PI comparison: read the three uploaded PIs, check, correct one value, export to Excel
+  // PI comparison: read the three uploaded PIs into the Excel template, check, correct one value, export
   await olivia.getByRole('link', { name: 'Compare these PIs' }).click()
-  await olivia.getByLabel('Annual premium for PI 3').waitFor()
+  await olivia.getByLabel('Insurer / plan for PI 3').waitFor()
   const val = (f, i) => olivia.getByLabel(`${f} for PI ${i}`).inputValue()
-  await check(olivia.getByLabel('Insurer for PI 1').inputValue().then((v) => v === 'Great Eastern'), 'comparison detects the insurer of PI 1')
-  await check(val('Sum assured (death / TPD)', 1).then((v) => v === '500000.00'), 'reads sum assured from a "Label: value" layout')
-  await check(val('Annual premium', 2).then((v) => v === '1180.00'), 'reads annual premium from a two-column table layout')
-  await check(val('Annual premium', 3).then((v) => v === '990.40'), 'reads annual premium when the value is on the next line')
-  await check(val('Critical illness cover', 2).then((v) => v === 'No'), 'reads "Not included" as No')
-  await check(val('Policy term', 1).then((v) => v === 'To age 65'), 'reads "To Age 65" as a policy term')
+  await check(val('Insurer / plan', 1).then((v) => v === 'Great Eastern – GREAT Term Protector'), 'reads insurer and plan name from the cover page')
+  await check(val('Sum assured (S$)', 1).then((v) => v === '500000'), 'reads sum assured from the summary table, not the small print')
+  await check(val('Policy term (years)', 1).then((v) => v === 'To age 65'), 'keeps "To Age 65" as a policy term')
+  await check(val('Premium term (years)', 2).then((v) => v === '30'), 'reads premium term in years')
+  await check(val('Premium (S$, monthly)', 1).then((v) => v === '105.20'), 'reads the monthly premium column')
+  await check(val('Premium (S$, monthly)', 2).then((v) => v === ''), 'leaves the monthly premium blank when the PI is annual')
+  await check(olivia.getByLabel('Notes for PI 2').getByText(/Payment mode is Annual/).isVisible(), 'says why the annual premium was left blank')
+  await check(val('Sum assured (S$)', 3).then((v) => v === '600000'), 'reads sum assured when headings are joined together')
+  await check(val('Premium (S$, monthly)', 3).then((v) => v === '68'), 'reads the premium payable after discount')
+  await check(olivia.getByText('After discount').isVisible(), 'flags a discounted premium')
+  await check(olivia.getByLabel('Notes for PI 3').getByText(/15% discount \(S\$80.00 before/).isVisible(), 'notes the discount and the premium before it')
+  await check(val('Total distribution cost (S$)', 3).then((v) => v === '990.40'), 'reads total distribution cost from the cover page sentence')
   await check(olivia.getByRole('button', { name: 'Export to Excel' }).isDisabled(), 'export needs the values-checked box')
-  await olivia.getByLabel('Life assured age for PI 3').fill('35')
+  await olivia.getByLabel('Premium (S$, monthly) for PI 2').fill('98.50')
   await olivia.screenshot({ path: SHOTS + '/8-compare-pis.png', fullPage: true })
   await olivia.getByText('I have checked these values against the PDFs').click()
   const [dl] = await Promise.all([olivia.waitForEvent('download'), olivia.getByRole('button', { name: 'Export to Excel' }).click()])
@@ -120,12 +101,20 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await dl.saveAs(xlsxPath)
   const ExcelJS = require(__dirname + '/../../web/node_modules/exceljs')
   const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(xlsxPath)
-  const ws = wb.getWorksheet('Comparison')
+  const ws = wb.getWorksheet('PI comparison')
   const rowOf = (label) => { let r = null; ws.eachRow((row) => { if (row.getCell(1).value === label) r = row }); return r }
-  await check(Promise.resolve(ws.getRow(3).getCell(2).value === 'Great Eastern' && rowOf('Annual premium').getCell(3).value === 1180), 'Excel file has insurers as columns and premiums as numbers')
-  await check(Promise.resolve(rowOf('Life assured age').getCell(4).value === '35' && wb.getWorksheet('Sources').rowCount === 37), 'Excel keeps hand corrections and a Sources sheet')
-  await olivia.goBack()
+  await check(Promise.resolve(ws && ['Field', 'PI1', 'PI2', 'PI3'].every((h, i) => ws.getRow(1).getCell(i + 1).value === h)), 'Excel uses the template headings Field, PI1, PI2, PI3')
+  await check(Promise.resolve(rowOf('Sum assured (S$)').getCell(2).value === 500000 && rowOf('Premium (S$, monthly)').getCell(4).value === 68 && rowOf('Total distribution cost (S$)').getCell(4).value === 990.4), 'Excel has the values as numbers in the PI columns')
+  await check(Promise.resolve(rowOf('Premium (S$, monthly)').getCell(3).value === 98.5 && wb.getWorksheet('Sources').rowCount === 19), 'Excel keeps hand corrections and a Sources sheet')
+  await check(Promise.resolve(ws.getColumn(1).values.some((v) => typeof v === 'string' && v.startsWith('PI3: Premium is after a 15% discount'))), 'Excel notes the discount under the table')
+  await olivia.getByRole('button', { name: /^Save to PI-\d+ for the introducer$/ }).click()
+  await olivia.getByRole('status').getByText(/Saved PI-\d+-pi-comparison\.xlsx/).waitFor()
+  ok('ops saved the comparison Excel to the request')
+  await olivia.getByRole('button', { name: /^Save to PI-\d+ for the introducer$/ }).click()
+  await olivia.getByRole('status').getByText(/Saved PI-\d+-pi-comparison\.xlsx/).waitFor()
+  await olivia.getByRole('link', { name: /^Back to PI-/ }).click()
   await olivia.getByRole('button', { name: 'insurer-c.pdf' }).waitFor()
+  await check(olivia.getByRole('button', { name: /pi-comparison\.xlsx$/ }).count().then((n) => n === 1), 'saving again replaces the earlier comparison (one file on the request)')
   await olivia.getByLabel('Write a comment').fill('Internal: insurer B needs a loading')
   await olivia.getByText('Internal note (hidden from the introducer)').click()
   await olivia.getByRole('button', { name: 'Post comment' }).click()
@@ -144,6 +133,7 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await sam.getByRole('link', { name: 'My requests' }).click()
   await sam.getByRole('link', { name: 'PI-00007' }).click()
   await sam.getByRole('button', { name: 'insurer-b.pdf' }).waitFor()
+  await check(sam.getByRole('button', { name: /^PI-\d+-pi-comparison\.xlsx$/ }).isVisible(), 'introducer gets the comparison Excel with the PIs')
   await check(sam.getByText('Internal: insurer B needs a loading').count().then((n) => n === 0), 'introducer cannot see internal notes')
   await sam.getByText('Your PIs are nearly ready').waitFor()
   ok('introducer sees the shared comment')
@@ -386,6 +376,28 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await olivia.goto(BASE + '/admin')
   await olivia.getByRole('heading', { name: 'Board' }).waitFor()
   ok('ops is redirected away from admin')
+
+  // 8. Optional: the two real Singapore sample PIs (not in the repo). PI_SAMPLES=/path/to/pi-samples
+  if (process.env.PI_SAMPLES) {
+    const expected = JSON.parse(fs.readFileSync(__dirname + '/../pi-extract/expected-sg-samples.json', 'utf8'))
+    const names = Object.keys(expected)
+    await olivia.goto(BASE + '/compare')
+    await olivia.getByLabel('Add PI PDFs').setInputFiles(names.map((n) => process.env.PI_SAMPLES + '/' + n))
+    await olivia.getByLabel('Insurer / plan for PI 2').waitFor()
+    const labels = { insurer_plan: 'Insurer / plan', sum_assured: 'Sum assured (S$)', policy_term: 'Policy term (years)', premium_term: 'Premium term (years)', monthly_premium: 'Premium (S$, monthly)', distribution_cost: 'Total distribution cost (S$)' }
+    for (const [i, n] of names.entries()) {
+      for (const [k, label] of Object.entries(labels)) {
+        const got = await olivia.getByLabel(`${label} for PI ${i + 1}`).inputValue()
+        await check(Promise.resolve(got === expected[n][k]), `real sample ${n}: ${label} = ${got || '(blank)'}`)
+      }
+    }
+    await check(olivia.getByLabel('Notes for PI 2').getByText(/30% discount \(S\$66.20 before/).isVisible(), 'real sample: Singlife premium flagged as after the 30% discount')
+    await olivia.screenshot({ path: SHOTS + '/13-compare-real-sg-pis.png', fullPage: true })
+    await olivia.getByText('I have checked these values against the PDFs').click()
+    const [dl2] = await Promise.all([olivia.waitForEvent('download'), olivia.getByRole('button', { name: 'Export to Excel' }).click()])
+    await dl2.saveAs(SHOTS + '/real-sg-comparison.xlsx')
+    ok('real samples exported to Excel')
+  }
 
   await check(Promise.resolve(errors.length === 0), 'no uncaught page errors' + (errors.length ? ': ' + errors[0] : ''))
   console.log(`\n${pass} passed, ${failed} failed`)
