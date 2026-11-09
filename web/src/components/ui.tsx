@@ -50,15 +50,15 @@ export function Fact({ label, children }: { label: string; children: ReactNode }
 }
 
 /** Small dialog asking for a reason, used for send back and remove. */
-export function ReasonDialog({ title, confirmLabel, onConfirm, onCancel }: {
-  title: string; confirmLabel: string; onConfirm: (reason: string) => void; onCancel: () => void
+export function ReasonDialog({ title, confirmLabel, onConfirm, onCancel, fieldLabel = 'Reason' }: {
+  title: string; confirmLabel: string; onConfirm: (reason: string) => void; onCancel: () => void; fieldLabel?: string
 }) {
   const [reason, setReason] = useState('')
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label={title}>
       <div className="card dialog">
         <h2>{title}</h2>
-        <label className="field">Reason
+        <label className="field">{fieldLabel}
           <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
         </label>
         <div className="row">
@@ -68,4 +68,8 @@ export function ReasonDialog({ title, confirmLabel, onConfirm, onCancel }: {
       </div>
     </div>
   )
+}
+
+export function UrgentPill() {
+  return <span className="pill bad urgent" title="Marked urgent">Urgent</span>
 }

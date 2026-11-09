@@ -45,6 +45,8 @@ insert into public.pi_requests (id, ref, introducer_id, status, assignee_id, age
  ('20000000-0000-0000-0000-000000000006', 'PI-00006', '00000000-0000-0000-0000-000000000002', 'removed', null,
   '50 to 54', 'Female', true, '5 years or less', 'Up to S$100,000', false, null, 'Duplicate of an earlier request', now() - interval '9 days', null);
 select setval('public.request_ref_seq', 6);
+-- PI-00004 was sent back 3 days ago: its deadline clock is paused until the introducer resubmits.
+update public.pi_requests set paused_at = now() - interval '3 days' where ref = 'PI-00004';
 
 insert into public.request_clients (request_id, owner_id, client_name, nric, contact)
 select r.id, r.introducer_id, c.name, c.nric, c.contact
@@ -64,7 +66,7 @@ insert into public.request_events (request_id, actor_id, kind, from_status, to_s
  ('20000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000005', 'assigned', 'submitted', 'assigned', 'To Olivia Ops', false, now() - interval '4 days'),
  ('20000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000003', 'started', 'assigned', 'in_progress', null, false, now() - interval '3 days'),
  ('20000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000004', 'assigned', 'submitted', 'assigned', 'Picked up', false, now() - interval '5 days'),
- ('20000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000004', 'sent_back', 'assigned', 'sent_back', 'Please confirm the intended sum assured', true, now() - interval '4 days'),
+ ('20000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000004', 'sent_back', 'assigned', 'sent_back', 'Please confirm the intended sum assured', true, now() - interval '3 days'),
  ('20000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000004', 'assigned', 'submitted', 'assigned', 'Picked up', false, now() - interval '11 days'),
  ('20000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000004', 'completed', 'in_progress', 'completed', null, true, now() - interval '8 days'),
  ('20000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000005', 'removed', 'submitted', 'removed', 'Duplicate of an earlier request', true, now() - interval '8 days');

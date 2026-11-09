@@ -4,15 +4,18 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useRequests } from '../lib/requests'
 import { nameOf, usePeople } from '../lib/people'
-import { BOARD_STATUSES, COLUMN_COLOR, INTRO_GROUPS, STATUS_LABEL, daysSince, dueInfo, introGroup, summary } from '../lib/options'
+import { BOARD_STATUSES, COLUMN_COLOR, INTRO_GROUPS, STATUS_LABEL, byPriorityThenDue, daysSince, dueInfo, fmtHours, introGroup, summary } from '../lib/options'
+import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestStatus } from '../lib/types'
-import { ReasonDialog } from '../components/ui'
+import { ReasonDialog, UrgentPill } from '../components/ui'
 
 export default function Board() {
   const { has, profile } = useAuth()
   const { rows, loading, reload } = useRequests()
   const people = usePeople()
+  const settings = useSettings()
   const [mine, setMine] = useState(false)
+  const [urgentOnly, setUrgentOnly] = useState(false)
   const [msg, setMsg] = useState('')
   const [over, setOver] = useState<string | null>(null)
   const [pending, setPending] = useState<{ req: PiRequest; to: RequestStatus } | null>(null)
@@ -41,14 +44,18 @@ export default function Board() {
     else move(req, to)
   }
 
-  const visible = rows.filter((r) => !mine || r.assignee_id === profile?.id)
-  const cardsIn = (col: string) => visible.filter((r) => (intro ? introGroup(r.status) === col : r.status === col))
+  const visible = rows.filter((r) => (!mine || r.assignee_id === profile?.id) && (!urgentOnly || r.priority === 'urgent'))
+  const cardsIn = (col: string) => visible.filter((r) => (intro ? introGroup(r.status) === col : r.status === col)).sort(byPriorityThenDue)
+  const due = (r: PiRequest) => dueInfo(r, settings.due_soon_hours)
   if (loading) return <div className="empty">Loading…</div>
   return (
     <main className="page wide">
       <div className="row between">
         <h1>Board</h1>
         <div className="row">
+          <label className="row small" style={{ gap: 6 }}>
+            <input type="checkbox" checked={urgentOnly} onChange={(e) => setUrgentOnly(e.target.checked)} /> Only urgent
+          </label>
           {staff && (
             <label className="row small" style={{ gap: 6 }}>
               <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> Only assigned to me
@@ -57,9 +64,10 @@ export default function Board() {
           {intro && <Link className="btn primary" to="/requests/new">New request</Link>}
         </div>
       </div>
-      {staff && visible.some((r) => dueInfo(r)?.overdue) && (
-        <div className="notice bad"><strong>{visible.filter((r) => dueInfo(r)?.overdue).length} overdue</strong>
-          <span>Requests open for more than two days are red. Orange means one day or less is left.</span></div>
+      {staff && visible.some((r) => due(r)?.overdue) && (
+        <div className="notice bad"><strong>{visible.filter((r) => due(r)?.overdue).length} overdue</strong>
+          <span>Requests are due {fmtHours(settings.deadline_hours)} after submission and turn red once overdue.
+            Orange means {fmtHours(settings.due_soon_hours)} or less is left. Urgent requests are listed first.</span></div>
       )}
       {msg && <div className="notice warn" role="alert"><strong>{msg}</strong></div>}
       {staff && <p className="small muted" style={{ margin: 0 }}>Drag a card by its grip (⋮⋮) to another column to change its status.</p>}
@@ -83,16 +91,16 @@ export default function Board() {
               </header>
               <div className="colbody">
                 {cards.map((r) => {
-                  const due = staff ? dueInfo(r) : null
+                  const d = staff ? due(r) : null
                   return (
-                    <Link key={r.id} to={`/requests/${r.id}`} className={`cardlet${due && due.level !== 'ok' ? ' ' + due.level : ''}${staff ? ' draggable' : ''}`} data-ref={r.ref}
+                    <Link key={r.id} to={`/requests/${r.id}`} className={`cardlet${d && (d.level === 'soon' || d.level === 'late') ? ' ' + d.level : ''}${staff ? ' draggable' : ''}${r.priority === 'urgent' ? ' urgent' : ''}`} data-ref={r.ref}
                       draggable={staff} onDragStart={(e) => e.dataTransfer.setData('text/plain', r.id)}>
                       {staff && <span className="grip" aria-hidden="true" title="Drag to move">⋮⋮</span>}
-                      <div className="row between"><strong>{r.ref}</strong><span className="small muted" style={{ marginRight: staff ? 22 : 0 }}>{daysSince(r.submitted_at)}d</span></div>
+                      <div className="row between"><strong>{r.ref} {r.priority === 'urgent' && <UrgentPill />}</strong><span className="small muted" style={{ marginRight: staff ? 22 : 0 }}>{daysSince(r.submitted_at)}d</span></div>
                       <div className="small">{summary(r)}</div>
                       {staff && <div className="small muted">{nameOf(people, r.introducer_id)} · {people[r.introducer_id]?.company}</div>}
                       {staff && <div className="small muted">{r.assignee_id ? `Handled by ${nameOf(people, r.assignee_id)}` : 'Unassigned'}</div>}
-                      {due && <div className={`due ${due.level}`}>{due.label}</div>}
+                      {d && <div className={`due ${d.level}`}>{d.label}</div>}
                       {has('ops') && r.status === 'submitted' && !r.assignee_id && (
                         <button className="btn small primary" onClick={(e) => { e.preventDefault(); e.stopPropagation(); move(r, 'assigned') }}>Assign to me</button>
                       )}

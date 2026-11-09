@@ -6,6 +6,7 @@ import type { Notice } from '../lib/notifications'
 
 const ICON: Record<string, string> = {
   sent_back: '↩', completed: '✓', due_soon: '⏰', overdue: '⚠', assigned: '→', resubmitted: '↻', comment: '💬',
+  urgent: '❗', reopened: '↺',
 }
 
 export default function Notifications() {

@@ -4,14 +4,16 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime } from '../lib/options'
+import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
-import { Fact, ReasonDialog, StatusPill } from '../components/ui'
+import { Fact, ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
 import Files from '../components/Files'
 
 export default function RequestView() {
   const { id } = useParams()
   const { profile, has } = useAuth()
   const people = usePeople()
+  const settings = useSettings()
   const [r, setR] = useState<PiRequest | null | undefined>(undefined)
   const [client, setClient] = useState<RequestClient | null>(null)
   const [comments, setComments] = useState<RequestComment[]>([])
@@ -20,7 +22,7 @@ export default function RequestView() {
   const [body, setBody] = useState('')
   const [internal, setInternal] = useState(false)
   const [assignTo, setAssignTo] = useState('')
-  const [dialog, setDialog] = useState<'send_back' | 'remove' | null>(null)
+  const [dialog, setDialog] = useState<'send_back' | 'remove' | 'reopen' | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -61,17 +63,26 @@ export default function RequestView() {
   const canUploadAttachment = has('introducer') && r.introducer_id === profile.id && ['submitted', 'assigned', 'in_progress', 'sent_back'].includes(r.status)
   const canUploadPi = (mineAssigned || has('bsd')) && ['assigned', 'in_progress'].includes(r.status)
   const introducerSeesPi = !has('introducer') || r.status === 'completed'
+  const owner = intro && r.introducer_id === profile.id
+  const open = !['completed', 'removed'].includes(r.status)
+  const canFlag = open && (owner || has('bsd') || mineAssigned)
+  const canReopen = r.status === 'completed' && (owner || has('bsd'))
+  const due = !intro ? dueInfo(r, settings.due_soon_hours) : null
 
   return (
     <main className="page">
       <div className="row between">
         <div>
           <p className="muted small" style={{ margin: 0 }}><Link to="/board">Board</Link> / {r.ref}</p>
-          <h1>{r.ref} <StatusPill status={r.status} />{!has('introducer') && dueInfo(r) && <span className={`due ${dueInfo(r)!.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{dueInfo(r)!.label}</span>}</h1>
+          <h1>{r.ref} <StatusPill status={r.status} />{r.priority === 'urgent' && <> <UrgentPill /></>}{due && <span className={`due ${due.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{due.label}</span>}</h1>
         </div>
         <div className="row">
           {has('introducer') && r.introducer_id === profile.id && r.status === 'submitted' &&
             <Link className="btn" to={`/requests/${r.id}/edit`}>Edit request</Link>}
+          {owner && <Link className="btn" to={`/requests/new?from=${r.id}`}>Duplicate</Link>}
+          {canReopen && <button className="btn" onClick={() => setDialog('reopen')}>Reopen</button>}
+          {canFlag && <button className="btn" onClick={() => call('set_priority', { p_request: r.id, p_priority: r.priority === 'urgent' ? 'normal' : 'urgent' })}>
+            {r.priority === 'urgent' ? 'Remove urgent flag' : 'Mark urgent'}</button>}
           {has('ops') && r.status === 'submitted' && !r.assignee_id &&
             <button className="btn primary" onClick={() => call('claim_request', { p_request: r.id })}>Assign to me</button>}
           {staffActs && r.status === 'assigned' && <button className="btn primary" onClick={() => move('in_progress')}>Start work</button>}
@@ -84,6 +95,9 @@ export default function RequestView() {
       {error && <div className="notice bad" role="alert"><strong>{error}</strong></div>}
       {r.status === 'sent_back' && (
         <div className="notice warn"><strong>Sent back</strong><span>{r.status_reason}</span></div>
+      )}
+      {open && r.status !== 'sent_back' && r.status_reason && (
+        <div className="notice warn"><strong>Reopened</strong><span>{r.status_reason}</span></div>
       )}
       {r.status === 'removed' && (
         <div className="notice bad"><strong>Removed</strong><span>{r.status_reason}</span></div>
@@ -114,6 +128,8 @@ export default function RequestView() {
               {!intro && <Fact label="Introducer">{nameOf(people, r.introducer_id)}{people[r.introducer_id]?.company ? ` · ${people[r.introducer_id].company}` : ''}</Fact>}
               {!intro && <Fact label="Handled by">{nameOf(people, r.assignee_id)}</Fact>}
               <Fact label="Submitted">{fmtDate(r.submitted_at)}</Fact>
+              {!intro && <Fact label="Due">{open ? fmtDateTime(r.due_at) : '—'}</Fact>}
+              <Fact label="Priority">{r.priority === 'urgent' ? 'Urgent' : 'Normal'}</Fact>
             </dl>
             {r.remarks && <p style={{ margin: 0 }}><span className="muted small">Remarks</span><br />{r.remarks}</p>}
           </section>
@@ -197,6 +213,10 @@ export default function RequestView() {
       {dialog === 'send_back' && (
         <ReasonDialog title="Send back to the introducer" confirmLabel="Send back" onCancel={() => setDialog(null)}
           onConfirm={(reason) => { setDialog(null); call('change_status', { p_request: r.id, p_to: 'sent_back', p_reason: reason }) }} />
+      )}
+      {dialog === 'reopen' && (
+        <ReasonDialog title={`Reopen ${r.ref}`} fieldLabel="What does the client want changed?" confirmLabel="Reopen request" onCancel={() => setDialog(null)}
+          onConfirm={(reason) => { setDialog(null); call('reopen_request', { p_request: r.id, p_reason: reason }) }} />
       )}
       {dialog === 'remove' && (
         <ReasonDialog title={`Remove ${r.ref}`} confirmLabel="Remove request" onCancel={() => setDialog(null)}

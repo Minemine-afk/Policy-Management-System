@@ -50,6 +50,7 @@ export const EVENT_LABEL: Record<string, string> = {
   started: 'Work started', sent_back: 'Sent back to introducer', resubmitted: 'Resubmitted by introducer',
   completed: 'Completed', removed: 'Removed', status_changed: 'Status changed',
   pi_uploaded: 'PI document uploaded', attachment_added: 'Attachment added',
+  released: 'Returned to the unassigned pool', reopened: 'Reopened', priority_changed: 'Priority changed',
 }
 
 export function fmtDate(s: string | null | undefined) {
@@ -70,17 +71,31 @@ export function summary(r: { age_band: string; gender: string; smoker: boolean; 
   return `${r.gender}, ${r.age_band}, ${r.smoker ? 'smoker' : 'non-smoker'} · ${r.sum_assured_band} · ${r.coverage_term}`
 }
 
-/** Requests are due two days after submission. Orange: one day or less left. Red: past two days.
- *  Completed and removed requests are never flagged. */
-export type DueLevel = 'ok' | 'soon' | 'late'
-export function dueInfo(r: { status: string; submitted_at: string }): { level: DueLevel; overdue: boolean; label: string } | null {
+/** "48 hours" -> "2 days". */
+export function fmtHours(h: number) {
+  if (h % 24 === 0) return h === 24 ? '1 day' : `${h / 24} days`
+  return h === 1 ? '1 hour' : `${h} hours`
+}
+
+/** Each request has a due time (set from the deadline in Admin > Settings). Orange: the "due soon" window.
+ *  Red: past the due time. Completed and removed requests are never flagged. While a request is sent back
+ *  the clock can be paused. */
+export type DueLevel = 'ok' | 'soon' | 'late' | 'paused'
+export function dueInfo(r: { status: string; due_at: string; paused_at?: string | null }, soonHours = 24):
+  { level: DueLevel; overdue: boolean; label: string } | null {
   if (r.status === 'completed' || r.status === 'removed') return null
-  const hours = (Date.now() - new Date(r.submitted_at).getTime()) / 3_600_000
-  if (hours > 48) {
-    const over = Math.floor(hours - 48)
+  if (r.paused_at) return { level: 'paused', overdue: false, label: 'Clock paused' }
+  const left = (new Date(r.due_at).getTime() - Date.now()) / 3_600_000
+  if (left < 0) {
+    const over = Math.floor(-left)
     const label = over >= 24 ? `Overdue by ${Math.floor(over / 24)}d` : `Overdue by ${Math.max(over, 1)}h`
     return { level: 'late', overdue: true, label }
   }
-  const left = 48 - hours
-  return { level: left <= 24 ? 'soon' : 'ok', overdue: false, label: left <= 24 ? 'Due in 1d' : 'Due in 2d' }
+  const label = left >= 24 ? `Due in ${Math.ceil(left / 24)}d` : `Due in ${Math.max(Math.ceil(left), 1)}h`
+  return { level: left <= soonHours ? 'soon' : 'ok', overdue: false, label }
+}
+
+/** Urgent first, then the earliest due time. */
+export function byPriorityThenDue(a: { priority: string; due_at: string }, b: { priority: string; due_at: string }) {
+  return (a.priority === 'urgent' ? 0 : 1) - (b.priority === 'urgent' ? 0 : 1) || a.due_at.localeCompare(b.due_at)
 }
