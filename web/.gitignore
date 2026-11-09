@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# OCR engine files, copied from node_modules by scripts/copy-ocr.mjs
+public/ocr/

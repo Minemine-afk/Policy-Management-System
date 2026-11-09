@@ -326,30 +326,41 @@ export function extract(pages: Page[], fileName: string): Extracted {
   return { found, notes, discounted: !!table?.values.discount }
 }
 
-/** Called after each page is read: pages done so far and the PDF's page count. */
-export type PageProgress = (done: number, total: number) => void
+/** Called as pages are read: pages done so far, the PDF's page count, and whether OCR is being used. */
+export type PageProgress = (done: number, total: number, ocr: boolean) => void
+/** Reads a page that has no text inside it (a scanned picture). */
+export type OcrPage = (page: unknown) => Promise<TextItem[]>
 
-/** Reads a PDF into positioned text and lines with pdf.js (loaded only when needed).
- *  Gives up after `timeoutMs` so a PDF the reader can't finish never leaves the screen waiting. */
-export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, timeoutMs = 60_000): Promise<Page[]> {
+/** A page with fewer text pieces than this is treated as a scan and read with OCR. */
+const MIN_TEXT_ITEMS = 5
+
+/** Reads a PDF into positioned text and lines with pdf.js (loaded only when needed). Scanned pages are read
+ *  with OCR (see ocr.ts). Gives up when nothing moves for `stallMs`, so a PDF the reader can't finish never
+ *  leaves the screen waiting; a long scanned PI keeps going as long as pages keep being read. */
+export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs = 60_000, useOcr = true): Promise<Page[]> {
   let task: { destroy?: () => unknown } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<never>((_, reject) => {
+  let fail: (e: Error) => void = () => {}
+  const stalled = new Promise<never>((_, reject) => { fail = reject })
+  const arm = () => {
+    clearTimeout(timer)
     timer = setTimeout(() => {
       task?.destroy?.()
-      reject(new Error(`it took longer than ${Math.round(timeoutMs / 1000)} seconds. Reload the page and try again, or type the values in by hand`))
-    }, timeoutMs)
-  })
+      fail(new Error(`nothing happened for ${Math.round(stallMs / 1000)} seconds. Reload the page and try again, or type the values in by hand`))
+    }, stallMs)
+  }
+  arm()
   const read = (async () => {
     // The legacy build carries polyfills: the default build needs very recent browser features
     // (Map.getOrInsertComputed, Math.sumPrecise, Promise.try, ...) and silently fails in older Chrome, Edge or Safari.
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
     const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
-    return readWith(pdfjs, data, onPage, (t) => { task = t })
+    const ocr = useOcr ? (await import('./ocr')).ocrPage : undefined
+    return readWith(pdfjs, data, (d, t, o) => { arm(); onPage?.(d, t, o) }, (t) => { task = t }, ocr)
   })()
   try {
-    return await Promise.race([read, timeout])
+    return await Promise.race([read, stalled])
   } finally {
     clearTimeout(timer)
   }
@@ -357,22 +368,26 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, timeoutM
 
 /** Shared by the browser and the Node test script. */
 export async function readWith(pdfjs: { getDocument: (src: { data: Uint8Array }) => { promise: Promise<unknown> } }, data: ArrayBuffer,
-  onPage?: PageProgress, onTask?: (task: { destroy?: () => unknown }) => void): Promise<Page[]> {
+  onPage?: PageProgress, onTask?: (task: { destroy?: () => unknown }) => void, ocr?: OcrPage): Promise<Page[]> {
   const task = pdfjs.getDocument({ data: new Uint8Array(data) })
   onTask?.(task as { destroy?: () => unknown })
   const doc = (await task.promise) as any
-  onPage?.(0, doc.numPages)
+  onPage?.(0, doc.numPages, false)
   const pages: Page[] = []
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
     const content = await page.getTextContent()
-    const items: TextItem[] = []
+    let items: TextItem[] = []
     for (const it of content.items) {
       if (!('str' in it)) continue
       items.push({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width })
     }
+    if (ocr && items.filter((i) => i.str.trim()).length < MIN_TEXT_ITEMS) {
+      onPage?.(p - 1, doc.numPages, true)
+      items = await ocr(page)
+    }
     pages.push({ page: p, items, lines: toLines(p, items) })
-    onPage?.(p, doc.numPages)
+    onPage?.(p, doc.numPages, false)
   }
   return pages
 }
