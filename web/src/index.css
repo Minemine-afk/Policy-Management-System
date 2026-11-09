@@ -152,3 +152,5 @@ td.edited-cell { background: var(--warn-soft); }
 .toolbar select { height: 34px; }
 .workload td button.linkish { background: none; border: 0; padding: 0; color: var(--brand); font: inherit; cursor: pointer; text-decoration: underline; }
 .notices li.urgent .nicon, .notices li.reopened .nicon { color: var(--bad); }
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.progress progress { width: 100%; height: 12px; accent-color: var(--brand); }

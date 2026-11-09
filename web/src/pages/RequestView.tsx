@@ -9,6 +9,7 @@ import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
 import { Fact, ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
 import Files from '../components/Files'
+import PiComparison from '../components/PiComparison'
 
 export default function RequestView() {
   const { id } = useParams()
@@ -64,7 +65,7 @@ export default function RequestView() {
   const piPdfCount = docs.filter((d) => d.kind === 'pi_output' && d.file_name.toLowerCase().endsWith('.pdf')).length
   const hasComparison = docs.some((d) => d.kind === 'pi_output' && isComparisonFile(d.file_name))
   // With two or more PIs, the introducer gets the comparison Excel too, so it must be saved first.
-  const completeBlock = !piCount ? 'Upload a PI first' : piPdfCount >= 2 && !hasComparison ? 'Save the PI comparison to this request first (Compare these PIs)' : ''
+  const completeBlock = !piCount ? 'Upload a PI first' : piPdfCount >= 2 && !hasComparison ? 'Save the PI comparison to this request first (PI comparison section)' : ''
   const canUploadAttachment = has('introducer') && r.introducer_id === profile.id && ['submitted', 'assigned', 'in_progress', 'sent_back'].includes(r.status)
   const canUploadPi = (mineAssigned || has('bsd')) && ['assigned', 'in_progress'].includes(r.status)
   const introducerSeesPi = !has('introducer') || r.status === 'completed'
@@ -155,15 +156,15 @@ export default function RequestView() {
 
           <Files title="Attachments" hint="Files the introducer adds to the request." requestId={r.id} kind="attachment" docs={docs}
             canUpload={canUploadAttachment} userId={profile.id} onChange={load} />
-          {has('ops') && piPdfCount >= 2 && (
-            <div className="row">
-              <Link className="btn" to={`/compare?request=${r.id}`}>{hasComparison ? 'Compare these PIs again' : 'Compare these PIs'}</Link>
-              {staffActs && r.status === 'in_progress' && completeBlock && piCount > 0 && <span className="small muted">Save the comparison to this request before marking it completed.</span>}
-            </div>
-          )}
           {introducerSeesPi && (
-            <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal, then save the PI comparison here from Compare these PIs. The introducer sees the PIs and the comparison once the request is completed.'}
+            <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal. They are compared below; save the comparison to this request. The introducer sees the PIs and the comparison once the request is completed.'}
               requestId={r.id} kind="pi_output" docs={docs} canUpload={canUploadPi} userId={profile.id} onChange={load} />
+          )}
+          {has('ops') && piPdfCount > 0 && (
+            <>
+              {staffActs && r.status === 'in_progress' && completeBlock && piCount > 0 && <div className="small muted">Save the PI comparison to this request before marking it completed.</div>}
+              <PiComparison req={r} docs={docs} userId={profile.id} onSaved={load} />
+            </>
           )}
 
           {r.status !== 'sent_back' && (

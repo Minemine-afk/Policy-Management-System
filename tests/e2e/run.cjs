@@ -81,9 +81,19 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await olivia.getByRole('button', { name: 'insurer-c.pdf' }).waitFor()
   await check(olivia.getByRole('button', { name: 'Mark completed' }).isDisabled(), 'cannot complete 2+ PIs until the comparison is saved to the request')
 
-  // PI comparison: read the three uploaded PIs into the Excel template, check, correct one value, export
-  await olivia.getByRole('link', { name: 'Compare these PIs' }).click()
-  await olivia.getByLabel('Insurer / plan for PI 3').waitFor()
+  // PI comparison on the request page: the three uploaded PIs are read straight away into the Excel template
+  await check(olivia.getByRole('link', { name: /Compare/ }).count().then((n) => n === 0), 'there is no separate Compare PIs page or link any more')
+  const cmp = olivia.getByRole('region', { name: 'PI comparison' })
+  await cmp.getByLabel('Insurer / plan for PI 3').waitFor()
+  ok('the uploaded PIs are compared directly on the request page')
+  // Progress bar: slow the next download down so the bar can be seen
+  await olivia.route('**/storage/v1/object/**', async (route) => { await new Promise((r) => setTimeout(r, 1500)); await route.continue() })
+  await cmp.getByRole('button', { name: 'Read the PIs again' }).click()
+  await check(cmp.getByRole('status', { name: 'Reading PIs' }).getByText(/Reading PI \d of 3: insurer-.\.pdf/).waitFor({ timeout: 4000 }).then(() => true, () => false), 'a progress bar shows which PI is being read')
+  await check(cmp.locator('progress').isVisible(), 'with a percentage bar')
+  await olivia.screenshot({ path: SHOTS + '/14-pi-comparison-progress.png' })
+  await cmp.getByLabel('Insurer / plan for PI 3').waitFor()
+  await olivia.unroute('**/storage/v1/object/**')
   const val = (f, i) => olivia.getByLabel(`${f} for PI ${i}`).inputValue()
   await check(val('Insurer / plan', 1).then((v) => v === 'Great Eastern – GREAT Term Protector'), 'reads insurer and plan name from the cover page')
   await check(val('Sum assured (S$)', 1).then((v) => v === '500000'), 'reads sum assured from the summary table, not the small print')
@@ -117,7 +127,7 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   ok('ops saved the comparison Excel to the request')
   await olivia.getByRole('button', { name: /^Save to PI-\d+ for the introducer$/ }).click()
   await olivia.getByRole('status').getByText(/Saved PI-\d+-pi-comparison\.xlsx/).waitFor()
-  await olivia.getByRole('link', { name: /^Back to PI-/ }).click()
+  await olivia.reload()
   await olivia.getByRole('button', { name: 'insurer-c.pdf' }).waitFor()
   await check(olivia.getByRole('button', { name: /pi-comparison\.xlsx$/ }).count().then((n) => n === 1), 'saving again replaces the earlier comparison (one file on the request)')
   await olivia.getByLabel('Write a comment').fill('Internal: insurer B needs a loading')
@@ -406,12 +416,16 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await olivia.getByRole('heading', { name: 'Board' }).waitFor()
   ok('ops is redirected away from admin')
 
+  await olivia.goto(BASE + '/compare?request=20000000-0000-0000-0000-000000000003')
+  await olivia.getByRole('heading', { name: /PI-00003/ }).waitFor()
+  ok('old Compare PIs links open the request instead')
+
   // 8. Optional: the two real Singapore sample PIs (not in the repo). PI_SAMPLES=/path/to/pi-samples
   if (process.env.PI_SAMPLES) {
     const expected = JSON.parse(fs.readFileSync(__dirname + '/../pi-extract/expected-sg-samples.json', 'utf8'))
     const names = Object.keys(expected)
-    await olivia.goto(BASE + '/compare')
-    await olivia.getByLabel('Add PI PDFs').setInputFiles(names.map((n) => process.env.PI_SAMPLES + '/' + n))
+    await olivia.goto(BASE + '/requests/20000000-0000-0000-0000-000000000003')
+    await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles(names.map((n) => process.env.PI_SAMPLES + '/' + n))
     await olivia.getByLabel('Insurer / plan for PI 2').waitFor()
     const labels = { insurer_plan: 'Insurer / plan', sum_assured: 'Sum assured (S$)', policy_term: 'Policy term (years)', premium_term: 'Premium term (years)', monthly_premium: 'Premium (S$, monthly)', distribution_cost: 'Total distribution cost (S$)' }
     for (const [i, n] of names.entries()) {

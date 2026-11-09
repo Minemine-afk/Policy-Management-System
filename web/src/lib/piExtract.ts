@@ -326,17 +326,40 @@ export function extract(pages: Page[], fileName: string): Extracted {
   return { found, notes, discounted: !!table?.values.discount }
 }
 
-/** Reads a PDF into positioned text and lines with pdf.js (loaded only when needed). */
-export async function readPdf(data: ArrayBuffer): Promise<Page[]> {
-  const pdfjs = await import('pdfjs-dist')
-  const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
-  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
-  return readWith(pdfjs, data)
+/** Called after each page is read: pages done so far and the PDF's page count. */
+export type PageProgress = (done: number, total: number) => void
+
+/** Reads a PDF into positioned text and lines with pdf.js (loaded only when needed).
+ *  Gives up after `timeoutMs` so a PDF the reader can't finish never leaves the screen waiting. */
+export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, timeoutMs = 60_000): Promise<Page[]> {
+  let task: { destroy?: () => unknown } | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      task?.destroy?.()
+      reject(new Error(`it took longer than ${Math.round(timeoutMs / 1000)} seconds. Reload the page and try again, or type the values in by hand`))
+    }, timeoutMs)
+  })
+  const read = (async () => {
+    const pdfjs = await import('pdfjs-dist')
+    const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
+    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
+    return readWith(pdfjs, data, onPage, (t) => { task = t })
+  })()
+  try {
+    return await Promise.race([read, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Shared by the browser and the Node test script. */
-export async function readWith(pdfjs: { getDocument: (src: { data: Uint8Array }) => { promise: Promise<unknown> } }, data: ArrayBuffer): Promise<Page[]> {
-  const doc = (await pdfjs.getDocument({ data: new Uint8Array(data) }).promise) as any
+export async function readWith(pdfjs: { getDocument: (src: { data: Uint8Array }) => { promise: Promise<unknown> } }, data: ArrayBuffer,
+  onPage?: PageProgress, onTask?: (task: { destroy?: () => unknown }) => void): Promise<Page[]> {
+  const task = pdfjs.getDocument({ data: new Uint8Array(data) })
+  onTask?.(task as { destroy?: () => unknown })
+  const doc = (await task.promise) as any
+  onPage?.(0, doc.numPages)
   const pages: Page[] = []
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
@@ -347,6 +370,7 @@ export async function readWith(pdfjs: { getDocument: (src: { data: Uint8Array })
       items.push({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width })
     }
     pages.push({ page: p, items, lines: toLines(p, items) })
+    onPage?.(p, doc.numPages)
   }
   return pages
 }
