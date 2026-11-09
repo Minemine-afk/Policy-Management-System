@@ -446,6 +446,29 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
     ok('real samples exported to Excel')
   }
 
+  // 8b. Optional: OCR on scanned copies of the two real SG PIs (./make-scans.sh makes them). PI_SCANS=/path/to/scans
+  if (process.env.PI_SAMPLES && process.env.PI_SCANS) {
+    const expected = JSON.parse(fs.readFileSync(__dirname + '/../pi-extract/expected-sg-samples.json', 'utf8'))
+    const names = Object.keys(expected)
+    await olivia.goto(BASE + '/requests/20000000-0000-0000-0000-000000000003')
+    const cmp = olivia.getByRole('region', { name: 'PI comparison' })
+    await cmp.getByLabel('Insurer / plan for PI 2').waitFor()
+    for (const n of names) await olivia.getByRole('listitem').filter({ hasText: n }).getByRole('button', { name: 'Remove' }).click()
+    await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles(names.map((n) => process.env.PI_SCANS + '/SCAN_' + n))
+    await check(cmp.getByText(/reading it with OCR/).waitFor({ timeout: 60000 }).then(() => true, () => false), 'scanned pages are read with OCR, shown on the progress bar')
+    await olivia.screenshot({ path: SHOTS + '/14-ocr-progress.png' })
+    await cmp.getByLabel('Insurer / plan for PI 2').waitFor({ timeout: 600000 })
+    const labels = { insurer_plan: 'Insurer / plan', sum_assured: 'Sum assured (S$)', policy_term: 'Policy term (years)', premium_term: 'Premium term (years)', monthly_premium: 'Premium (S$, monthly)', distribution_cost: 'Total distribution cost (S$)' }
+    for (const [i, n] of names.entries()) {
+      for (const [k, label] of Object.entries(labels)) {
+        const got = await cmp.getByLabel(`${label} for PI ${i + 1}`).inputValue()
+        await check(Promise.resolve(got === expected[n][k]), `scanned ${n} (OCR): ${label} = ${got || '(blank)'}`)
+      }
+    }
+    await check(cmp.getByLabel('Notes for PI 1').getByText(/read with OCR: check every value/).isVisible(), 'values read with OCR carry a note to check them')
+    await olivia.screenshot({ path: SHOTS + '/15-ocr-result.png', fullPage: true })
+  }
+
   await check(Promise.resolve(errors.length === 0), 'no uncaught page errors' + (errors.length ? ': ' + errors[0] : ''))
   console.log(`\n${pass} passed, ${failed} failed`)
   await browser.close()

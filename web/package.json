@@ -7,15 +7,19 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "predev": "node scripts/copy-ocr.mjs",
+    "prebuild": "node scripts/copy-ocr.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "exceljs": "^4.4.0",
     "pdfjs-dist": "^6.5.438",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.5"
+    "react-router-dom": "^7.18.5",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

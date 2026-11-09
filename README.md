@@ -49,13 +49,18 @@ columns), Backlog (filterable table), and a request page with comments (shared o
 > PDPA: do not enter any until the go-live checklist below is done.
 
 **PI comparison (ops and BSD):** on each request page, under the uploaded PIs. The first three PI PDFs are read straight away,
-with a progress bar (PI, page and percentage); each PI is given up to 60 seconds before it is reported as unreadable, so the
+with a progress bar (PI, page and percentage). A PI is reported as unreadable if nothing happens for 60 seconds, so the
 screen never waits forever. There is no separate Compare PIs page any more (old links open the request).
+**Scanned PIs (OCR):** a page with no text inside it (a scan or photo) is read with OCR (Tesseract, open source, free).
+It runs in the browser from files this site serves itself (`web/public/ocr/`, copied by `web/scripts/copy-ocr.mjs` before
+`dev` and `build`), so the PDF never leaves the computer and no outside service is called. It takes a few seconds per
+scanned page, and values read this way get a note asking ops to check them against the PDF. Tested on 200 dpi scans of
+the two real Singapore sample PIs (12 of 12 values); poor or blurred scans can still misread a value.
 The text is read in the browser with pdf.js (nothing is sent anywhere), key fields are matched by label rules in
 `web/src/lib/piExtract.ts`, ops check and correct every value side by side, then export an Excel comparison with
 ExcelJS (a Comparison sheet plus a Sources sheet showing where each value came from and what was changed by hand).
 The rules were tested only on made-up sample PIs. Real insurer PIs will need per-insurer rules (`INSURER_RULES`).
-Scanned PDFs (images) can't be read yet; they would need OCR. There is no AI fallback yet.
+There is no AI fallback.
 
 ## Stack
 
@@ -129,6 +134,6 @@ PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # acces
 
 - Phase 2: invite and password-reset emails sent from the app, deactivation review. (MFA skipped for now by decision.)
 - Email alerts: parked, ready to switch on (`docs/email-alerts/README.md`).
-- PDF comparison: tune the rules on real PIs from each insurer, fill your own Excel template instead of the default layout, optional AI fallback (switchable off), OCR for scanned PDFs.
+- PDF comparison: tune the rules on real PIs from each insurer, fill your own Excel template instead of the default layout, optional AI fallback (switchable off). (OCR for scanned PDFs is done.)
 - Supabase Pro (backups, no pausing), sample users removed, MAS outsourcing assessment, PDPA review, compliance
   sign-off, and a professional security test. Make this GitHub repository private.

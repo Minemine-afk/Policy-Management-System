@@ -13,12 +13,12 @@ interface Column {
   error?: string
 }
 
-interface Progress { file: number; files: number; name: string; page: number; pages: number }
+interface Progress { file: number; files: number; name: string; page: number; pages: number; ocr: boolean }
 
 const failed = (fileName: string, error: string): Column => ({ fileName, found: {}, values: {}, notes: [], discounted: false, error })
 
 const MAX = 3
-/** Each PI gets this long (download and reading) before it is given up on. */
+/** A PI is given up on when its download, or its reading, makes no progress for this long. */
 export const READ_LIMIT_MS = 60_000
 
 function withLimit<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
@@ -54,18 +54,24 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       const out: Column[] = []
       for (const [i, doc] of list.entries()) {
         if (cancelled) return
-        setProgress({ file: i, files: list.length, name: doc.file_name, page: 0, pages: 0 })
+        setProgress({ file: i, files: list.length, name: doc.file_name, page: 0, pages: 0, ocr: false })
         try {
           const dl = await withLimit(supabase.storage.from('request-docs').download(doc.storage_path), READ_LIMIT_MS, 'Downloading')
           if (!dl.data) { out.push(failed(doc.file_name, dl.error?.message ?? 'Download failed')); continue }
-          const pages = await readPdf(await dl.data.arrayBuffer(),
-            (page, total) => { if (!cancelled) setProgress({ file: i, files: list.length, name: doc.file_name, page, pages: total }) },
-            READ_LIMIT_MS)
+          const ocrPages = new Set<number>()
+          const pages = await readPdf(await dl.data.arrayBuffer(), (page, total, ocr) => {
+            if (ocr) ocrPages.add(page + 1)
+            if (!cancelled) setProgress({ file: i, files: list.length, name: doc.file_name, page, pages: total, ocr })
+          }, READ_LIMIT_MS)
           if (!pages.some((p) => p.lines.length)) {
-            out.push(failed(doc.file_name, 'No text found. This may be a scanned image, which needs OCR. Type the values in by hand.'))
+            out.push(failed(doc.file_name, 'No text could be read, even with OCR. Type the values in by hand.'))
             continue
           }
           const { found, notes, discounted } = extract(pages, doc.file_name)
+          if (ocrPages.size) {
+            const list = [...ocrPages].join(', ')
+            notes.unshift(`Scanned ${ocrPages.size === 1 ? 'page' : 'pages'} ${list} read with OCR: check every value from ${ocrPages.size === 1 ? 'it' : 'them'} against the PDF.`)
+          }
           out.push({ fileName: doc.file_name, found, notes, discounted, values: Object.fromEntries(FIELDS.map((f) => [f.key, found[f.key]?.value ?? ''])) })
         } catch (e) {
           out.push(failed(doc.file_name, 'Could not read this PDF: ' + (e as Error).message))
@@ -138,7 +144,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       </div>
       <p className="small muted" style={{ margin: 0 }}>
         The first three PI PDFs uploaded above fill PI1, PI2 and PI3 of the comparison Excel template, in upload order.
-        They are read in your browser by fixed rules (no AI) and nothing is sent anywhere. Fields that can't be read are left
+        They are read in your browser by fixed rules (no AI), scanned pages with OCR, and nothing is sent anywhere. Fields that can't be read are left
         blank for you to fill. Check each value against the PDF, correct it if needed, then save it to this request.
         {pdfs.length > MAX && ` Only the first ${MAX} of the ${pdfs.length} PDFs are compared.`}
       </p>
@@ -148,11 +154,12 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         <div className="progress" role="status" aria-label="Reading PIs">
           <div className="row between small">
             <span>Reading PI {progress.file + 1} of {progress.files}: {progress.name}
-              {progress.pages ? ` · page ${progress.page} of ${progress.pages}` : ' · downloading'}</span>
+              {progress.ocr ? ` · scanned page ${progress.page + 1} of ${progress.pages}, reading it with OCR (slower)`
+                : progress.pages ? ` · page ${progress.page} of ${progress.pages}` : ' · downloading'}</span>
             <strong>{pct}%</strong>
           </div>
           <progress max={100} value={pct} aria-label={`${pct}% read`} />
-          <span className="small muted">Each PI is given up to {READ_LIMIT_MS / 1000} seconds.</span>
+          <span className="small muted">A PI is stopped if nothing happens for {READ_LIMIT_MS / 1000} seconds. Scanned pages are read with OCR, which takes a few seconds each.</span>
         </div>
       )}
 
