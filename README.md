@@ -13,13 +13,20 @@ from submission to delivery, in the style of a simple Jira or Taiga board.
 Ops can assign a pooled request to themselves (**Assign to me**). Requests are due two days after submission. Ops and BSD see them in orange when one day or less is left and in red
 once past two days (with the time overdue), until they are completed or removed.
 
+Board columns: staff see Unassigned, Assigned, In progress, Sent back, Completed (cards have a drag grip); ops can drag a
+request freely between Unassigned, Assigned and In progress. Introducers see only In progress (anything not yet sent back
+or completed), Sent back and Completed, and never see who is handling a request. Sent-back requests are closed to comments;
+the introducer edits any field and resubmits. Notifications (bell): introducers on sent back / completed; ops on
+assignments, deadlines and resubmissions of their requests; BSD on all deadlines. Deadline notices are generated when
+ops/BSD have the app open (every minute); there is no email yet.
+
 Statuses: Submitted, Assigned, In progress, Sent back, Completed, Removed. Views: Board (drag cards between
 columns), Backlog (filterable table), and a request page with comments (shared or internal), files and an activity timeline.
 
 > **Prototype.** All names and clients are made-up sample data. Real client details are personal data under
 > PDPA: do not enter any until the go-live checklist below is done.
 
-**Compare PIs (ops and BSD):** add up to three PI PDFs, or open it from a request to load that request's PIs.
+**Compare PIs (ops only):** add up to three PI PDFs, or open it from a request to load that request's PIs.
 The text is read in the browser with pdf.js (nothing is sent anywhere), key fields are matched by label rules in
 `web/src/lib/piExtract.ts`, ops check and correct every value side by side, then export an Excel comparison with
 ExcelJS (a Comparison sheet plus a Sources sheet showing where each value came from and what was changed by hand).

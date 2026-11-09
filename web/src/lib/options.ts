@@ -9,13 +9,34 @@ export const PREMIUM_TYPES = ['Annual', 'Monthly']
 
 export const BOARD_STATUSES = ['submitted', 'assigned', 'in_progress', 'sent_back', 'completed'] as const
 
+/** Introducers see three simple stages: everything that is not sent back or completed counts as In progress. */
+export type IntroGroup = 'in_progress' | 'sent_back' | 'completed'
+export const INTRO_GROUPS: IntroGroup[] = ['in_progress', 'sent_back', 'completed']
+export function introGroup(status: string): IntroGroup | null {
+  if (status === 'sent_back') return 'sent_back'
+  if (status === 'completed') return 'completed'
+  if (status === 'removed') return null
+  return 'in_progress'
+}
+
+/** Column colour chips, like a kanban board. */
+export const COLUMN_COLOR: Record<string, string> = {
+  submitted: '#6E7191', assigned: '#3B82C4', in_progress: '#E08A3C', sent_back: '#D64550', completed: '#3BA668',
+}
+
 export const STATUS_LABEL: Record<string, string> = {
-  submitted: 'Submitted',
+  submitted: 'Unassigned',
   assigned: 'Assigned',
   in_progress: 'In progress',
   sent_back: 'Sent back',
   completed: 'Completed',
   removed: 'Removed',
+}
+
+/** What a status is called for the person looking at it. */
+export function statusLabel(status: string, isIntroducer: boolean) {
+  if (isIntroducer) { const g = introGroup(status); return g ? STATUS_LABEL[g] : STATUS_LABEL[status] }
+  return STATUS_LABEL[status]
 }
 
 export const ROLE_LABEL: Record<string, string> = {

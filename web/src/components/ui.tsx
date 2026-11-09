@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
-import { STATUS_LABEL } from '../lib/options'
+import { introGroup, statusLabel } from '../lib/options'
+import { useAuth } from '../lib/auth'
 import type { RequestStatus } from '../lib/types'
 
 export function Seg<T extends string | boolean>({ label, value, options, onChange }: {
@@ -38,7 +39,10 @@ const TONE: Record<RequestStatus, string> = {
 }
 
 export function StatusPill({ status }: { status: RequestStatus }) {
-  return <span className={`pill ${TONE[status]}`}>{STATUS_LABEL[status]}</span>
+  const { has } = useAuth()
+  const intro = has('introducer')
+  const shown = (intro ? introGroup(status) ?? status : status) as RequestStatus
+  return <span className={`pill ${TONE[shown]}`}>{statusLabel(status, intro)}</span>
 }
 
 export function Fact({ label, children }: { label: string; children: ReactNode }) {

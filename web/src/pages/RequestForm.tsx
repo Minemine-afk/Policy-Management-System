@@ -4,8 +4,10 @@ import { supabase } from '../lib/supabase'
 import {
   AGE_BANDS, COVERAGE_TERMS, GENDERS, PLAN_CATEGORIES, PREMIUM_TYPES, PRODUCTS, SUM_ASSURED_BANDS,
 } from '../lib/options'
-import type { PiRequest } from '../lib/types'
+import type { PiRequest, RequestDocument } from '../lib/types'
 import { Seg, Select } from '../components/ui'
+import Files from '../components/Files'
+import { useAuth } from '../lib/auth'
 
 interface FormState {
   plan_category: string; product: string; age_band: string; gender: string; smoker: boolean
@@ -19,10 +21,18 @@ const DEFAULTS: FormState = {
 export default function RequestForm() {
   const { id } = useParams()
   const nav = useNavigate()
+  const { profile } = useAuth()
+  const [docs, setDocs] = useState<RequestDocument[]>([])
+  const loadDocs = async () => {
+    if (!id) return
+    const { data } = await supabase.from('request_documents').select('*').eq('request_id', id).order('uploaded_at')
+    setDocs((data as RequestDocument[]) ?? [])
+  }
   const [ref, setRef] = useState('')
   const [f, setF] = useState<FormState>(DEFAULTS)
   const [client, setClient] = useState({ client_name: '', nric: '', contact: '' })
   const [error, setError] = useState('')
+  const [ready, setReady] = useState(!id)
   const [saving, setSaving] = useState(false)
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }))
 
@@ -35,8 +45,10 @@ export default function RequestForm() {
       if (!['submitted', 'sent_back'].includes(r.status)) { nav(`/requests/${r.id}`, { replace: true }); return }
       setRef(r.ref)
       setF({ ...r, remarks: r.remarks ?? '' })
+      loadDocs()
       const c = await supabase.from('request_clients').select('*').eq('request_id', id).maybeSingle()
       if (c.data) setClient({ client_name: c.data.client_name, nric: c.data.nric ?? '', contact: c.data.contact ?? '' })
+      setReady(true)
     })()
   }, [id, nav])
 
@@ -51,6 +63,7 @@ export default function RequestForm() {
   }
 
   const yesNo = [{ value: false, label: 'No' }, { value: true, label: 'Yes' }]
+  if (!ready) return <div className="empty">Loading…</div>
   return (
     <main className="page">
       <div>
@@ -108,6 +121,11 @@ export default function RequestForm() {
             placeholder="Anything ops should know. Do not put the client's name here: ops can see this box." />
         </label>
       </section>
+
+      {id && profile && (
+        <Files title="Attachments" hint="Add or remove files before you save." requestId={id} kind="attachment" docs={docs}
+          canUpload userId={profile.id} onChange={loadDocs} />
+      )}
 
       {error && <div className="error" role="alert">{error}</div>}
       <div className="row">

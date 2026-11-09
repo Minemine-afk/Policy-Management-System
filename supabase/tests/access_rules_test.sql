@@ -50,9 +50,10 @@ select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 do $$ begin
   if exists (select 1 from pi_requests where introducer_id <> auth.uid()) then raise exception 'introducer 2 sees introducer 1'; end if;
   if exists (select 1 from request_clients where owner_id <> auth.uid()) then raise exception 'introducer 2 sees others clients'; end if;
-  if exists (select 1 from profiles where role = 'introducer' and id <> auth.uid()) then raise exception 'introducer sees other introducer profiles'; end if;
+  if exists (select 1 from profiles where id <> auth.uid()) then raise exception 'introducer sees other profiles (ops names must stay hidden)'; end if;
   raise notice 'ok: introducers are isolated from each other';
 end $$;
+select pg_temp.expect_error($$select add_comment('20000000-0000-0000-0000-000000000004', 'hello')$$, 'closed while a request is sent back');
 -- Dana resubmits her sent-back request
 select resubmit_request('20000000-0000-0000-0000-000000000004', 'Confirmed: 100k');
 do $$ begin
@@ -80,11 +81,68 @@ select pg_temp.expect_error($$select change_status((select id from pi_requests w
 select pg_temp.expect_error($$select remove_request((select id from pi_requests where ref = 'PI-00002'), 'x')$$, 'Only bsd');
 select pg_temp.expect_error($$select change_status('20000000-0000-0000-0000-000000000004', 'completed')$$, 'assigned ops user or bsd');
 
+-- 4b. Ops move their own work freely between Unassigned, Assigned and In progress
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select claim_request((select id from pi_requests where ref = 'PI-00007'), true);
+do $$ begin
+  if (select status from pi_requests where ref = 'PI-00007') <> 'in_progress' then raise exception 'claim with start should go to in_progress'; end if;
+end $$;
+select change_status((select id from pi_requests where ref = 'PI-00007'), 'assigned');
+select change_status((select id from pi_requests where ref = 'PI-00007'), 'in_progress');
+select change_status((select id from pi_requests where ref = 'PI-00007'), 'submitted');
+do $$ begin
+  if (select assignee_id from pi_requests where ref = 'PI-00007') is not null then raise exception 'release should clear the assignee'; end if;
+  raise notice 'ok: ops moved a request between unassigned, assigned and in progress';
+end $$;
+select claim_request((select id from pi_requests where ref = 'PI-00007'));
+select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00007'), 'completed')$$, 'cannot move');
+select change_status((select id from pi_requests where ref = 'PI-00007'), 'submitted');
+
 -- 5. Introducer 1 now sees the finished PI
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 do $$ begin
   if (select count(*) from request_documents where kind = 'pi_output') <> 3 then raise exception 'introducer should see 3 PIs on completed requests, saw %', (select count(*) from request_documents where kind = 'pi_output'); end if;
   raise notice 'ok: PIs reach the introducer once completed';
+end $$;
+
+-- 5b. Notifications
+do $$ begin
+  if (select count(*) from notifications where kind = 'completed') <> 1 then raise exception 'Sam should be told PI-00001 completed'; end if;
+  if exists (select 1 from notifications where user_id <> auth.uid()) then raise exception 'introducer sees others notifications'; end if;
+  if exists (select 1 from request_events where kind in ('assigned','reassigned','started','status_changed','released')) then raise exception 'introducer sees assignment events'; end if;
+  raise notice 'ok: introducer got a completed notice and sees no assignment events';
+end $$;
+select mark_notifications_read();
+do $$ begin
+  if exists (select 1 from notifications where read_at is null) then raise exception 'mark read failed'; end if;
+  raise notice 'ok: notifications can be marked read';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+do $$ begin
+  if (select count(*) from notifications) <> 0 then raise exception 'Dana should have no notices'; end if;
+end $$;
+select refresh_deadline_notifications();
+do $$ begin
+  if (select count(*) from notifications) <> 0 then raise exception 'introducers must not generate or receive deadline notices'; end if;
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select refresh_deadline_notifications();
+select refresh_deadline_notifications();
+do $$ begin
+  if (select count(*) from notifications where kind = 'overdue') <> 2 then raise exception 'Olivia should have 2 overdue notices (PI-00002, PI-00003), saw %', (select count(*) from notifications where kind = 'overdue'); end if;
+  if (select count(*) from notifications where kind in ('due_soon','overdue')) <> 2 then raise exception 'deadline notices should not repeat'; end if;
+  raise notice 'ok: ops get one deadline notice per assigned request';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
+do $$ begin
+  if (select count(*) from notifications where kind = 'resubmitted') <> 1 then raise exception 'Omar should be told PI-00004 was corrected'; end if;
+  if (select count(*) from notifications where kind = 'overdue') <> 1 then raise exception 'Omar should have 1 overdue notice'; end if;
+  raise notice 'ok: ops told when a sent-back request is corrected';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+do $$ begin
+  if (select count(*) from notifications where kind = 'overdue') <> 3 then raise exception 'bsd should have 3 overdue notices, saw %', (select count(*) from notifications where kind = 'overdue'); end if;
+  raise notice 'ok: bsd gets deadline notices for every open request';
 end $$;
 
 -- 6. Bsd sees all, assigns, removes; cannot read client details
@@ -95,6 +153,12 @@ do $$ begin
   raise notice 'ok: bsd sees every request but not client details';
 end $$;
 select assign_request((select id from pi_requests where ref = 'PI-00002'), '00000000-0000-0000-0000-000000000004');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000004');
+do $$ begin
+  if (select count(*) from notifications where kind = 'assigned') <> 1 then raise exception 'Omar should be told about the assignment'; end if;
+  raise notice 'ok: ops notified when bsd assigns a request';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
 select pg_temp.expect_error($$select assign_request((select id from pi_requests where ref = 'PI-00002'), '00000000-0000-0000-0000-000000000001')$$, 'ops user');
 select pg_temp.expect_error($$select assign_request((select id from pi_requests where ref = 'PI-00001'), '00000000-0000-0000-0000-000000000004')$$, 'cannot be reassigned');
 select pg_temp.expect_error($$select remove_request((select id from pi_requests where ref = 'PI-00002'), '')$$, 'reason is required');

@@ -19,7 +19,6 @@ export default function RequestView() {
   const [docs, setDocs] = useState<RequestDocument[]>([])
   const [body, setBody] = useState('')
   const [internal, setInternal] = useState(false)
-  const [note, setNote] = useState('')
   const [assignTo, setAssignTo] = useState('')
   const [dialog, setDialog] = useState<'send_back' | 'remove' | null>(null)
   const [error, setError] = useState('')
@@ -52,6 +51,8 @@ export default function RequestView() {
   if (r === undefined) return <div className="empty">Loading…</div>
   if (r === null || !profile) return <main className="page"><div className="card">Request not found, or you do not have access.</div></main>
 
+  const intro = has('introducer')
+  const who = (id: string | null) => (intro ? (id === profile.id ? 'You' : 'Ops team') : nameOf(people, id))
   const mineAssigned = has('ops') && r.assignee_id === profile.id
   const staffActs = (mineAssigned || has('bsd')) && r.status !== 'removed'
   const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active)
@@ -69,7 +70,7 @@ export default function RequestView() {
           <h1>{r.ref} <StatusPill status={r.status} />{!has('introducer') && dueInfo(r) && <span className={`due ${dueInfo(r)!.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{dueInfo(r)!.label}</span>}</h1>
         </div>
         <div className="row">
-          {has('introducer') && r.introducer_id === profile.id && ['submitted', 'sent_back'].includes(r.status) &&
+          {has('introducer') && r.introducer_id === profile.id && r.status === 'submitted' &&
             <Link className="btn" to={`/requests/${r.id}/edit`}>Edit request</Link>}
           {has('ops') && r.status === 'submitted' && !r.assignee_id &&
             <button className="btn primary" onClick={() => call('claim_request', { p_request: r.id })}>Assign to me</button>}
@@ -90,9 +91,12 @@ export default function RequestView() {
 
       {has('introducer') && r.status === 'sent_back' && r.introducer_id === profile.id && (
         <section className="card">
-          <h2 className="eyebrow">Reply and resubmit</h2>
-          <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Answer ops' question, or describe what you changed" aria-label="Reply note" />
-          <div><button className="btn primary" onClick={async () => { if (await call('resubmit_request', { p_request: r.id, p_note: note })) setNote('') }}>Resubmit</button></div>
+          <h2 className="eyebrow">Fix and resubmit</h2>
+          <p className="small muted" style={{ margin: 0 }}>Edit any detail of the request, including the client details and attachments, then resubmit it.</p>
+          <div className="row">
+            <Link className="btn" to={`/requests/${r.id}/edit`}>Edit request</Link>
+            <button className="btn primary" onClick={() => call('resubmit_request', { p_request: r.id })}>Resubmit</button>
+          </div>
         </section>
       )}
 
@@ -107,8 +111,8 @@ export default function RequestView() {
               <Fact label="Coverage term">{r.coverage_term}</Fact>
               <Fact label="Sum assured">{r.sum_assured_band}</Fact>
               <Fact label="Premium · CI benefit">{r.premium_type} · {r.ci_benefit ? 'Yes' : 'No'}</Fact>
-              <Fact label="Introducer">{nameOf(people, r.introducer_id)}{people[r.introducer_id]?.company ? ` · ${people[r.introducer_id].company}` : ''}</Fact>
-              <Fact label="Handled by">{nameOf(people, r.assignee_id)}</Fact>
+              {!intro && <Fact label="Introducer">{nameOf(people, r.introducer_id)}{people[r.introducer_id]?.company ? ` · ${people[r.introducer_id].company}` : ''}</Fact>}
+              {!intro && <Fact label="Handled by">{nameOf(people, r.assignee_id)}</Fact>}
               <Fact label="Submitted">{fmtDate(r.submitted_at)}</Fact>
             </dl>
             {r.remarks && <p style={{ margin: 0 }}><span className="muted small">Remarks</span><br />{r.remarks}</p>}
@@ -127,7 +131,7 @@ export default function RequestView() {
 
           <Files title="Attachments" hint="Files the introducer adds to the request." requestId={r.id} kind="attachment" docs={docs}
             canUpload={canUploadAttachment} userId={profile.id} onChange={load} />
-          {!has('introducer') && piCount >= 2 && (
+          {has('ops') && piCount >= 2 && (
             <div><Link className="btn" to={`/compare?request=${r.id}`}>Compare these PIs</Link></div>
           )}
           {introducerSeesPi && (
@@ -135,12 +139,13 @@ export default function RequestView() {
               requestId={r.id} kind="pi_output" docs={docs} canUpload={canUploadPi} userId={profile.id} onChange={load} />
           )}
 
+          {r.status !== 'sent_back' && (
           <section className="card" aria-label="Comments">
             <h2 className="eyebrow">Comments</h2>
             <ul className="comments">
               {comments.map((c) => (
                 <li key={c.id} className={c.internal ? 'internal' : ''}>
-                  <div className="small muted">{nameOf(people, c.author_id)} · {fmtDateTime(c.created_at)}{c.internal && ' · internal note'}</div>
+                  <div className="small muted">{who(c.author_id)} · {fmtDateTime(c.created_at)}{c.internal && ' · internal note'}</div>
                   <div>{c.body}</div>
                 </li>
               ))}
@@ -159,6 +164,7 @@ export default function RequestView() {
               </form>
             )}
           </section>
+          )}
         </div>
 
         <aside className="side" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -180,7 +186,7 @@ export default function RequestView() {
               {events.map((e) => (
                 <li key={e.id}>
                   <strong>{EVENT_LABEL[e.kind] ?? e.kind}</strong>{e.detail && <span> · {e.detail}</span>}
-                  <div className="small muted">{nameOf(people, e.actor_id)} · {fmtDateTime(e.at)}</div>
+                  <div className="small muted">{who(e.actor_id)} · {fmtDateTime(e.at)}</div>
                 </li>
               ))}
             </ol>

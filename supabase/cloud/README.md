@@ -14,7 +14,8 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
 ## 2. Create the tables and access rules
 1. Left menu: **SQL Editor** → **New query**.
 2. Paste the whole of `1-setup.sql` and click **Run**. You should see "Success. No rows returned".
-3. Run it once only. If it fails part-way nothing is saved (it runs as one transaction); send me the error.
+3. **Already ran an earlier `1-setup.sql`?** Don't run it again. Run `1b-upgrade.sql` instead (adds notifications, the new workflow rules and tighter privacy; safe on the earlier setup).
+4. Run it once only. If it fails part-way nothing is saved (it runs as one transaction); send me the error.
 
 ## 3. Lock down sign-up
 1. **Authentication** → **Sign In / Providers**: keep Email enabled, turn **off** "Allow new users to sign up".

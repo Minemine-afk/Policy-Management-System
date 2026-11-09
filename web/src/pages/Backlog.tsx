@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useRequests } from '../lib/requests'
 import { nameOf, usePeople } from '../lib/people'
-import { STATUS_LABEL, daysSince, dueInfo, fmtDate, summary } from '../lib/options'
+import { STATUS_LABEL, daysSince, dueInfo, fmtDate, introGroup, summary } from '../lib/options'
 import { StatusPill } from '../components/ui'
 
 export default function Backlog() {
@@ -19,7 +19,8 @@ export default function Backlog() {
   const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active)
 
   const list = useMemo(() => rows
-    .filter((r) => status === 'open' ? !['completed', 'removed'].includes(r.status) : status === 'all' || r.status === status)
+    .filter((r) => status === 'open' ? !['completed', 'removed'].includes(r.status)
+      : status === 'all' ? true : has('introducer') ? introGroup(r.status) === status : r.status === status)
     .filter((r) => !assignee || (assignee === 'none' ? !r.assignee_id : r.assignee_id === assignee))
     .filter((r) => !q || (r.ref + ' ' + summary(r) + ' ' + (people[r.introducer_id]?.full_name ?? '')).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => (a.assignee_id ? 1 : 0) - (b.assignee_id ? 1 : 0) || a.submitted_at.localeCompare(b.submitted_at)),
@@ -52,7 +53,7 @@ export default function Backlog() {
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="open">Open (not completed)</option>
               <option value="all">All</option>
-              {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {(has('introducer') ? ['in_progress', 'sent_back', 'completed'] : Object.keys(STATUS_LABEL)).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
             </select>
           </label>
           {staff && (
@@ -72,7 +73,7 @@ export default function Backlog() {
         <div className="tablewrap">
           <table>
             <thead><tr>
-              <th>Ref</th><th>Status</th><th>Profile</th>{staff && <th>Introducer</th>}<th>Handled by</th><th className="num">Age</th>{staff && <th>Due</th>}<th>Submitted</th>
+              <th>Ref</th><th>Status</th><th>Profile</th>{staff && <th>Introducer</th>}{staff && <th>Handled by</th>}<th className="num">Age</th>{staff && <th>Due</th>}<th>Submitted</th>
             </tr></thead>
             <tbody>
               {list.map((r) => {
@@ -83,7 +84,7 @@ export default function Backlog() {
                   <td><StatusPill status={r.status} /></td>
                   <td>{summary(r)}</td>
                   {staff && <td>{nameOf(people, r.introducer_id)}<div className="small muted">{people[r.introducer_id]?.company}</div></td>}
-                  <td>
+                  {staff && <td>
                     {has('bsd') && !['completed', 'removed'].includes(r.status) ? (
                       <select aria-label={`Assign ${r.ref}`} value={r.assignee_id ?? ''} onChange={(e) => e.target.value && assign(r.id, e.target.value)}
                         style={{ height: 34, minWidth: 140 }}>
@@ -93,7 +94,7 @@ export default function Backlog() {
                     ) : has('ops') && r.status === 'submitted' && !r.assignee_id ? (
                       <button className="btn small primary" onClick={() => claim(r.id)}>Assign to me</button>
                     ) : nameOf(people, r.assignee_id)}
-                  </td>
+                  </td>}
                   <td className="num">{daysSince(r.submitted_at)}d</td>
                   {staff && <td>{due && <span className={`due ${due.level}`}>{due.label}</span>}</td>}
                   <td>{fmtDate(r.submitted_at)}</td>

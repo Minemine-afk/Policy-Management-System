@@ -60,12 +60,12 @@ join (values
 insert into public.request_events (request_id, actor_id, kind, from_status, to_status, detail, introducer_visible, at)
 select id, introducer_id, 'submitted', null, 'submitted', null, true, submitted_at from public.pi_requests;
 insert into public.request_events (request_id, actor_id, kind, from_status, to_status, detail, introducer_visible, at) values
- ('20000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 'assigned', 'submitted', 'assigned', 'Picked up', true, now() - interval '2 days'),
- ('20000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000005', 'assigned', 'submitted', 'assigned', 'To Olivia Ops', true, now() - interval '4 days'),
- ('20000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000003', 'started', 'assigned', 'in_progress', null, true, now() - interval '3 days'),
- ('20000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000004', 'assigned', 'submitted', 'assigned', 'Picked up', true, now() - interval '5 days'),
+ ('20000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 'assigned', 'submitted', 'assigned', 'Picked up', false, now() - interval '2 days'),
+ ('20000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000005', 'assigned', 'submitted', 'assigned', 'To Olivia Ops', false, now() - interval '4 days'),
+ ('20000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000003', 'started', 'assigned', 'in_progress', null, false, now() - interval '3 days'),
+ ('20000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000004', 'assigned', 'submitted', 'assigned', 'Picked up', false, now() - interval '5 days'),
  ('20000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000004', 'sent_back', 'assigned', 'sent_back', 'Please confirm the intended sum assured', true, now() - interval '4 days'),
- ('20000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000004', 'assigned', 'submitted', 'assigned', 'Picked up', true, now() - interval '11 days'),
+ ('20000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000004', 'assigned', 'submitted', 'assigned', 'Picked up', false, now() - interval '11 days'),
  ('20000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000004', 'completed', 'in_progress', 'completed', null, true, now() - interval '8 days'),
  ('20000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000005', 'removed', 'submitted', 'removed', 'Duplicate of an earlier request', true, now() - interval '8 days');
 
