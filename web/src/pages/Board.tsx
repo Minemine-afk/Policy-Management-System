@@ -53,9 +53,11 @@ export default function Board() {
       <div className="row between">
         <h1>Board</h1>
         <div className="row">
-          <label className="row small" style={{ gap: 6 }}>
-            <input type="checkbox" checked={urgentOnly} onChange={(e) => setUrgentOnly(e.target.checked)} /> Only urgent
-          </label>
+          {staff && (
+            <label className="row small" style={{ gap: 6 }}>
+              <input type="checkbox" checked={urgentOnly} onChange={(e) => setUrgentOnly(e.target.checked)} /> Only urgent
+            </label>
+          )}
           {staff && (
             <label className="row small" style={{ gap: 6 }}>
               <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> Only assigned to me
@@ -67,7 +69,7 @@ export default function Board() {
       {staff && visible.some((r) => due(r)?.overdue) && (
         <div className="notice bad"><strong>{visible.filter((r) => due(r)?.overdue).length} overdue</strong>
           <span>Requests are due {fmtHours(settings.deadline_hours)} after submission and turn red once overdue.
-            Orange means {fmtHours(settings.due_soon_hours)} or less is left. Urgent requests are listed first.</span></div>
+            Orange means {fmtHours(settings.due_soon_hours)} or less is left. Overdue requests are marked urgent automatically and urgent requests are listed first.</span></div>
       )}
       {msg && <div className="notice warn" role="alert"><strong>{msg}</strong></div>}
       {staff && <p className="small muted" style={{ margin: 0 }}>Drag a card by its grip (⋮⋮) to another column to change its status.</p>}
@@ -92,11 +94,12 @@ export default function Board() {
               <div className="colbody">
                 {cards.map((r) => {
                   const d = staff ? due(r) : null
+                  const urgent = staff && r.priority === 'urgent'
                   return (
-                    <Link key={r.id} to={`/requests/${r.id}`} className={`cardlet${d && (d.level === 'soon' || d.level === 'late') ? ' ' + d.level : ''}${staff ? ' draggable' : ''}${r.priority === 'urgent' ? ' urgent' : ''}`} data-ref={r.ref}
+                    <Link key={r.id} to={`/requests/${r.id}`} className={`cardlet${d && (d.level === 'soon' || d.level === 'late') ? ' ' + d.level : ''}${staff ? ' draggable' : ''}${urgent ? ' urgent' : ''}`} data-ref={r.ref}
                       draggable={staff} onDragStart={(e) => e.dataTransfer.setData('text/plain', r.id)}>
                       {staff && <span className="grip" aria-hidden="true" title="Drag to move">⋮⋮</span>}
-                      <div className="row between"><strong>{r.ref} {r.priority === 'urgent' && <UrgentPill />}</strong><span className="small muted" style={{ marginRight: staff ? 22 : 0 }}>{daysSince(r.submitted_at)}d</span></div>
+                      <div className="row between"><strong>{r.ref} {urgent && <UrgentPill auto={r.urgent_auto} />}</strong><span className="small muted" style={{ marginRight: staff ? 22 : 0 }}>{daysSince(r.submitted_at)}d</span></div>
                       <div className="small">{summary(r)}</div>
                       {staff && <div className="small muted">{nameOf(people, r.introducer_id)} · {people[r.introducer_id]?.company}</div>}
                       {staff && <div className="small muted">{r.assignee_id ? `Handled by ${nameOf(people, r.assignee_id)}` : 'Unassigned'}</div>}

@@ -30,8 +30,10 @@ export interface PiRequest {
   ci_benefit: boolean
   remarks: string | null
   status_reason: string | null
-  priority: 'normal' | 'urgent'
-  due_at: string
+  // Ops and bsd only: the database returns null for introducers (they never see priority or deadlines).
+  priority: 'normal' | 'urgent' | null
+  urgent_auto: boolean | null   // true = urgent because it is overdue (set automatically)
+  due_at: string | null
   paused_at: string | null
   submitted_at: string
   completed_at: string | null

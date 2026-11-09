@@ -52,7 +52,7 @@ export default function Backlog() {
     .filter((r) => f.status === 'open' ? OPEN(r)
       : f.status === 'all' ? true : intro ? introGroup(r.status) === f.status : r.status === f.status)
     .filter((r) => !f.assignee || (f.assignee === 'none' ? !r.assignee_id : r.assignee_id === f.assignee))
-    .filter((r) => !f.priority || r.priority === f.priority)
+    .filter((r) => !staff || !f.priority || r.priority === f.priority)
     .filter((r) => {
       if (!f.due) return true
       const d = due(r)
@@ -64,7 +64,7 @@ export default function Backlog() {
       .join(' ').toLowerCase().includes(f.q.toLowerCase()))
     .sort((a, b) => (a.priority === 'urgent' ? 0 : 1) - (b.priority === 'urgent' ? 0 : 1)
       || (a.assignee_id ? 1 : 0) - (b.assignee_id ? 1 : 0) || byPriorityThenDue(a, b)),
-  [rows, f, people, clients, intro, due])
+  [rows, f, people, clients, intro, staff, due])
 
   // Workload for bsd: open requests per ops user
   const workload = useMemo(() => {
@@ -129,7 +129,7 @@ export default function Backlog() {
     const body = list.map((r) => [r.ref, STATUS_LABEL[r.status], r.priority === 'urgent' ? 'Urgent' : 'Normal', r.product, r.plan_category,
       r.age_band, r.gender, r.smoker ? 'Yes' : 'No', r.coverage_term, r.sum_assured_band, r.premium_type, r.ci_benefit ? 'Yes' : 'No',
       nameOf(people, r.introducer_id), people[r.introducer_id]?.company ?? '', r.assignee_id ? nameOf(people, r.assignee_id) : '',
-      r.submitted_at, r.due_at, r.completed_at ?? '', due(r)?.label ?? ''])
+      r.submitted_at, r.due_at ?? '', r.completed_at ?? '', due(r)?.label ?? ''])
     downloadCsv(`pi-requests-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...body])
   }
 
@@ -192,13 +192,15 @@ export default function Backlog() {
               </select>
             </label>
           )}
-          <label className="field" style={{ maxWidth: 150 }}>Priority
-            <select value={f.priority} onChange={(e) => set({ priority: e.target.value })}>
-              <option value="">Any</option>
-              <option value="urgent">Urgent</option>
-              <option value="normal">Normal</option>
-            </select>
-          </label>
+          {staff && (
+            <label className="field" style={{ maxWidth: 150 }}>Priority
+              <select value={f.priority} onChange={(e) => set({ priority: e.target.value })}>
+                <option value="">Any</option>
+                <option value="urgent">Urgent</option>
+                <option value="normal">Normal</option>
+              </select>
+            </label>
+          )}
           {staff && (
             <label className="field" style={{ maxWidth: 170 }}>Deadline
               <select value={f.due} onChange={(e) => set({ due: e.target.value })}>
@@ -266,7 +268,7 @@ export default function Backlog() {
                 return (
                 <tr key={r.id} className={d && (d.level === 'soon' || d.level === 'late') ? 'row-' + d.level : ''}>
                   {bsd && <td>{OPEN(r) && <input type="checkbox" aria-label={`Select ${r.ref}`} checked={picked.has(r.id)} onChange={() => toggle(r.id)} />}</td>}
-                  <td><Link to={`/requests/${r.id}`}><strong>{r.ref}</strong></Link> {r.priority === 'urgent' && <UrgentPill />}</td>
+                  <td><Link to={`/requests/${r.id}`}><strong>{r.ref}</strong></Link> {staff && r.priority === 'urgent' && <UrgentPill auto={r.urgent_auto} />}</td>
                   <td><StatusPill status={r.status} /></td>
                   {intro && <td>{clients[r.id] ?? ''}</td>}
                   <td>{summary(r)}</td>

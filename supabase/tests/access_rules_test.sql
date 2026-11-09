@@ -179,33 +179,85 @@ do $$ begin
   if (select count(*) from pi_requests) <> 0 then raise exception 'deactivated user still sees requests'; end if;
   raise notice 'ok: deactivated user sees nothing';
 end $$;
--- 8. Priority (urgent flag)
+-- 8. Priority (urgent flag): ops and bsd only. Introducers can neither see nor set it, nor see due times.
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
-select set_priority((select id from pi_requests where ref = 'PI-00007'), 'urgent');
-select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'high')$$, 'normal or urgent');
+select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'urgent')$$, 'Only the assigned ops user or bsd');
 select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","priority":"urgent"}',
                       '{"client_name":"[Sample] Client Hotel"}');
+select pg_temp.expect_error($$select priority from pi_requests$$, 'permission denied');
+select pg_temp.expect_error($$select urgent_auto from pi_requests$$, 'permission denied');
+select pg_temp.expect_error($$select due_at from pi_requests$$, 'permission denied');
+select pg_temp.expect_error($$select paused_at from pi_requests$$, 'permission denied');
+select pg_temp.expect_error($$select * from pi_requests$$, 'permission denied');
+select pg_temp.expect_error($$update request_list set status = 'completed'$$, 'cannot update view');
 do $$ begin
-  if (select priority from pi_requests where ref = 'PI-00007') <> 'urgent' then raise exception 'introducer could not flag own request urgent'; end if;
-  if (select priority from pi_requests where ref = 'PI-00008') <> 'urgent' then raise exception 'urgent on create not saved'; end if;
-  if (select due_at from pi_requests where ref = 'PI-00008') < now() + interval '47 hours' then raise exception 'new request should be due in 48h'; end if;
-  raise notice 'ok: introducer flags requests urgent; new requests get a due time';
+  if (select count(*) from request_list) <> 5 then raise exception 'introducer 1 should list 5 requests, saw %', (select count(*) from request_list); end if;
+  if exists (select 1 from request_list where introducer_id <> auth.uid()) then raise exception 'request_list shows other introducers'' requests'; end if;
+  if exists (select 1 from request_list where priority is not null or urgent_auto is not null or due_at is not null or paused_at is not null) then
+    raise exception 'introducer sees priority or deadline fields'; end if;
+  if exists (select 1 from request_events where kind = 'priority_changed' or detail ilike '%urgent%') then raise exception 'introducer sees urgent changes on the timeline'; end if;
+  if exists (select 1 from notifications where kind = 'urgent' or message ilike '%urgent%') then raise exception 'introducer got an urgent notice'; end if;
+  raise notice 'ok: introducers cannot see or set the urgent flag or due times';
 end $$;
+reset role;
+do $$ begin
+  if (select priority from pi_requests where ref = 'PI-00008') <> 'normal' then raise exception 'a priority sent by an introducer should be ignored'; end if;
+  if (select due_at from pi_requests where ref = 'PI-00008') < now() + interval '47 hours' then raise exception 'new request should be due in 48h'; end if;
+end $$;
+set role authenticated;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
 select pg_temp.expect_error($$select set_priority('20000000-0000-0000-0000-000000000001', 'urgent')$$, 'not found');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
-select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'normal')$$, 'Only the introducer');
+select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'urgent')$$, 'Only the assigned ops user or bsd');
 select pg_temp.expect_error($$select generate_deadline_notifications()$$, 'permission denied');
-select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
-select set_priority('20000000-0000-0000-0000-000000000003', 'urgent');
+select pg_temp.expect_error($$select mark_overdue_urgent()$$, 'permission denied');
+select pg_temp.expect_error($$update request_list set status = 'completed'$$, 'cannot update view');
 do $$ begin
-  if (select count(*) from notifications where kind = 'urgent') <> 1 then raise exception 'bsd should be told about the urgent new request'; end if;
+  if (select priority from request_list where ref = 'PI-00003') <> 'urgent' or not (select urgent_auto from request_list where ref = 'PI-00003') then
+    raise exception 'overdue PI-00003 should be urgent automatically for ops'; end if;
+  if (select due_at from request_list where ref = 'PI-00003') is null then raise exception 'ops should see the due time'; end if;
+  if (select priority from request_list where ref = 'PI-00007') <> 'normal' then raise exception 'PI-00007 is not overdue and should be normal'; end if;
+  raise notice 'ok: ops see overdue requests as urgent automatically';
+end $$;
+select pg_temp.expect_error($$select set_priority('20000000-0000-0000-0000-000000000003', 'normal')$$, 'Overdue requests stay urgent');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+do $$ begin
+  if (select priority from request_list where ref = 'PI-00004') <> 'urgent' then raise exception 'PI-00004 was overdue before it was sent back and should stay urgent'; end if;
+end $$;
+select pg_temp.expect_error($$select set_priority('20000000-0000-0000-0000-000000000003', 'normal')$$, 'Overdue requests stay urgent');
+select assign_request((select id from pi_requests where ref = 'PI-00008'), '00000000-0000-0000-0000-000000000003');
+select set_priority((select id from pi_requests where ref = 'PI-00008'), 'urgent');
+select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00008'), 'high')$$, 'normal or urgent');
+do $$ begin
+  if (select priority from request_list where ref = 'PI-00008') <> 'urgent' or (select urgent_auto from request_list where ref = 'PI-00008') then
+    raise exception 'bsd could not flag PI-00008 urgent by hand'; end if;
+  if not exists (select 1 from request_events e join pi_requests r on r.id = e.request_id
+                 where r.ref = 'PI-00008' and e.kind = 'priority_changed' and not e.introducer_visible) then
+    raise exception 'priority change should be on the staff timeline only'; end if;
 end $$;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if (select count(*) from notifications where kind = 'urgent') <> 1 then raise exception 'Olivia should be told PI-00003 is urgent'; end if;
-  raise notice 'ok: bsd and the assignee are told about urgent requests';
+  if (select count(*) from notifications where kind = 'urgent') <> 1 then raise exception 'Olivia should be told PI-00008 is urgent'; end if;
+  raise notice 'ok: bsd and the assigned ops user flag requests urgent; the assignee is told';
 end $$;
+
+-- 8b. Requests that become overdue as time passes are marked urgent by the deadline check
+reset role;
+alter table pi_requests disable trigger pi_requests_overdue_urgent;
+update pi_requests set due_at = now() - interval '1 hour' where ref = 'PI-00007';
+alter table pi_requests enable trigger pi_requests_overdue_urgent;
+select generate_deadline_notifications();
+do $$ begin
+  if (select priority from pi_requests where ref = 'PI-00007') <> 'urgent' or not (select urgent_auto from pi_requests where ref = 'PI-00007') then
+    raise exception 'the deadline check should mark overdue PI-00007 urgent'; end if;
+  if not exists (select 1 from request_events e join pi_requests r on r.id = e.request_id where r.ref = 'PI-00007'
+                 and e.detail = 'Marked urgent automatically: overdue' and not e.introducer_visible) then
+    raise exception 'automatic urgent flag should be on the staff timeline'; end if;
+  if exists (select 1 from notifications n join profiles p on p.id = n.user_id
+             where n.kind = 'overdue' and n.message not like 'URGENT %') then raise exception 'overdue notices should say URGENT'; end if;
+  raise notice 'ok: the deadline check marks newly overdue requests urgent';
+end $$;
+set role authenticated;
 
 -- 9. Reopen a completed request
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
@@ -219,10 +271,14 @@ select reopen_request('20000000-0000-0000-0000-000000000001', 'Client wants 30 y
 do $$ begin
   if (select status from pi_requests where ref = 'PI-00001') <> 'in_progress' then raise exception 'reopen should go back to the same ops user, in progress'; end if;
   if (select assignee_id from pi_requests where ref = 'PI-00001') <> '00000000-0000-0000-0000-000000000003' then raise exception 'reopen lost the assignee'; end if;
-  if (select due_at from pi_requests where ref = 'PI-00001') < now() + interval '47 hours' then raise exception 'reopen should restart the deadline'; end if;
   if exists (select 1 from request_documents d where d.request_id = '20000000-0000-0000-0000-000000000001' and d.kind = 'pi_output') then raise exception 'introducer should not see PIs of a reopened request'; end if;
   if not exists (select 1 from request_events where request_id = '20000000-0000-0000-0000-000000000001' and kind = 'reopened') then raise exception 'reopen event hidden from introducer'; end if;
 end $$;
+reset role;
+do $$ begin
+  if (select due_at from pi_requests where ref = 'PI-00001') < now() + interval '47 hours' then raise exception 'reopen should restart the deadline'; end if;
+end $$;
+set role authenticated;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
   if (select count(*) from notifications where kind = 'reopened') <> 1 then raise exception 'Olivia should be told PI-00001 was reopened'; end if;
@@ -247,32 +303,52 @@ select pg_temp.expect_error($$select update_settings(72, 24, true)$$, 'Only bsd'
 select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
 select pg_temp.expect_error($$select update_settings(24, 24, true)$$, 'shorter than the deadline');
 select pg_temp.expect_error($$select update_settings(0, 0, true)$$, 'between 1 and 720');
-create temp table due_before as select ref, due_at from pi_requests;
+create temp table due_before as select ref, due_at from request_list;
 select update_settings(72, 24, true);
 do $$ begin
-  if exists (select 1 from pi_requests r join due_before b using (ref)
+  if exists (select 1 from request_list r join due_before b using (ref)
              where r.status not in ('completed', 'removed') and r.due_at <> b.due_at + interval '24 hours') then
     raise exception 'open requests should move by the change in deadline'; end if;
-  if exists (select 1 from pi_requests r join due_before b using (ref) where r.status in ('completed', 'removed') and r.due_at <> b.due_at) then
+  if exists (select 1 from request_list r join due_before b using (ref) where r.status in ('completed', 'removed') and r.due_at <> b.due_at) then
     raise exception 'closed requests should not move'; end if;
   raise notice 'ok: bsd changes the deadline and open requests follow';
+  if (select priority from request_list where ref = 'PI-00007') <> 'normal' then raise exception 'automatic urgent should clear when the deadline moves later'; end if;
+  if not exists (select 1 from request_events e join pi_requests r on r.id = e.request_id where r.ref = 'PI-00007'
+                 and e.detail = 'Urgent flag removed automatically: no longer overdue') then raise exception 'automatic clear not on the timeline'; end if;
+  if (select priority from request_list where ref = 'PI-00008') <> 'urgent' then raise exception 'a flag set by hand should stay'; end if;
+  if (select priority from request_list where ref = 'PI-00003') <> 'urgent' then raise exception 'PI-00003 is still overdue and should stay urgent'; end if;
+  raise notice 'ok: automatic urgent clears when no longer overdue; flags set by hand stay';
 end $$;
 
 -- 11. The clock pauses while a request is sent back
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 select change_status('20000000-0000-0000-0000-000000000001', 'sent_back', 'Which cover term?');
 do $$ begin
-  if (select paused_at from pi_requests where ref = 'PI-00001') is null then raise exception 'sending back should pause the clock'; end if;
+  if (select paused_at from request_list where ref = 'PI-00001') is null then raise exception 'sending back should pause the clock'; end if;
 end $$;
-reset role; update pi_requests set paused_at = now() - interval '10 hours' where ref = 'PI-00001'; set role authenticated;
-select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+reset role; update pi_requests set paused_at = now() - interval '10 hours' where ref = 'PI-00001';
 create temp table due_paused as select due_at from pi_requests where ref = 'PI-00001';
+grant select on due_paused to authenticated;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 select resubmit_request('20000000-0000-0000-0000-000000000001');
+reset role;
 do $$ begin
   if (select paused_at from pi_requests where ref = 'PI-00001') is not null then raise exception 'resubmit should restart the clock'; end if;
   if (select due_at from pi_requests where ref = 'PI-00001') < (select due_at from due_paused) + interval '10 hours' then raise exception 'paused time should be added to the deadline'; end if;
   raise notice 'ok: sent-back time does not count against the deadline';
 end $$;
+-- Completing (or removing) an overdue request clears the automatic flag
+update pi_requests set status = 'completed', completed_at = now() where ref = 'PI-00003';
+do $$ begin
+  if (select priority from pi_requests where ref = 'PI-00003') <> 'normal' then raise exception 'completing should clear the automatic urgent flag'; end if;
+  raise notice 'ok: completed requests lose the automatic urgent flag';
+end $$;
+update pi_requests set status = 'in_progress', completed_at = null where ref = 'PI-00003';
+do $$ begin
+  if (select priority from pi_requests where ref = 'PI-00003') <> 'urgent' then raise exception 'back in progress and overdue: urgent again'; end if;
+end $$;
+set role authenticated;
 
 -- 12. Bulk assign (bsd)
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
@@ -280,7 +356,7 @@ select pg_temp.expect_error($$select assign_requests(array['20000000-0000-0000-0
 select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
 do $$ declare n int; begin
   n := assign_requests(array(select id from pi_requests where ref in ('PI-00005', 'PI-00007', 'PI-00008', 'PI-00003')), '00000000-0000-0000-0000-000000000003');
-  if n <> 3 then raise exception 'bulk assign should assign 3 (PI-00003 already with Olivia), did %', n; end if;
+  if n <> 2 then raise exception 'bulk assign should assign 2 (PI-00003 and PI-00008 already with Olivia), did %', n; end if;
   if (select count(*) from pi_requests where assignee_id = '00000000-0000-0000-0000-000000000003' and ref in ('PI-00005', 'PI-00007', 'PI-00008')) <> 3 then raise exception 'bulk assign failed'; end if;
   raise notice 'ok: bsd assigns several requests at once';
 end $$;

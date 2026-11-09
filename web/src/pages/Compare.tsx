@@ -47,7 +47,7 @@ export default function Compare() {
     if (!requestId) return
     let cancelled = false
     ;(async () => {
-      const r = await supabase.from('pi_requests').select('*').eq('id', requestId).maybeSingle()
+      const r = await supabase.from('request_list').select('*').eq('id', requestId).maybeSingle()
       setReq((r.data as PiRequest) ?? null)
       const d = await supabase.from('request_documents').select('*').eq('request_id', requestId).eq('kind', 'pi_output').order('uploaded_at')
       const docs = ((d.data as RequestDocument[]) ?? []).filter((x) => x.file_name.toLowerCase().endsWith('.pdf')).slice(0, MAX)

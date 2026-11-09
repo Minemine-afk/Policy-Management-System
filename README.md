@@ -15,8 +15,12 @@ Ops can assign a pooled request to themselves (**Assign to me**). Requests are d
 window (one day by default) and in red once overdue, until they are completed or removed. While a request is sent back,
 its clock is paused (BSD can switch that off) and the time is added back when the introducer resubmits.
 
-**Priority:** introducers can mark a request **Urgent** on the form; the introducer, the assigned ops user or BSD can switch the
-flag on or off later. Urgent cards are listed first, BSD are notified of new urgent requests and the ops user of requests made urgent.
+**Priority (ops and BSD only):** introducers never see the urgent flag, due times or the deadline colours, and cannot set urgent.
+Every overdue request is marked **Urgent** automatically. The assigned ops user or BSD can also mark a request urgent by hand, and
+can remove a flag unless the request is overdue. An automatic flag clears again once the request is no longer late (BSD lengthens the
+deadline, or it is reopened with a fresh deadline) or when it is completed or removed; while a request is sent back with the clock
+paused, the flag stays as it was. A flag set by hand is never cleared automatically. Urgent cards are listed first, and the ops user is
+told when bsd marks their request urgent.
 
 **Reopen:** the introducer (or BSD) can reopen a completed request with a reason when the client wants changes. It goes back
 to the same ops user (In progress) if they are still active, otherwise to the unassigned pool, and the deadline starts again.
@@ -96,6 +100,8 @@ These rules live in `supabase/migrations/` and hold even if someone bypasses the
 - Client name, NRIC and contact are readable only by the introducer who submitted the request. Ops and BSD never see them.
 - An introducer sees only their own requests. Ops see the unassigned pool and their own assignments. BSD sees all.
 - Internal comments and internal events never reach introducers. PIs reach the introducer only once the request is completed.
+- Introducers cannot read the priority, due time or paused clock of a request: the app reads requests through the `request_list`
+  view, which returns those fields only to ops and BSD, and introducers cannot read those columns of `pi_requests` at all.
 - Sending back or removing needs a reason. Completing needs at least one uploaded PI. Only BSD assigns, reassigns and removes.
 - Deactivated users see nothing. Removal keeps the record. Every status change, assignment, removal, document view
   and user change is written to an append-only audit log.
