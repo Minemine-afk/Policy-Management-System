@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import { ROLE_LABEL, fmtDateTime } from '../lib/options'
-import type { AuditRow, Profile, Role } from '../lib/types'
+import { ROLE_LABEL, fmtDateTime, fmtHours } from '../lib/options'
+import { forgetSettings } from '../lib/settings'
+import type { AppSettings, AuditRow, Profile, Role } from '../lib/types'
 
 export default function Admin() {
   const cls = ({ isActive }: { isActive: boolean }) => `btn small ${isActive ? 'primary' : ''}`
@@ -12,11 +13,13 @@ export default function Admin() {
       <h1>Admin</h1>
       <nav className="row" aria-label="Admin sections">
         <NavLink to="/admin/users" className={cls}>Users and roles</NavLink>
+        <NavLink to="/admin/settings" className={cls}>Deadline settings</NavLink>
         <NavLink to="/admin/audit" className={cls}>Audit log</NavLink>
       </nav>
       <Routes>
         <Route path="users" element={<Users />} />
         <Route path="audit" element={<Audit />} />
+        <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="users" replace />} />
       </Routes>
     </main>
@@ -97,6 +100,53 @@ function Audit() {
         </table>
         {!rows.length && <div className="empty">Nothing logged yet.</div>}
       </div>
+    </div>
+  )
+}
+
+function Settings() {
+  const [s, setS] = useState<AppSettings | null>(null)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState('')
+  const load = useCallback(() => supabase.from('app_settings').select('deadline_hours, due_soon_hours, pause_when_sent_back').maybeSingle()
+    .then(({ data }) => setS(data as AppSettings)), [])
+  useEffect(() => { load() }, [load])
+  if (!s) return <div className="empty">Loading…</div>
+
+  async function save() {
+    if (!s) return
+    setError(''); setSaved('')
+    const { error } = await supabase.rpc('update_settings', {
+      p_deadline_hours: s.deadline_hours, p_due_soon_hours: s.due_soon_hours, p_pause: s.pause_when_sent_back,
+    })
+    if (error) setError(error.message)
+    else { setSaved('Saved. Open requests now follow the new deadline.'); forgetSettings(s) }
+    load()
+  }
+  const num = (v: string) => Math.max(0, Math.round(Number(v) || 0))
+  return (
+    <div className="card" style={{ maxWidth: 620 }}>
+      <p className="small muted" style={{ margin: 0 }}>
+        Requests are due a set time after they are submitted. Ops and bsd see them in orange when the "due soon" window starts,
+        and in red once overdue. Changing the deadline moves the due time of every open request by the same amount.
+      </p>
+      <div className="grid">
+        <label className="field">Deadline (hours after submission)
+          <input type="number" min={1} max={720} value={s.deadline_hours} onChange={(e) => setS({ ...s, deadline_hours: num(e.target.value) })} />
+          <span className="small muted">{s.deadline_hours > 0 ? fmtHours(s.deadline_hours) : ''}</span>
+        </label>
+        <label className="field">Warn when this many hours are left
+          <input type="number" min={0} max={719} value={s.due_soon_hours} onChange={(e) => setS({ ...s, due_soon_hours: num(e.target.value) })} />
+          <span className="small muted">{fmtHours(s.due_soon_hours)}</span>
+        </label>
+      </div>
+      <label className="row small" style={{ gap: 6 }}>
+        <input type="checkbox" checked={s.pause_when_sent_back} onChange={(e) => setS({ ...s, pause_when_sent_back: e.target.checked })} />
+        Pause the clock while a request is sent back to the introducer
+      </label>
+      {error && <div className="error" role="alert">{error}</div>}
+      {saved && <div className="small" role="status" style={{ color: 'var(--ok)' }}>{saved}</div>}
+      <div><button className="btn primary" onClick={save}>Save settings</button></div>
     </div>
   )
 }

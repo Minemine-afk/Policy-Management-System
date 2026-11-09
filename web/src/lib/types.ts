@@ -7,6 +7,7 @@ export interface Profile {
   company: string
   role: Role | null
   active: boolean
+  email_alerts: boolean
   created_at: string
 }
 
@@ -29,6 +30,9 @@ export interface PiRequest {
   ci_benefit: boolean
   remarks: string | null
   status_reason: string | null
+  priority: 'normal' | 'urgent'
+  due_at: string
+  paused_at: string | null
   submitted_at: string
   completed_at: string | null
   created_at: string
@@ -80,4 +84,16 @@ export interface AuditRow {
   entity: string
   entity_id: string | null
   details: Record<string, unknown>
+}
+
+export interface AppSettings {
+  deadline_hours: number
+  due_soon_hours: number
+  pause_when_sent_back: boolean
+}
+
+export interface SavedFilter {
+  id: string
+  name: string
+  filters: Record<string, string>
 }

@@ -10,15 +10,33 @@ from submission to delivery, in the style of a simple Jira or Taiga board.
 - **BSD** (temporary name; the admin role) sees every request, assigns or reassigns it to an ops user,
   removes requests, manages users and reads the audit log.
 
-Ops can assign a pooled request to themselves (**Assign to me**). Requests are due two days after submission. Ops and BSD see them in orange when one day or less is left and in red
-once past two days (with the time overdue), until they are completed or removed.
+Ops can assign a pooled request to themselves (**Assign to me**). Requests are due a set time after submission
+(two days by default; BSD changes it under **Admin → Deadline settings**). Ops and BSD see them in orange in the "due soon"
+window (one day by default) and in red once overdue, until they are completed or removed. While a request is sent back,
+its clock is paused (BSD can switch that off) and the time is added back when the introducer resubmits.
+
+**Priority:** introducers can mark a request **Urgent** on the form; the introducer, the assigned ops user or BSD can switch the
+flag on or off later. Urgent cards are listed first, BSD are notified of new urgent requests and the ops user of requests made urgent.
+
+**Reopen:** the introducer (or BSD) can reopen a completed request with a reason when the client wants changes. It goes back
+to the same ops user (In progress) if they are still active, otherwise to the unassigned pool, and the deadline starts again.
+
+**Introducer shortcuts:** **Duplicate** on a request starts a new one with the same profile and client details; on a new
+request, **Previous client** fills in an earlier client's details and last profile; **My requests** can be searched by client name.
+
+**Backlog (staff):** filters for status, handler, priority, deadline (overdue, due soon, paused), submission dates and text;
+**saved filters** per user; **Export CSV** of the filtered list (no client details). BSD also see a **Workload** table (open
+requests per ops user: assigned, in progress, sent back, urgent, overdue) and can tick several requests and **assign them at once**.
+
+**Email alerts:** each notification can also be emailed (users switch this off on the Notifications page). This needs an email
+provider and a few dashboard steps; see `supabase/cloud/EMAIL-ALERTS.md`. Until then, alerts are in-app only.
 
 Board columns: staff see Unassigned, Assigned, In progress, Sent back, Completed (cards have a drag grip); ops can drag a
 request freely between Unassigned, Assigned and In progress. Introducers see only In progress (anything not yet sent back
 or completed), Sent back and Completed, and never see who is handling a request. Sent-back requests are closed to comments;
 the introducer edits any field and resubmits. Notifications (bell): introducers on sent back / completed; ops on
 assignments, deadlines and resubmissions of their requests; BSD on all deadlines. Deadline notices are generated when
-ops/BSD have the app open (every minute); there is no email yet.
+ops/BSD have the app open (every minute), or every 15 minutes on a schedule once `supabase/cloud/5-schedule-deadline-checks.sql` is run.
 
 Statuses: Submitted, Assigned, In progress, Sent back, Completed, Removed. Views: Board (drag cards between
 columns), Backlog (filterable table), and a request page with comments (shared or internal), files and an activity timeline.
@@ -88,7 +106,7 @@ These rules live in `supabase/migrations/` and hold even if someone bypasses the
 PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # access-rule tests on plain PostgreSQL
 ```
 
-`tests/e2e/` holds the browser walkthrough (27 checks) that was used to verify the full flow; see its README.
+`tests/e2e/` holds the browser walkthrough (75 checks) that was used to verify the full flow; see its README.
 
 ## Put it online (sample data only)
 
@@ -102,7 +120,7 @@ PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # acces
 ## Not done yet (before real client data)
 
 - Phase 2: invite and password-reset emails sent from the app, deactivation review. (MFA skipped for now by decision.)
+- Email alerts: built, but need an email provider (Resend), the Edge Function deployed and a webhook (`supabase/cloud/EMAIL-ALERTS.md`).
 - PDF comparison: tune the rules on real PIs from each insurer, fill your own Excel template instead of the default layout, optional AI fallback (switchable off), OCR for scanned PDFs.
-- Daily reminders for stale requests, email notifications.
 - Supabase Pro (backups, no pausing), sample users removed, MAS outsourcing assessment, PDPA review, compliance
   sign-off, and a professional security test. Make this GitHub repository private.

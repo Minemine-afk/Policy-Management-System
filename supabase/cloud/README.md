@@ -14,7 +14,11 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
 ## 2. Create the tables and access rules
 1. Left menu: **SQL Editor** → **New query**.
 2. Paste the whole of `1-setup.sql` and click **Run**. You should see "Success. No rows returned".
-3. **Already ran an earlier `1-setup.sql`?** Don't run it again. Run `1b-upgrade.sql` instead (adds notifications, the new workflow rules and tighter privacy; safe on the earlier setup).
+3. **Already ran an earlier `1-setup.sql`?** Don't run it again. Run the upgrade files you haven't run yet, in order:
+   - `1b-upgrade.sql` (9 Nov: notifications, new workflow rules, tighter privacy)
+   - `1c-upgrade.sql` (10 Nov: urgent flag, deadline settings, reopen, bulk assign, saved filters, email alert preference)
+
+   Each is safe to run again if you are not sure whether you ran it.
 4. Run it once only. If it fails part-way nothing is saved (it runs as one transaction); send me the error.
 
 ## 3. Lock down sign-up
@@ -31,6 +35,13 @@ Until this step a new user sees "Waiting for access". Afterwards, BSD can change
 
 ## 6. (Optional) Load sample requests
 Run `3-sample-data.sql` after step 5. `4-remove-sample-data.sql` removes them again.
+
+## 6b. (Optional) Deadline checks on a schedule
+Run `5-schedule-deadline-checks.sql` once. It checks deadlines every 15 minutes, so "due soon" and "overdue" notices
+(and emails, once set up) arrive even when nobody has the app open.
+
+## 6c. (Optional) Email alerts
+Follow `EMAIL-ALERTS.md` (about 20 minutes; needs a Resend account and your email domain).
 
 ## 7. Connect the web app
 **Project Settings** → **API** (or the **Connect** button): copy the **Project URL** and the **anon / publishable** key.

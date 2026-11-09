@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import {
   AGE_BANDS, COVERAGE_TERMS, GENDERS, PLAN_CATEGORIES, PREMIUM_TYPES, PRODUCTS, SUM_ASSURED_BANDS,
@@ -12,14 +12,24 @@ import { useAuth } from '../lib/auth'
 interface FormState {
   plan_category: string; product: string; age_band: string; gender: string; smoker: boolean
   coverage_term: string; sum_assured_band: string; premium_type: string; ci_benefit: boolean; remarks: string
+  priority: 'normal' | 'urgent'
 }
 const DEFAULTS: FormState = {
   plan_category: 'All', product: 'Term life', age_band: '25 to 29', gender: 'Male', smoker: false,
-  coverage_term: '6 to 10 years', sum_assured_band: 'S$100,001 to 250,000', premium_type: 'Annual', ci_benefit: true, remarks: '',
+  coverage_term: '6 to 10 years', sum_assured_band: 'S$100,001 to 250,000', premium_type: 'Annual', ci_benefit: true, remarks: '', priority: 'normal',
 }
+const pick = (r: PiRequest): FormState => ({
+  plan_category: r.plan_category, product: r.product, age_band: r.age_band, gender: r.gender, smoker: r.smoker,
+  coverage_term: r.coverage_term, sum_assured_band: r.sum_assured_band, premium_type: r.premium_type, ci_benefit: r.ci_benefit,
+  remarks: r.remarks ?? '', priority: r.priority,
+})
+
+interface PastClient { client_name: string; nric: string; contact: string; request: PiRequest }
 
 export default function RequestForm() {
   const { id } = useParams()
+  const [params] = useSearchParams()
+  const from = id ? null : params.get('from')
   const nav = useNavigate()
   const { profile } = useAuth()
   const [docs, setDocs] = useState<RequestDocument[]>([])
@@ -31,8 +41,10 @@ export default function RequestForm() {
   const [ref, setRef] = useState('')
   const [f, setF] = useState<FormState>(DEFAULTS)
   const [client, setClient] = useState({ client_name: '', nric: '', contact: '' })
+  const [copiedFrom, setCopiedFrom] = useState('')
+  const [past, setPast] = useState<PastClient[]>([])
   const [error, setError] = useState('')
-  const [ready, setReady] = useState(!id)
+  const [ready, setReady] = useState(!id && !from)
   const [saving, setSaving] = useState(false)
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }))
 
@@ -44,13 +56,54 @@ export default function RequestForm() {
       const r = data as PiRequest
       if (!['submitted', 'sent_back'].includes(r.status)) { nav(`/requests/${r.id}`, { replace: true }); return }
       setRef(r.ref)
-      setF({ ...r, remarks: r.remarks ?? '' })
+      setF(pick(r))
       loadDocs()
       const c = await supabase.from('request_clients').select('*').eq('request_id', id).maybeSingle()
       if (c.data) setClient({ client_name: c.data.client_name, nric: c.data.nric ?? '', contact: c.data.contact ?? '' })
       setReady(true)
     })()
   }, [id, nav])
+
+  // Duplicate: start a new request from an earlier one (profile and client details, no files).
+  useEffect(() => {
+    if (!from) return
+    ;(async () => {
+      const [{ data }, c] = await Promise.all([
+        supabase.from('pi_requests').select('*').eq('id', from).maybeSingle(),
+        supabase.from('request_clients').select('*').eq('request_id', from).maybeSingle(),
+      ])
+      if (data) { const r = data as PiRequest; setF({ ...pick(r), priority: 'normal' }); setCopiedFrom(r.ref) }
+      if (c.data) setClient({ client_name: c.data.client_name, nric: c.data.nric ?? '', contact: c.data.contact ?? '' })
+      setReady(true)
+    })()
+  }, [from])
+
+  // Earlier clients of this introducer, newest request first, to fill the form again quickly.
+  useEffect(() => {
+    if (id) return
+    ;(async () => {
+      const [cl, rq] = await Promise.all([
+        supabase.from('request_clients').select('request_id, client_name, nric, contact'),
+        supabase.from('pi_requests').select('*').order('submitted_at', { ascending: false }),
+      ])
+      const byId = new Map(((rq.data as PiRequest[]) ?? []).map((r) => [r.id, r]))
+      const seen = new Map<string, PastClient>()
+      for (const c of (cl.data ?? []).map((c) => ({ ...c, request: byId.get(c.request_id)! })).filter((c) => c.request)
+        .sort((a, b) => b.request.submitted_at.localeCompare(a.request.submitted_at))) {
+        const key = c.client_name.trim().toLowerCase()
+        if (!seen.has(key)) seen.set(key, { client_name: c.client_name, nric: c.nric ?? '', contact: c.contact ?? '', request: c.request })
+      }
+      setPast([...seen.values()].sort((a, b) => a.client_name.localeCompare(b.client_name)))
+    })()
+  }, [id])
+
+  function fillFromPast(name: string) {
+    const c = past.find((p) => p.client_name === name)
+    if (!c) return
+    setClient({ client_name: c.client_name, nric: c.nric, contact: c.contact })
+    setF({ ...pick(c.request), priority: 'normal', remarks: '' })
+    setCopiedFrom(c.request.ref)
+  }
 
   async function submit() {
     setSaving(true); setError('')
@@ -67,7 +120,7 @@ export default function RequestForm() {
   return (
     <main className="page">
       <div>
-        <p className="muted small" style={{ margin: 0 }}>{ref ? `Editing ${ref}` : 'New policy illustration request'}</p>
+        <p className="muted small" style={{ margin: 0 }}>{ref ? `Editing ${ref}` : copiedFrom ? `New request, copied from ${copiedFrom}` : 'New policy illustration request'}</p>
         <h1>Request a policy illustration</h1>
       </div>
 
@@ -78,6 +131,14 @@ export default function RequestForm() {
             Only you can see these details. Ops and bsd see the request reference and profile below, never the client's name.
           </p>
         </div>
+        {!id && past.length > 0 && (
+          <label className="field" style={{ maxWidth: 360 }}>Previous client (optional)
+            <select value="" onChange={(e) => fillFromPast(e.target.value)}>
+              <option value="">Choose to fill in their details…</option>
+              {past.map((p) => <option key={p.client_name} value={p.client_name}>{p.client_name} (last: {p.request.ref})</option>)}
+            </select>
+          </label>
+        )}
         <div className="grid">
           <label className="field">Client name
             <input type="text" value={client.client_name} onChange={(e) => setClient({ ...client, client_name: e.target.value })} />
@@ -104,6 +165,8 @@ export default function RequestForm() {
           <Seg label="Premium type" value={f.premium_type} onChange={(v) => set('premium_type', v)}
             options={PREMIUM_TYPES.map((c) => ({ value: c, label: c }))} />
           <Seg label="Critical illness benefit" value={f.ci_benefit} onChange={(v) => set('ci_benefit', v)} options={yesNo} />
+          <Seg label="Priority" value={f.priority} onChange={(v) => set('priority', v)}
+            options={[{ value: 'normal', label: 'Normal' }, { value: 'urgent', label: 'Urgent' }]} />
         </div>
       </section>
 

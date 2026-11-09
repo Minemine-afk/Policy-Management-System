@@ -179,4 +179,136 @@ do $$ begin
   if (select count(*) from pi_requests) <> 0 then raise exception 'deactivated user still sees requests'; end if;
   raise notice 'ok: deactivated user sees nothing';
 end $$;
+-- 8. Priority (urgent flag)
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+select set_priority((select id from pi_requests where ref = 'PI-00007'), 'urgent');
+select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'high')$$, 'normal or urgent');
+select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","priority":"urgent"}',
+                      '{"client_name":"[Sample] Client Hotel"}');
+do $$ begin
+  if (select priority from pi_requests where ref = 'PI-00007') <> 'urgent' then raise exception 'introducer could not flag own request urgent'; end if;
+  if (select priority from pi_requests where ref = 'PI-00008') <> 'urgent' then raise exception 'urgent on create not saved'; end if;
+  if (select due_at from pi_requests where ref = 'PI-00008') < now() + interval '47 hours' then raise exception 'new request should be due in 48h'; end if;
+  raise notice 'ok: introducer flags requests urgent; new requests get a due time';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+select pg_temp.expect_error($$select set_priority('20000000-0000-0000-0000-000000000001', 'urgent')$$, 'not found');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'normal')$$, 'Only the introducer');
+select pg_temp.expect_error($$select generate_deadline_notifications()$$, 'permission denied');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select set_priority('20000000-0000-0000-0000-000000000003', 'urgent');
+do $$ begin
+  if (select count(*) from notifications where kind = 'urgent') <> 1 then raise exception 'bsd should be told about the urgent new request'; end if;
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if (select count(*) from notifications where kind = 'urgent') <> 1 then raise exception 'Olivia should be told PI-00003 is urgent'; end if;
+  raise notice 'ok: bsd and the assignee are told about urgent requests';
+end $$;
+
+-- 9. Reopen a completed request
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select pg_temp.expect_error($$select reopen_request('20000000-0000-0000-0000-000000000001', 'x')$$, 'Only the introducer who submitted it or bsd');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+select pg_temp.expect_error($$select reopen_request('20000000-0000-0000-0000-000000000001', 'x')$$, 'not found');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+select pg_temp.expect_error($$select reopen_request('20000000-0000-0000-0000-000000000001', ' ')$$, 'wants changed');
+select pg_temp.expect_error($$select reopen_request((select id from pi_requests where ref = 'PI-00007'), 'x')$$, 'Only a completed');
+select reopen_request('20000000-0000-0000-0000-000000000001', 'Client wants 30 years cover');
+do $$ begin
+  if (select status from pi_requests where ref = 'PI-00001') <> 'in_progress' then raise exception 'reopen should go back to the same ops user, in progress'; end if;
+  if (select assignee_id from pi_requests where ref = 'PI-00001') <> '00000000-0000-0000-0000-000000000003' then raise exception 'reopen lost the assignee'; end if;
+  if (select due_at from pi_requests where ref = 'PI-00001') < now() + interval '47 hours' then raise exception 'reopen should restart the deadline'; end if;
+  if exists (select 1 from request_documents d where d.request_id = '20000000-0000-0000-0000-000000000001' and d.kind = 'pi_output') then raise exception 'introducer should not see PIs of a reopened request'; end if;
+  if not exists (select 1 from request_events where request_id = '20000000-0000-0000-0000-000000000001' and kind = 'reopened') then raise exception 'reopen event hidden from introducer'; end if;
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if (select count(*) from notifications where kind = 'reopened') <> 1 then raise exception 'Olivia should be told PI-00001 was reopened'; end if;
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select reopen_request('20000000-0000-0000-0000-000000000005', 'Client asked for a lower sum assured');
+do $$ begin
+  if (select status from pi_requests where ref = 'PI-00005') <> 'submitted' or (select assignee_id from pi_requests where ref = 'PI-00005') is not null then
+    raise exception 'reopen with a deactivated assignee should go to the unassigned pool'; end if;
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+do $$ begin
+  if (select count(*) from notifications where kind = 'reopened') <> 1 then raise exception 'Sam should be told bsd reopened PI-00005'; end if;
+  raise notice 'ok: completed requests can be reopened by their introducer or bsd';
+end $$;
+
+-- 10. Configurable deadline (bsd only)
+do $$ begin
+  if (select deadline_hours from app_settings) <> 48 then raise exception 'introducers should be able to read the settings'; end if;
+end $$;
+select pg_temp.expect_error($$select update_settings(72, 24, true)$$, 'Only bsd');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select update_settings(24, 24, true)$$, 'shorter than the deadline');
+select pg_temp.expect_error($$select update_settings(0, 0, true)$$, 'between 1 and 720');
+create temp table due_before as select ref, due_at from pi_requests;
+select update_settings(72, 24, true);
+do $$ begin
+  if exists (select 1 from pi_requests r join due_before b using (ref)
+             where r.status not in ('completed', 'removed') and r.due_at <> b.due_at + interval '24 hours') then
+    raise exception 'open requests should move by the change in deadline'; end if;
+  if exists (select 1 from pi_requests r join due_before b using (ref) where r.status in ('completed', 'removed') and r.due_at <> b.due_at) then
+    raise exception 'closed requests should not move'; end if;
+  raise notice 'ok: bsd changes the deadline and open requests follow';
+end $$;
+
+-- 11. The clock pauses while a request is sent back
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select change_status('20000000-0000-0000-0000-000000000001', 'sent_back', 'Which cover term?');
+do $$ begin
+  if (select paused_at from pi_requests where ref = 'PI-00001') is null then raise exception 'sending back should pause the clock'; end if;
+end $$;
+reset role; update pi_requests set paused_at = now() - interval '10 hours' where ref = 'PI-00001'; set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+create temp table due_paused as select due_at from pi_requests where ref = 'PI-00001';
+select resubmit_request('20000000-0000-0000-0000-000000000001');
+do $$ begin
+  if (select paused_at from pi_requests where ref = 'PI-00001') is not null then raise exception 'resubmit should restart the clock'; end if;
+  if (select due_at from pi_requests where ref = 'PI-00001') < (select due_at from due_paused) + interval '10 hours' then raise exception 'paused time should be added to the deadline'; end if;
+  raise notice 'ok: sent-back time does not count against the deadline';
+end $$;
+
+-- 12. Bulk assign (bsd)
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select pg_temp.expect_error($$select assign_requests(array['20000000-0000-0000-0000-000000000005']::uuid[], '00000000-0000-0000-0000-000000000003')$$, 'Only bsd');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+do $$ declare n int; begin
+  n := assign_requests(array(select id from pi_requests where ref in ('PI-00005', 'PI-00007', 'PI-00008', 'PI-00003')), '00000000-0000-0000-0000-000000000003');
+  if n <> 3 then raise exception 'bulk assign should assign 3 (PI-00003 already with Olivia), did %', n; end if;
+  if (select count(*) from pi_requests where assignee_id = '00000000-0000-0000-0000-000000000003' and ref in ('PI-00005', 'PI-00007', 'PI-00008')) <> 3 then raise exception 'bulk assign failed'; end if;
+  raise notice 'ok: bsd assigns several requests at once';
+end $$;
+select pg_temp.expect_error($$select assign_requests(array['20000000-0000-0000-0000-000000000002']::uuid[], '00000000-0000-0000-0000-000000000003')$$, 'cannot be reassigned');
+
+-- 13. Saved filters are private to each user
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+select save_filter('Urgent only', '{"priority":"urgent"}');
+select save_filter('Urgent only', '{"priority":"urgent","status":"open"}');
+select pg_temp.expect_error($$insert into saved_filters (name) values ('x')$$, 'permission denied');
+do $$ begin
+  if (select count(*) from saved_filters) <> 1 then raise exception 'saving the same name should replace it'; end if;
+  if (select filters ->> 'status' from saved_filters) <> 'open' then raise exception 'saved filter not updated'; end if;
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+do $$ begin
+  if exists (select 1 from saved_filters) then raise exception 'Dana sees Sam''s saved filters'; end if;
+end $$;
+select delete_saved_filter((select id from saved_filters limit 1));
+select set_email_alerts(false);
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+do $$ begin
+  if (select count(*) from saved_filters) <> 1 then raise exception 'saved filter missing'; end if;
+  if not (select email_alerts from profiles where id = auth.uid()) then raise exception 'Dana changed Sam''s email setting'; end if;
+end $$;
+select delete_saved_filter((select id from saved_filters limit 1));
+do $$ begin
+  if exists (select 1 from saved_filters) then raise exception 'delete saved filter failed'; end if;
+  raise notice 'ok: saved filters and email preferences are per user';
+end $$;
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;
