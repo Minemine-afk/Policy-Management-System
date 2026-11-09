@@ -102,7 +102,7 @@ export default function Board() {
                       <div className="row between"><strong>{r.ref} {urgent && <UrgentPill auto={r.urgent_auto} />}</strong><span className="small muted" style={{ marginRight: staff ? 22 : 0 }}>{daysSince(r.submitted_at)}d</span></div>
                       <div className="small">{summary(r)}</div>
                       {staff && <div className="small muted">{nameOf(people, r.introducer_id)} · {people[r.introducer_id]?.company}</div>}
-                      {staff && <div className="small muted">{r.assignee_id ? `Handled by ${nameOf(people, r.assignee_id)}` : 'Unassigned'}</div>}
+                      {staff && <div className="small handler" style={{ fontWeight: 700 }}>{r.assignee_id ? `Handled by ${nameOf(people, r.assignee_id)}` : 'Unassigned'}</div>}
                       {d && <div className={`due ${d.level}`}>{d.label}</div>}
                       {has('ops') && r.status === 'submitted' && !r.assignee_id && (
                         <button className="btn small primary" onClick={(e) => { e.preventDefault(); e.stopPropagation(); move(r, 'assigned') }}>Assign to me</button>
