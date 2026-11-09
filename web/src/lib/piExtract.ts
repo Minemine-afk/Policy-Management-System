@@ -341,8 +341,10 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, timeoutM
     }, timeoutMs)
   })
   const read = (async () => {
-    const pdfjs = await import('pdfjs-dist')
-    const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
+    // The legacy build carries polyfills: the default build needs very recent browser features
+    // (Map.getOrInsertComputed, Math.sumPrecise, Promise.try, ...) and silently fails in older Chrome, Edge or Safari.
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
     return readWith(pdfjs, data, onPage, (t) => { task = t })
   })()
