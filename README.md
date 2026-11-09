@@ -134,6 +134,6 @@ PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # acces
 
 - Phase 2: invite and password-reset emails sent from the app, deactivation review. (MFA skipped for now by decision.)
 - Email alerts: parked, ready to switch on (`docs/email-alerts/README.md`).
-- PDF comparison: tune the rules on real PIs from each insurer, fill your own Excel template instead of the default layout, optional AI fallback (switchable off), OCR for scanned PDFs.
+- PDF comparison: tune the rules on real PIs from each insurer, fill your own Excel template instead of the default layout, optional AI fallback (switchable off). (OCR for scanned PDFs is done.)
 - Supabase Pro (backups, no pausing), sample users removed, MAS outsourcing assessment, PDPA review, compliance
   sign-off, and a professional security test. Make this GitHub repository private.
