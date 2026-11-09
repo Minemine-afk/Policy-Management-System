@@ -9,7 +9,7 @@ begin
     ('00000000-0000-0000-0000-000000000002'::uuid, 'introducer2@example.com', 'Dana Introducer'),
     ('00000000-0000-0000-0000-000000000003'::uuid, 'ops1@example.com',        'Olivia Ops'),
     ('00000000-0000-0000-0000-000000000004'::uuid, 'ops2@example.com',        'Omar Ops'),
-    ('00000000-0000-0000-0000-000000000005'::uuid, 'bsd@example.com',         'Pat Bsd')
+    ('00000000-0000-0000-0000-000000000005'::uuid, 'bsd@example.com',         'Pat Admin')
   ) as t(id, email, full_name)
   loop
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,

@@ -33,9 +33,9 @@ everyone else from the website.
 
 ## 5. Give people roles
 New query → paste `2-assign-roles.sql`, change the emails, names and roles, **Run**. The result lists everyone.
-Until this step a new user sees "Waiting for access". Afterwards, BSD can change roles from the Admin page.
+Until this step a new user sees "Waiting for access". Afterwards, an admin can change roles from the Admin page.
 
-## 4b. Let bsd create users from the website (about 5 minutes, once)
+## 4b. Let admins create users from the website (about 5 minutes, once)
 Creating a login needs Supabase's secret key, which must never be in the web app. So the website asks a small
 server function, `admin-create-user`, which runs on Supabase, checks the caller is an active bsd user, creates the
 login and sets the role. No command line needed:

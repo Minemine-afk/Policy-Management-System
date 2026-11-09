@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth'
 import { useRequests } from '../lib/requests'
 import { nameOf, usePeople } from '../lib/people'
 import { useSettings } from '../lib/settings'
-import { STATUS_LABEL, byPriorityThenDue, daysSince, dueInfo, fmtDate, introGroup, summary } from '../lib/options'
+import { STATUS_LABEL, byPriorityThenDue, daysSince, dueInfo, fmtDate, introGroup, summary, says } from '../lib/options'
 import { downloadCsv } from '../lib/csv'
 import { StatusPill, UrgentPill } from '../components/ui'
 import type { PiRequest, SavedFilter } from '../lib/types'
@@ -86,14 +86,14 @@ export default function Backlog() {
   async function assign(id: string, user: string) {
     setError(''); setInfo('')
     const { error } = await supabase.rpc('assign_request', { p_request: id, p_user: user })
-    if (error) setError(error.message)
+    if (error) setError(says(error.message))
     reload()
   }
 
   async function bulkAssign() {
     setError(''); setInfo('')
     const { data, error } = await supabase.rpc('assign_requests', { p_requests: [...picked], p_user: bulkTo })
-    if (error) setError(error.message)
+    if (error) setError(says(error.message))
     else { setInfo(`Assigned ${data} request${data === 1 ? '' : 's'} to ${nameOf(people, bulkTo)}`); setPicked(new Set()); setBulkTo('') }
     reload()
   }
@@ -101,14 +101,14 @@ export default function Backlog() {
   async function claim(id: string) {
     setError(''); setInfo('')
     const { error } = await supabase.rpc('claim_request', { p_request: id })
-    if (error) setError(error.message)
+    if (error) setError(says(error.message))
     reload()
   }
 
   async function saveFilter() {
     if (!saveName?.trim()) return
     const { data, error } = await supabase.rpc('save_filter', { p_name: saveName.trim(), p_filters: f })
-    if (error) { setError(error.message); return }
+    if (error) { setError(says(error.message)); return }
     setSaveName(null); await loadSaved(); setSavedId(data as string)
   }
 

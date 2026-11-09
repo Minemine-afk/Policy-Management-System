@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import {
-  AGE_BANDS, COVERAGE_TERMS, GENDERS, PLAN_CATEGORIES, PREMIUM_TYPES, PRODUCTS, SUM_ASSURED_BANDS,
-} from '../lib/options'
+import { AGE_BANDS, COVERAGE_TERMS, GENDERS, PLAN_CATEGORIES, PREMIUM_TYPES, PRODUCTS, SUM_ASSURED_BANDS, says } from '../lib/options'
 import type { PiRequest, RequestDocument } from '../lib/types'
 import { Seg, Select } from '../components/ui'
 import Files from '../components/Files'
@@ -110,7 +108,7 @@ export default function RequestForm() {
       ? await supabase.rpc('update_request', { p_request: id, p: f, p_client: client })
       : await supabase.rpc('create_request', { p: f, p_client: client })
     setSaving(false)
-    if (res.error) { setError(res.error.message); return }
+    if (res.error) { setError(says(res.error.message)); return }
     nav(`/requests/${id ?? res.data}`)
   }
 
@@ -127,7 +125,7 @@ export default function RequestForm() {
         <div>
           <h2 id="client-head" className="eyebrow">Client</h2>
           <p className="small muted" style={{ margin: '4px 0 0' }}>
-            Only you can see these details. Ops and bsd see the request reference and profile below, never the client's name.
+            Only you can see these details. Ops and admins see the request reference and profile below, never the client's name.
           </p>
         </div>
         {!id && past.length > 0 && (

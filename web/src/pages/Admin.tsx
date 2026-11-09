@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import { ROLE_LABEL, fmtDateTime, fmtHours } from '../lib/options'
+import { ROLE_LABEL, fmtDateTime, fmtHours, says } from '../lib/options'
 import { forgetSettings } from '../lib/settings'
+import { nameOf, usePeople } from '../lib/people'
 import type { AppSettings, AuditRow, Profile, Role } from '../lib/types'
 
 export default function Admin() {
@@ -40,7 +41,7 @@ function Users() {
     const { error } = await supabase.rpc('admin_update_user', {
       p_user: p.id, p_role: p.role, p_active: p.active, p_full_name: p.full_name, p_company: p.company,
     })
-    if (error) setError(error.message); else setSaved(`Saved ${p.email}`)
+    if (error) setError(says(error.message)); else setSaved(`Saved ${p.email}`)
     load()
   }
   const edit = (id: string, patch: Partial<Profile>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)))
@@ -104,12 +105,12 @@ function AddUser({ onCreated }: { onCreated: () => void }) {
     })
     setBusy(false)
     if (error) {
-      let msg = error.message
+      let msg = says(error.message)
       const ctx = (error as { context?: Response }).context
       if (ctx && typeof ctx.json === 'function') {
-        try { msg = (await ctx.json()).error ?? msg } catch { /* not JSON */ }
+        try { msg = says((await ctx.json()).error ?? msg) } catch { /* not JSON */ }
       } else if (/fetch|send a request|not found/i.test(msg)) {
-        msg = 'Could not reach the user-creation function. It may not be deployed yet (see supabase/cloud/README.md, "Let bsd create users").'
+        msg = 'Could not reach the user-creation function. It may not be deployed yet (see supabase/cloud/README.md, "Let admins create users").'
       }
       setError(msg)
       return
@@ -162,27 +163,103 @@ function AddUser({ onCreated }: { onCreated: () => void }) {
   )
 }
 
+const AUDIT_LIMIT = 500
+const NO_AUDIT_FILTER = { from: '', to: '', who: '', role: '', action: '' }
+
+/** Start of a local calendar day ('2026-11-09') as an ISO timestamp, optionally a number of days later. */
+function dayStart(d: string, plusDays = 0) {
+  const t = new Date(`${d}T00:00:00`); t.setDate(t.getDate() + plusDays); return t.toISOString()
+}
+
 function Audit() {
+  const people = usePeople()
   const [rows, setRows] = useState<AuditRow[]>([])
+  const [actions, setActions] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [f, setF] = useState(NO_AUDIT_FILTER)
+  const set = (patch: Partial<typeof NO_AUDIT_FILTER>) => setF((x) => ({ ...x, ...patch }))
+  const everyone = Object.values(people).sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email))
+
+  // The list of action types for the Action filter (from the latest entries).
   useEffect(() => {
-    supabase.from('audit_log').select('*').order('at', { ascending: false }).limit(200)
-      .then(({ data }) => setRows((data as AuditRow[]) ?? []))
+    supabase.from('audit_log').select('action').order('at', { ascending: false }).limit(2000)
+      .then(({ data }) => setActions([...new Set(((data as { action: string }[]) ?? []).map((r) => r.action))].sort()))
   }, [])
+
+  useEffect(() => {
+    // Role filter means "done by someone who has this role now"; wait for the people list before applying it.
+    if (f.role && f.role !== 'system' && !everyone.length) return
+    let q = supabase.from('audit_log').select('*').order('at', { ascending: false }).limit(AUDIT_LIMIT)
+    if (f.from) q = q.gte('at', dayStart(f.from))
+    if (f.to) q = q.lt('at', dayStart(f.to, 1))
+    if (f.action) q = q.eq('action', f.action)
+    if (f.who === 'system') q = q.is('actor_id', null)
+    else if (f.who) q = q.eq('actor_id', f.who)
+    if (f.role === 'system') q = q.is('actor_id', null)
+    else if (f.role) {
+      const ids = everyone.filter((p) => p.role === f.role).map((p) => p.id)
+      q = q.in('actor_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
+    }
+    let stale = false
+    setLoading(true)
+    q.then(({ data }) => { if (!stale) { setRows((data as AuditRow[]) ?? []); setLoading(false) } })
+    return () => { stale = true }
+  }, [f, everyone.length])
+
+  const filtered = Object.values(f).some(Boolean)
+  const whoOf = (id: string | null) => (id ? nameOf(people, id) : 'System')
+  const roleOf = (id: string | null) => (id ? (people[id]?.role ? ROLE_LABEL[people[id].role!] : 'No role') : '—')
+
   return (
     <div className="card">
+      <div className="row" style={{ alignItems: 'flex-end' }}>
+        <label className="field" style={{ maxWidth: 160 }}>From
+          <input type="date" value={f.from} onChange={(e) => set({ from: e.target.value })} />
+        </label>
+        <label className="field" style={{ maxWidth: 160 }}>To
+          <input type="date" value={f.to} onChange={(e) => set({ to: e.target.value })} />
+        </label>
+        <label className="field" style={{ maxWidth: 220 }}>User
+          <select value={f.who} onChange={(e) => set({ who: e.target.value })}>
+            <option value="">Anyone</option>
+            <option value="system">System (automatic)</option>
+            {everyone.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}
+          </select>
+        </label>
+        <label className="field" style={{ maxWidth: 170 }}>Role
+          <select value={f.role} onChange={(e) => set({ role: e.target.value })}>
+            <option value="">Any</option>
+            {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            <option value="system">System (automatic)</option>
+          </select>
+        </label>
+        <label className="field" style={{ maxWidth: 220 }}>Action
+          <select value={f.action} onChange={(e) => set({ action: e.target.value })}>
+            <option value="">Any</option>
+            {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </label>
+        {filtered && <button type="button" className="btn small" onClick={() => setF(NO_AUDIT_FILTER)}>Clear filters</button>}
+      </div>
+      <div className="small muted" role="status">
+        {loading ? 'Loading…' : `${rows.length}${rows.length === AUDIT_LIMIT ? '+' : ''} ${rows.length === 1 ? 'entry' : 'entries'}`}
+        {!loading && rows.length === AUDIT_LIMIT && ` (showing the latest ${AUDIT_LIMIT}; narrow the filters to see older ones)`}
+        {f.role && f.role !== 'system' && ' · Role is the person\'s current role.'}
+      </div>
       <div className="tablewrap">
         <table>
-          <thead><tr><th>When</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+          <thead><tr><th>When</th><th>User</th><th>Role</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td>{fmtDateTime(r.at)}</td><td>{r.action}</td><td>{r.entity_id}</td>
+                <td>{fmtDateTime(r.at)}</td><td>{whoOf(r.actor_id)}</td><td>{roleOf(r.actor_id)}</td>
+                <td>{r.action}</td><td>{r.entity_id}</td>
                 <td className="small muted">{Object.keys(r.details).length ? JSON.stringify(r.details) : ''}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!rows.length && <div className="empty">Nothing logged yet.</div>}
+        {!loading && !rows.length && <div className="empty">{filtered ? 'Nothing matches these filters.' : 'Nothing logged yet.'}</div>}
       </div>
     </div>
   )
@@ -203,7 +280,7 @@ function Settings() {
     const { error } = await supabase.rpc('update_settings', {
       p_deadline_hours: s.deadline_hours, p_due_soon_hours: s.due_soon_hours, p_pause: s.pause_when_sent_back,
     })
-    if (error) setError(error.message)
+    if (error) setError(says(error.message))
     else { setSaved('Saved. Open requests now follow the new deadline.'); forgetSettings(s) }
     load()
   }
@@ -211,7 +288,7 @@ function Settings() {
   return (
     <div className="card" style={{ maxWidth: 620 }}>
       <p className="small muted" style={{ margin: 0 }}>
-        Requests are due a set time after they are submitted. Ops and bsd see them in orange when the "due soon" window starts,
+        Requests are due a set time after they are submitted. Ops and admins see them in orange when the "due soon" window starts,
         and in red once overdue. Changing the deadline moves the due time of every open request by the same amount.
       </p>
       <div className="grid">

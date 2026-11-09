@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { fmtDateTime } from '../lib/options'
+import { fmtDateTime, says } from '../lib/options'
 import type { RequestDocument } from '../lib/types'
 
 /** A list of files of one kind, with upload and download. */
@@ -19,9 +19,9 @@ export default function Files({ title, hint, requestId, kind, docs, canUpload, u
     for (const file of Array.from(files)) {
       const path = `${requestId}/${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_')}`
       const up = await supabase.storage.from('request-docs').upload(path, file, { contentType: file.type || 'application/octet-stream' })
-      if (up.error) { setError(up.error.message); continue }
+      if (up.error) { setError(says(up.error.message)); continue }
       const ins = await supabase.rpc('add_document', { p_request: requestId, p_kind: kind, p_path: path, p_name: file.name })
-      if (ins.error) { setError(ins.error.message); await supabase.storage.from('request-docs').remove([path]) }
+      if (ins.error) { setError(says(ins.error.message)); await supabase.storage.from('request-docs').remove([path]) }
     }
     setBusy(false)
     if (input.current) input.current.value = ''
@@ -37,7 +37,7 @@ export default function Files({ title, hint, requestId, kind, docs, canUpload, u
 
   async function remove(d: RequestDocument) {
     const { error } = await supabase.rpc('remove_document', { p_document: d.id })
-    if (error) setError(error.message)
+    if (error) setError(says(error.message))
     onChange()
   }
 
