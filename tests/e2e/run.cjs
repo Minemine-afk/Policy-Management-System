@@ -322,10 +322,6 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await pat.getByRole('link', { name: 'Audit log' }).click()
   await pat.getByText('settings.updated').first().waitFor()
   ok('settings changes are audited')
-  await sam.goto(BASE + '/notifications')
-  await sam.getByLabel(/Also email me these notifications/).uncheck()
-  await sam.reload()
-  await check(sam.getByLabel(/Also email me these notifications/).isChecked().then((c) => !c), 'users can turn email alerts off')
 
   // 7. Non-bsd cannot open admin
   await olivia.goto(BASE + '/admin')

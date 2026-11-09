@@ -1,7 +1,7 @@
 // notify-email: emails each new in-app notification to its user.
 //
 // Runs as a Supabase Edge Function, called by a Database Webhook on INSERT into public.notifications.
-// Emails are sent through Resend's HTTP API (resend.com). Setup steps: supabase/cloud/EMAIL-ALERTS.md.
+// Emails are sent through Resend's HTTP API (resend.com). Parked (not deployed). Switch-on steps: docs/email-alerts/README.md.
 //
 // Secrets (Edge Functions > Secrets):
 //   RESEND_API_KEY   the API key from Resend

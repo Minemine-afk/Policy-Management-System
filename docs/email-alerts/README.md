@@ -1,7 +1,22 @@
-# Email alerts (about 20 minutes)
+# Email alerts (parked, not switched on)
+
+Email alerts are **off** for now (Kumar, 9 Nov 2026). Everything needed is kept so they can be switched on later:
+
+- **Already in the database** (no change needed): `profiles.email_alerts` (each user's opt-out, default on) and
+  `set_email_alerts(on)`, plus the `notifications` table every email is built from.
+- **Parked here:** `notify-email.ts`, the Edge Function that sends one email per new notification (tested with mocked calls only).
+- **Optional schedule:** `supabase/cloud/5-schedule-deadline-checks.sql`, so overdue alerts go out when nobody has the app open.
+
+## To switch it on
+1. Move `docs/email-alerts/notify-email.ts` to `supabase/functions/notify-email/index.ts` (or paste it in the dashboard, step 2 below).
+2. Put the opt-out checkbox back on the Notifications page (`web/src/pages/Notifications.tsx`): load `email_alerts` from
+   the user's own profile and call `supabase.rpc('set_email_alerts', { p_on })` when it changes. Git history of
+   PR #1 has the original version.
+3. Follow the setup steps below (about 20 minutes).
+
 
 Every in-app notification (assigned to you, due soon, overdue, sent back, completed, resubmitted, urgent, reopened,
-new comment) can also go out by email. Each user can switch emails off on their Notifications page.
+new comment) can also go out by email. Each user can switch emails off on their Notifications page (once step 2 above is done).
 
 The email carries only the request reference and the notice text (for example "PI-00012 is overdue" or the
 send-back reason), plus a link. It never contains client names, NRIC or contact details.
@@ -20,7 +35,7 @@ It works like this: a new row in `notifications` → a Supabase **Database Webho
 
 ## 2. Deploy the function
 1. Supabase dashboard → **Edge Functions → Deploy a new function → Via Editor**.
-2. Name it `notify-email`. Replace the sample code with the whole of `supabase/functions/notify-email/index.ts` from the repo. **Deploy**.
+2. Name it `notify-email`. Replace the sample code with the whole of `notify-email.ts` (this folder). **Deploy**.
 3. **Edge Functions → Secrets** (or Manage secrets), add:
    - `RESEND_API_KEY` = the key from step 1
    - `EMAIL_FROM` = `PI Tracker <alerts@alerts.yourfirm.sg>` (an address on the verified domain)

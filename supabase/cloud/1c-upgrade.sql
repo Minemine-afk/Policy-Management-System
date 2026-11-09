@@ -1,5 +1,5 @@
 -- UPGRADE for a project that already ran 1-setup.sql and 1b-upgrade.sql (before 10 Nov 2026). Paste the whole file into SQL Editor and Run once.
--- Adds priority, deadline settings, reopen, bulk assign, saved filters and email alert preferences. Do NOT run this on a fresh project (use 1-setup.sql).
+-- Adds priority, deadline settings, reopen, bulk assign and saved filters. Do NOT run this on a fresh project (use 1-setup.sql).
 -- Never ran 1b-upgrade.sql? Run that first, then this one.
 begin;
 -- Workflow improvements (10 Nov 2026):
@@ -8,7 +8,9 @@ begin;
 --  * reopen a completed request
 --  * bulk assign for bsd
 --  * saved backlog filters per user
---  * email alert preference per user, and a deadline check that a schedule (pg_cron) can run
+--  * a deadline check that a schedule (pg_cron) can run
+--  * email alerts are OFF for now; profiles.email_alerts and set_email_alerts() are kept so they can be switched on
+--    later without a database change (see docs/email-alerts/README.md)
 -- Safe to run on a project that already has the earlier setup (1-setup.sql + 1b-upgrade.sql).
 
 -- ---------------------------------------------------------------------------
@@ -361,8 +363,8 @@ returns void language sql security definer set search_path = public as $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- Email alerts: each user can turn them off. Sending is done by the notify-email
--- Edge Function (supabase/functions/notify-email) once an email provider is set up.
+-- Email alerts (not switched on yet): each user's opt-out. Sending would be done by the notify-email
+-- Edge Function parked in docs/email-alerts/ once an email provider is set up.
 -- ---------------------------------------------------------------------------
 create or replace function public.set_email_alerts(p_on boolean)
 returns void language sql security definer set search_path = public as $$

@@ -28,8 +28,8 @@ request, **Previous client** fills in an earlier client's details and last profi
 **saved filters** per user; **Export CSV** of the filtered list (no client details). BSD also see a **Workload** table (open
 requests per ops user: assigned, in progress, sent back, urgent, overdue) and can tick several requests and **assign them at once**.
 
-**Email alerts:** each notification can also be emailed (users switch this off on the Notifications page). This needs an email
-provider and a few dashboard steps; see `supabase/cloud/EMAIL-ALERTS.md`. Until then, alerts are in-app only.
+**Email alerts:** off for now; notifications are in-app only (the bell). The email code is parked in `docs/email-alerts/`
+with the steps to switch it on later.
 
 Board columns: staff see Unassigned, Assigned, In progress, Sent back, Completed (cards have a drag grip); ops can drag a
 request freely between Unassigned, Assigned and In progress. Introducers see only In progress (anything not yet sent back
@@ -106,7 +106,7 @@ These rules live in `supabase/migrations/` and hold even if someone bypasses the
 PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # access-rule tests on plain PostgreSQL
 ```
 
-`tests/e2e/` holds the browser walkthrough (75 checks) that was used to verify the full flow; see its README.
+`tests/e2e/` holds the browser walkthrough (74 checks) that was used to verify the full flow; see its README.
 
 ## Put it online (sample data only)
 
@@ -120,7 +120,7 @@ PGURL=postgres://user:password@127.0.0.1:5432/postgres npm run test:db   # acces
 ## Not done yet (before real client data)
 
 - Phase 2: invite and password-reset emails sent from the app, deactivation review. (MFA skipped for now by decision.)
-- Email alerts: built, but need an email provider (Resend), the Edge Function deployed and a webhook (`supabase/cloud/EMAIL-ALERTS.md`).
+- Email alerts: parked, ready to switch on (`docs/email-alerts/README.md`).
 - PDF comparison: tune the rules on real PIs from each insurer, fill your own Excel template instead of the default layout, optional AI fallback (switchable off), OCR for scanned PDFs.
 - Supabase Pro (backups, no pausing), sample users removed, MAS outsourcing assessment, PDPA review, compliance
   sign-off, and a professional security test. Make this GitHub repository private.
