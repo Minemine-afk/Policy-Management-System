@@ -68,7 +68,7 @@ export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer)
     lastRow = Math.max(lastRow, r)
     if (/^sum assured\s*:/i.test(raw)) { bannerSa = r; return }
     if (/^policy term\s*:/i.test(raw)) { bannerTerm = r; return }
-    const f = FIELDS.find((x) => norm(x.label) === label)
+    const f = FIELDS.find((x) => x.section !== 'banner' && x.section !== 'meta' && norm(x.label) === label)
     if (f && !rowOf[f.key]) { rowOf[f.key] = r; if (f.key === 'insurer') insurerRow = r }
   })
   const needed = FIELDS.filter((f) => f.key !== 'currency' && f.key !== 'cover_age')

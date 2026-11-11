@@ -17,7 +17,8 @@
 /** text: words. money: an amount in the policy currency. sum: a sum assured (or "NA"). years: a term.
  *  age: an age. cover: "Included" or "NA". currency: a 3-letter code such as SGD. */
 export type FieldKind = 'text' | 'money' | 'sum' | 'years' | 'age' | 'cover' | 'currency'
-export type Section = 'client' | 'plan' | 'death' | 'riders' | 'other'
+/** 'meta': read and used (currency labels), but not a row of the comparison. */
+export type Section = 'client' | 'banner' | 'plan' | 'death' | 'riders' | 'other' | 'meta'
 
 export interface FieldDef {
   key: string
@@ -29,6 +30,7 @@ export interface FieldDef {
 
 export const SECTIONS: { key: Section; label: string }[] = [
   { key: 'client', label: 'Insured person' },
+  { key: 'banner', label: 'Plan type: Term plan' },
   { key: 'plan', label: 'Plan' },
   { key: 'death', label: 'Base plan cover' },
   { key: 'riders', label: 'Riders' },
@@ -41,8 +43,8 @@ export const FIELDS: FieldDef[] = [
   { key: 'gender', label: 'Gender', kind: 'text', section: 'client' },
   { key: 'residency', label: 'Residency', kind: 'text', section: 'client' },
   { key: 'underwriting_class', label: 'Underwriting Class', kind: 'text', section: 'client' },
-  { key: 'currency', label: 'Policy Currency', kind: 'currency', section: 'plan' },
-  { key: 'cover_age', label: 'Covered up till age', kind: 'age', section: 'plan' },
+  { key: 'currency', label: 'Policy Currency', kind: 'currency', section: 'meta' },
+  { key: 'cover_age', label: 'Policy Term: Up till age', kind: 'age', section: 'banner' },
   { key: 'insurer', label: 'Insurer', kind: 'text', section: 'plan' },
   { key: 'policy_name', label: 'Policy Name', kind: 'text', section: 'plan' },
   { key: 'policy_term', label: 'Policy Term (Years)', kind: 'years', section: 'plan' },
@@ -345,6 +347,44 @@ function readRiders(lines: Line[]): { riders: Rider[]; total: { value: string; p
   return { riders, total, seen: true }
 }
 
+/** Another summary layout (e.g. FWD): one line per plan, base plan first, then riders, then "Total":
+ *  "Future First  S$8,866.00  Annually  S$1,000,000  35  35" = name, premium, frequency, sum insured, two terms.
+ *  Which term is which comes from the heading (premium "payment period" vs "coverage period"). */
+const FREQ = /^(annual(?:ly)?|yearly|monthly|quarterly|half[\s-]?yearly|semi[\s-]?annual(?:ly)?|single)$/i
+const CUR_AMT = /^(?:S\$|SGD|US\$|USD|HK\$|A\$|RM|\$)?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)$/
+interface PlanRow { name: string; premium: string; freq: string; sa: string; premiumTerm: string; policyTerm: string; page: number; line: string }
+function readPlanRows(lines: Line[]): { rows: PlanRow[]; total: { value: string; page: number; line: string } | null } | null {
+  for (let i = 0; i < lines.length; i++) {
+    const parts = lines[i].text.split(/\s{2,}/)
+    const fi = parts.findIndex((x) => FREQ.test(x.trim()))
+    if (fi < 2 || parts.length < fi + 4) continue
+    const prem = parts[fi - 1].match(CUR_AMT), sa = parts[fi + 1].match(CUR_AMT)
+    const t1 = parseYears(parts[fi + 2]), t2 = parseYears(parts[fi + 3])
+    if (!prem || !sa || !t1 || !t2) continue
+    // Heading lines above: is the premium payment period before the coverage period?
+    const head = lines.slice(Math.max(0, i - 8), i).filter((l) => l.page === lines[i].page).map((l) => l.text).join(' ')
+    const afterSa = head.split(/sum\s+(?:insured|assured)/i).slice(1).join(' ')
+    const payAt = afterSa.search(/payment|premium\s+term/i), covAt = afterSa.search(/coverage|policy\s+term|cover/i)
+    const premiumFirst = payAt >= 0 && (covAt < 0 || payAt < covAt)
+    const rows: PlanRow[] = []
+    let total: { value: string; page: number; line: string } | null = null
+    for (const l of lines.slice(i, i + 15).filter((x) => x.page === lines[i].page)) {
+      const ps = l.text.split(/\s{2,}/)
+      const t = ps[0].match(/^total\b/i) && ps[1]?.match(CUR_AMT)
+      if (t) { total = { value: amount(t[1]), page: l.page, line: l.text }; break }
+      const f = ps.findIndex((x) => FREQ.test(x.trim()))
+      if (f < 1 || ps.length < f + 4) { if (rows.length) break; continue }
+      const pm = ps[f - 1].match(CUR_AMT), sm = ps[f + 1].match(CUR_AMT)
+      const a = parseYears(ps[f + 2]), b = parseYears(ps[f + 3])
+      if (!pm || !sm || !a || !b) break
+      rows.push({ name: ps.slice(0, f - 1).join(' ').trim(), premium: amount(pm[1]), freq: ps[f].trim(), sa: amount(sm[1]),
+        premiumTerm: premiumFirst ? a : b, policyTerm: premiumFirst ? b : a, page: l.page, line: l.text })
+    }
+    if (rows.length) return { rows, total }
+  }
+  return null
+}
+
 const isTpd = (n: string) => /\bTPD\b|total\s*(?:and|&)\s*permanent\s+disab/i.test(n)
 const isCi = (n: string) => /critical\s+illness|\bCI\b|dread\s+disease/i.test(n) && !/waiver|payer/i.test(n)
 
@@ -356,15 +396,16 @@ function readIllustrations(lines: Line[]): { segments: IllRow[][]; surrender: bo
   const segments: IllRow[][] = []
   let inTable = false, surrender = false, misses = 0
   lines.forEach((l, i) => {
-    if (/total\s*premiums?\s*paid/i.test(l.text)) {
+    if (/total\s*premiums?\s*paid|paid\s+to[\s-]*date/i.test(l.text)) {
       const near = lines.slice(Math.max(0, i - 1), i + 3).filter((x) => x.page === l.page).map((x) => x.text).join(' ')
       inTable = !/distribution\s+cost/i.test(near)
-      surrender = inTable && /surr?ender\s+value/i.test(near)
+      surrender = inTable && /surr?ender\s+(?:value|benefit)/i.test(near)
       misses = 0
       return
     }
     if (!inTable) return
-    const m = l.text.match(/^(\d{1,3})\s*\/\s*(\d{1,3})\s+(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)\b\s*(.*)$/)
+    // "25/61  13,905 ..." or, with year and age in their own columns, "25  61  13,905 ..."
+    const m = l.text.match(/^(\d{1,3})\s*(?:\/\s*|\s+)(\d{1,3})\s+(?:S\$|\$)?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)\b\s*(.*)$/)
     if (!m) { if (++misses > 15) inTable = false; return }
     misses = 0
     const row: IllRow = { year: +m[1], age: +m[2], total: amount(m[3]), rest: m[4].split(/\s+/).filter(Boolean), page: l.page, line: l.text }
@@ -388,6 +429,15 @@ export function extract(pages: Page[], fileName: string): Extracted {
   // ----- Insured person (the "Policyholder and Plan Details" block) -----
   const name = labelled(lines, /^life\s+assured(?:'s)?(?:\s+name)?\b/i) ?? labelled(lines, /^(?:name\s+of\s+(?:the\s+)?life\s+assured|insured\s+name)\b/i)
   if (name) set('insured_name', name.value, name.line.page, name.line.text)
+  // Another layout (e.g. FWD): a table "Name | Gender | Age | Smoker Status" with a "Person insured" row.
+  for (const l of lines) {
+    const m = l.text.match(/^(?:person|life)\s+(?:insured|assured)\s{2,}(.+?)\s{2,}(male|female)\s{2,}(?:(\d{1,3})\s{2,})?(non[\s-]?smoker|smoker)\b/i)
+    if (!m) continue
+    set('insured_name', m[1].trim(), l.page, l.text)
+    set('gender', cap(m[2]), l.page, l.text)
+    set('underwriting_class', smoker(m[4]), l.page, l.text)
+    break
+  }
   const dob = labelled(lines, /^(?:date\s+of\s+birth|DOB)\b/i)
   if (dob) set('date_of_birth', dob.value, dob.line.page, dob.line.text)
   const gs = labelled(lines, /^gender\s*\/\s*smok(?:er|ing)\s+status\b/i) ?? labelled(lines, /^sex\s*\/\s*smok(?:er|ing)\s+status\b/i)
@@ -412,7 +462,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   const cover = lines.filter((l) => l.page <= 2)
   const prt = coverRow(cover, /^premium\s+term\b/i)
   if (prt) set('premium_term', parseYears(prt.value), prt.line.page, prt.line.text)
-  const pt = coverRow(cover, /^policy\s+term\b/i)
+  const pt = coverRow(cover, /^policy\s+(?:coverage\s+)?term\b/i) ?? coverRow(cover, /^(?:coverage|policy)\s+period\b/i)
   if (pt) set('policy_term', parseYears(pt.value), pt.line.page, pt.line.text)
   const insurerRow = coverRow(cover, /^name\s+of\s+insurer\b/i)
 
@@ -443,7 +493,8 @@ export function extract(pages: Page[], fileName: string): Extracted {
     const m = l.text.match(/total\s+distribution\s+cost\s+for\s+this\s+plan\s+is\s*(.*)$/i)
     if (!m) continue
     const v = m[1].replace(/\$\s+(?=\d)/, '$').replace(/([\d.,])\s+(?=[\d.,])/g, '$1').match(MONEY_IN_TEXT)
-    const pct = l.text.match(/makes\s+up\s+(\d{1,3}(?:\.\d+)?)\s*%/i)
+    const next = lines[lines.indexOf(l) + 1]?.text ?? ''
+    const pct = (l.text + ' ' + next).match(/makes\s+up\s+(\d{1,3}(?:\.\d+)?)\s*%/i)
     if (v) notes.push(`Total distribution cost is ${cm(v[1])}${pct ? ` (${pct[1]}% of total premiums)` : ''}.`)
     break
   }
@@ -455,8 +506,10 @@ export function extract(pages: Page[], fileName: string): Extracted {
   // ----- Summary table -----
   let table: TableRead | null = null
   for (const p of pages) { table = readSummaryTable(p); if (table) break }
-  const factor = modeFactor(mode) ?? (table && /monthly/i.test(table.premiumHeader) ? 12 : table && /annual/i.test(table.premiumHeader) ? 1 : null)
-  const modeName = mode ? cap(mode) : factor === 12 ? 'Monthly' : factor === 1 ? 'Annual' : ''
+  const planRows = table ? null : readPlanRows(lines)
+  const baseRow = planRows?.rows[0]
+  const factor = modeFactor(mode) ?? (baseRow ? modeFactor(baseRow.freq) : null) ?? (table && /monthly/i.test(table.premiumHeader) ? 12 : table && /annual/i.test(table.premiumHeader) ? 1 : null)
+  const modeName = mode ? cap(mode) : baseRow && modeFactor(baseRow.freq) ? cap(baseRow.freq) : factor === 12 ? 'Monthly' : factor === 1 ? 'Annual' : ''
   const yearly = (v: string) => (factor ? fmt2(num(v) * factor) : '')
   let baseModal = ''
   if (table) {
@@ -467,9 +520,17 @@ export function extract(pages: Page[], fileName: string): Extracted {
     if (t.premium) { baseModal = amount(t.premium); set('base_premium', yearly(baseModal), table.page, table.line) }
     if (!plan && t.plan) plan = t.plan
   }
+  if (baseRow) {
+    set('death_sa', baseRow.sa, baseRow.page, baseRow.line)
+    set('policy_term', baseRow.policyTerm, baseRow.page, baseRow.line)
+    set('premium_term', baseRow.premiumTerm, baseRow.page, baseRow.line)
+    baseModal = baseRow.premium
+    set('base_premium', yearly(baseModal), baseRow.page, baseRow.line)
+    if (!plan && baseRow.name) plan = baseRow.name
+  }
 
   // Fallbacks: "label: value" on one line (never the next line, to avoid picking up the wrong number).
-  const insurer = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName)
+  const insurer = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName.replace(/[_.-]+/g, ' '))
   const labelRules: Record<string, RegExp[]> = {
     death_sa: [/\b(?:basic\s+)?sum\s+assured\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i],
   }
@@ -487,7 +548,10 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
 
   // ----- Riders, and the total premium line -----
-  const { riders, total, seen: ridersSeen } = readRiders(lines)
+  const fromTable = readRiders(lines)
+  const riders: Rider[] = planRows ? planRows.rows.slice(1).map((r) => ({ name: r.name, sa: r.sa, premium: r.premium, discount: '', page: r.page, line: r.line })) : fromTable.riders
+  const total = planRows ? planRows.total : fromTable.total
+  const ridersSeen = planRows ? true : fromTable.seen
   const tpd = riders.find((r) => isTpd(r.name))
   const ci = riders.find((r) => isCi(r.name))
   if (tpd) { set('tpd_sa', tpd.sa, tpd.page, tpd.line); set('tpd_premium', yearly(tpd.premium), tpd.page, tpd.line) }
@@ -501,10 +565,11 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (others.length) notes.push(`Other riders not in the table: ${others.map((r) => `${r.name} (${cm(r.premium)} ${modeName.toLowerCase() || 'per payment'})`).join('; ')}.`)
   if (total) set('annual_premium', yearly(total.value), total.page, total.line)
   else if (table && baseModal && ridersSeen === false) set('annual_premium', yearly(baseModal), table.page, table.line)
+  else if (baseRow && planRows!.rows.length === 1) set('annual_premium', yearly(baseModal), baseRow.page, baseRow.line)
   if (factor && factor !== 1 && (found.annual_premium.value || found.base_premium.value)) {
     notes.push(`Payment mode is ${modeName}: premiums are shown per year (${factor} × the ${modeName.toLowerCase()} premium${total ? `, ${cm(total.value)} in total` : baseModal ? `, ${cm(baseModal)}` : ''}).`)
   }
-  if (!factor && (table?.values.premium || total)) {
+  if (!factor && (table?.values.premium || total || baseRow)) {
     notes.push('Payment mode not found, so premiums were left blank. Fill them in as yearly amounts.')
   }
   if (mode && /single/i.test(mode)) notes.push('This is a single premium policy: the premium is paid once.')
@@ -543,6 +608,11 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (ti) set('terminal_illness', 'Included', ti.page, ti.text)
   const ad = mention(/accidental\s+death/i)
   if (ad) set('accidental_death', 'Included', ad.page, ad.text)
+  // A PI lists what the plan pays for; a benefit it never mentions is not covered (spec: "NA").
+  if (table || baseRow) {
+    if (!ti) set('terminal_illness', 'NA', null, 'not mentioned anywhere in the PI')
+    if (!ad) set('accidental_death', 'NA', null, 'not mentioned anywhere in the PI')
+  }
   const noCash = lines.find((l) => /(?:does\s+not\s+have|has\s+no|there\s+is\s+no|without)\s+(?:any\s+)?cash\s+values?/i.test(l.text))
   if (noCash) set('cash_value', 'NA', noCash.page, noCash.text)
   const coverText = lines.filter((l) => l.page <= 2).map((l) => l.text).join(' ')
@@ -559,7 +629,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
     if (table.values.before) notes.unshift(`Premium is after the ${pct} discount (${cm(amount(table.values.before))}${modeName ? ' ' + modeName.toLowerCase() : ''} before it).`)
   } else if (lines.some((l) => /\b(?:promo(?:tion(?:al)?)?\s+(?:code|discount)|premium\s+discount|discount\s*\(%\))/i.test(l.text))) {
     notes.unshift('This PI mentions a premium discount or promotion. Fill in Campaigns by hand.')
-  } else if (table) {
+  } else if (table || baseRow) {
     set('campaigns', 'NA', null, null)
   }
 

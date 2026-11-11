@@ -107,7 +107,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   }
 
   const currency = commonCurrency(cols)
-  const missing = cols.reduce((n, c) => n + FIELDS.filter((f) => !c.values[f.key]).length, 0)
+  const missing = cols.reduce((n, c) => n + FIELDS.filter((f) => f.section !== 'meta' && !c.values[f.key]).length, 0)
   const canSave = (isBsd || req.assignee_id === userId) && ['assigned', 'in_progress'].includes(req.status)
   const fileName = `${req.ref}-pi-comparison.xlsx`
   const hasSaved = docs.some((d) => d.kind === 'pi_output' && isComparisonFile(d.file_name))
@@ -199,6 +199,14 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                     <th key={i}>
                       PI{i + 1}
                       <div className="small muted" style={{ fontWeight: 400, marginTop: 4 }}>{c.fileName}</div>
+                      {!c.error && (
+                        <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 400, marginTop: 6 }}>
+                          Currency
+                          <input type="text" aria-label={`Policy Currency for PI ${i + 1}`} value={c.values.currency ?? ''} maxLength={3} placeholder="?"
+                            style={{ width: 70, height: 30 }} className={c.values.currency ? '' : 'empty-cell'}
+                            onChange={(e) => setValue(i, 'currency', e.target.value.toUpperCase())} />
+                        </label>
+                      )}
                       {c.error && <div className="error">{c.error}</div>}
                     </th>
                   ))}
@@ -212,7 +220,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                       const label = labelWith(f, currency)
                       return (
                         <tr key={f.key}>
-                          <td><strong>{label}</strong>{f.key === 'currency' && <div className="small muted">Sets the currency on the amounts</div>}</td>
+                          <td><strong>{label}</strong></td>
                           {cols.map((c, i) => {
                             const fd = c.found[f.key]
                             const edited = (fd?.value ?? '') !== (c.values[f.key] ?? '')
@@ -224,7 +232,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                                 {(f.kind === 'money' || f.kind === 'sum') && !currency && cur && c.values[f.key] && c.values[f.key] !== 'NA' && <div className="small">in {cur}</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
-                                  {edited ? 'Changed by hand' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : 'From the PI') : 'Not found'}
+                                  {edited ? 'Changed by hand' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}
                                 </div>
                               </td>
                             )
