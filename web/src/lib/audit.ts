@@ -17,6 +17,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'document.viewed': 'Document opened',
   'settings.updated': 'Deadline settings changed',
   'user.updated': 'User added or changed',
+  'access.user_module': 'Module access changed for a person',
+  'access.role_module': 'Module default changed for a role',
 }
 
 export const auditActionLabel = (action: string) => AUDIT_ACTION_LABEL[action] ?? action.replace(/[._]/g, ' ')
@@ -54,6 +56,14 @@ export function describeAudit(r: AuditRow, people: Record<string, Profile>): str
       const role = d.role ? ROLE_LABEL[String(d.role)] ?? String(d.role) : 'no role'
       return `Saved the account of ${person(r.entity_id)}: role ${role}, ${d.active === false ? 'deactivated' : 'active'}`
     }
+  }
+  if (r.action === 'access.user_module') {
+    const what = d.setting === 'default' ? 'set back to the role default' : `switched ${d.setting}`
+    return `${d.module_name ?? d.module} ${what} for ${person(r.entity_id)}`
+  }
+  if (r.action === 'access.role_module') {
+    const role = ROLE_LABEL[String(d.role)] ?? String(d.role)
+    return `${d.module_name ?? d.module} switched ${d.setting} by default for the ${role} role`
   }
   if (r.action.startsWith('request.')) {
     const status = STATUS_LABEL[r.action.slice(8)] ?? r.action.slice(8).replace(/_/g, ' ')

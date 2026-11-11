@@ -8,22 +8,31 @@ interface AuthState {
   profile: Profile | null
   loading: boolean
   has: (r: Role) => boolean
+  /** Modules the user can open (role default or the admin's per-user switch). */
+  modules: string[]
+  can: (module: string) => boolean
   /** True after the user opened a password-reset link, until they set a new password. */
   recovering: boolean
   clearRecovering: () => void
 }
 
-const Ctx = createContext<AuthState>({ session: null, profile: null, loading: true, has: () => false, recovering: false, clearRecovering: () => {} })
+const Ctx = createContext<AuthState>({ session: null, profile: null, loading: true, has: () => false, modules: [], can: () => false, recovering: false, clearRecovering: () => {} })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [modules, setModules] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [recovering, setRecovering] = useState(false)
 
   async function loadProfile(s: Session | null) {
-    if (!s) { setProfile(null); return }
-    const { data } = await supabase.from('profiles').select('*').eq('id', s.user.id).maybeSingle()
+    if (!s) { setProfile(null); setModules([]); return }
+    const [{ data }, mods] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', s.user.id).maybeSingle(),
+      supabase.rpc('my_modules'),
+    ])
+    // Before 1i-upgrade.sql is run the database has no modules yet: keep PI Requests working as before.
+    setModules(mods.error ? ['pi_requests'] : ((mods.data as string[] | null) ?? []))
     setProfile((data as Profile) ?? null)
   }
 
@@ -41,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const has = (r: Role) => !!profile?.active && profile.role === r
-  return <Ctx.Provider value={{ session, profile, loading, has, recovering, clearRecovering: () => setRecovering(false) }}>{children}</Ctx.Provider>
+  const can = (m: string) => modules.includes(m)
+  return <Ctx.Provider value={{ session, profile, loading, has, modules, can, recovering, clearRecovering: () => setRecovering(false) }}>{children}</Ctx.Provider>
 }
 
 export const useAuth = () => useContext(Ctx)

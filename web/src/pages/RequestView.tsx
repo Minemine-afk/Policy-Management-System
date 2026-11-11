@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { isComparisonFile } from '../lib/piExcel'
 import { nameOf, usePeople } from '../lib/people'
+import { usePiMembers } from '../lib/modules'
 import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime, says } from '../lib/options'
 import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
@@ -15,6 +16,7 @@ export default function RequestView() {
   const { id } = useParams()
   const { profile, has } = useAuth()
   const people = usePeople()
+  const piMembers = usePiMembers()
   const settings = useSettings()
   const [r, setR] = useState<PiRequest | null | undefined>(undefined)
   const [client, setClient] = useState<RequestClient | null>(null)
@@ -59,7 +61,7 @@ export default function RequestView() {
   const who = (id: string | null) => (intro ? (id === profile.id ? 'You' : 'Ops team') : id ? nameOf(people, id) : 'Automatic')
   const mineAssigned = has('ops') && r.assignee_id === profile.id
   const staffActs = (mineAssigned || has('bsd')) && r.status !== 'removed'
-  const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active)
+  const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active && (!piMembers || piMembers.has(p.id)))
   const move = (to: RequestStatus) => call('change_status', { p_request: r.id, p_to: to })
   const piCount = docs.filter((d) => d.kind === 'pi_output').length
   const piPdfCount = docs.filter((d) => d.kind === 'pi_output' && d.file_name.toLowerCase().endsWith('.pdf')).length
