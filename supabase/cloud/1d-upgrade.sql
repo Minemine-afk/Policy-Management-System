@@ -144,8 +144,8 @@ begin
       p ->> 'age_band', p ->> 'gender', (p ->> 'smoker')::boolean, p ->> 'coverage_term', p ->> 'sum_assured_band',
       coalesce(p ->> 'premium_type', 'Annual'), coalesce((p ->> 'ci_benefit')::boolean, false), nullif(btrim(p ->> 'remarks'), ''))
   returning id, ref into rid, rref;
-  insert into public.request_clients (request_id, owner_id, client_name, nric, contact)
-  values (rid, auth.uid(), btrim(p_client ->> 'client_name'), nullif(btrim(p_client ->> 'nric'), ''), nullif(btrim(p_client ->> 'contact'), ''));
+  insert into public.request_clients (request_id, owner_id, client_name, contact)
+  values (rid, auth.uid(), btrim(p_client ->> 'client_name'), nullif(btrim(p_client ->> 'contact'), ''));
   perform public.add_event(rid, 'submitted', null, 'submitted');
   perform public.log_event('request.submitted', 'pi_request', rref);
   return rid;
@@ -168,7 +168,7 @@ begin
   if p_client is not null then
     if coalesce(btrim(p_client ->> 'client_name'), '') = '' then raise exception 'Enter the client name'; end if;
     update public.request_clients set client_name = btrim(p_client ->> 'client_name'),
-      nric = nullif(btrim(p_client ->> 'nric'), ''), contact = nullif(btrim(p_client ->> 'contact'), '')
+      contact = nullif(btrim(p_client ->> 'contact'), '')
     where request_id = r.id;
   end if;
   perform public.add_event(r.id, 'edited', r.status, r.status);

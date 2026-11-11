@@ -107,7 +107,7 @@ These rules live in `supabase/migrations/` and hold even if someone bypasses the
 
 - Requests change only through database functions (`create_request`, `claim_request`, `assign_request`,
   `change_status`, `resubmit_request`, `remove_request`, ...). Nobody can edit the status directly.
-- Client name, NRIC and contact are readable only by the introducer who submitted the request. Ops, BSD and admins never see them.
+- Client name and contact are readable only by the introducer who submitted the request. Ops, BSD and admins never see them.
 - An introducer sees only their own requests. Ops see the unassigned pool and their own assignments. BSD see all. Admins see none.
 - Internal comments and internal events never reach introducers. PIs reach the introducer only once the request is completed.
 - Introducers cannot read the priority, due time or paused clock of a request: the app reads requests through the `request_list`

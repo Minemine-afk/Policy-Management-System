@@ -1,6 +1,6 @@
 -- ============================================================================================================
 -- FAKE SAMPLE DATA ONLY: 20 made-up users (5 introducers, 5 ops, 5 bsd, 5 admin) and 3 made-up requests per introducer.
--- Every name, firm, client, NRIC and phone number below is invented. Do not use with real client data.
+-- Every name, firm, client and phone number below is invented. Do not use with real client data.
 --
 -- Run after 1-setup.sql (and the 1b to 1e upgrade files if you use them). Safe to run twice: it skips users that exist.
 -- Remove everything it adds with 4b-remove-sample-users.sql.
@@ -90,8 +90,8 @@ begin
         case when k = 3 then now() - make_interval(days => i, hours => 1) end,
         case when k = 2 and i % 2 = 1 then 'urgent' else 'normal' end)   -- a few marked urgent
       returning id into rid;
-      insert into public.request_clients (request_id, owner_id, client_name, nric, contact)
-      values (rid, u.id, format('[Sample] Client %s-%s', i, k), format('S99%s%s000Z', i, k), format('9000%s%s00', i, k));
+      insert into public.request_clients (request_id, owner_id, client_name, contact)
+      values (rid, u.id, format('[Sample] Client %s-%s', i, k), format('9000%s%s00', i, k));
       insert into public.request_events (request_id, actor_id, kind, to_status, at)
       values (rid, u.id, 'submitted', 'submitted', now() - make_interval(days => (4 - k) * 2 + i, hours => i * 3));
     end loop;

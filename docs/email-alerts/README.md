@@ -19,7 +19,7 @@ Every in-app notification (assigned to you, due soon, overdue, sent back, comple
 new comment) can also go out by email. Each user can switch emails off on their Notifications page (once step 2 above is done).
 
 The email carries only the request reference and the notice text (for example "PI-00012 is overdue" or the
-send-back reason), plus a link. It never contains client names, NRIC or contact details.
+send-back reason), plus a link. It never contains client names or contact details.
 
 It works like this: a new row in `notifications` → a Supabase **Database Webhook** → the **notify-email** Edge Function
 → **Resend** sends the email. (Supabase Edge Functions can't use ordinary SMTP on port 587, so an email API is used.)

@@ -10,7 +10,7 @@
 //   WEBHOOK_SECRET   any long random text; the webhook sends it in the x-webhook-secret header
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase automatically.
 //
-// The email carries only the request reference and the notice text (never client names, NRIC or contact).
+// The email carries only the request reference and the notice text (never client names or contact).
 
 type Env = (name: string) => string | undefined
 

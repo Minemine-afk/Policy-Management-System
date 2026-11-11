@@ -44,7 +44,6 @@ export interface PiRequest {
 export interface RequestClient {
   request_id: string
   client_name: string
-  nric: string | null
   contact: string | null
 }
 

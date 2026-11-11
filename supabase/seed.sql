@@ -50,16 +50,16 @@ select setval('public.request_ref_seq', 6);
 -- PI-00004 was sent back 3 days ago: its deadline clock is paused until the introducer resubmits.
 update public.pi_requests set paused_at = now() - interval '3 days' where ref = 'PI-00004';
 
-insert into public.request_clients (request_id, owner_id, client_name, nric, contact)
-select r.id, r.introducer_id, c.name, c.nric, c.contact
+insert into public.request_clients (request_id, owner_id, client_name, contact)
+select r.id, r.introducer_id, c.name, c.contact
 from public.pi_requests r
 join (values
-  ('PI-00001', '[Sample] Client Alpha', 'S0000001A', '90000001'),
-  ('PI-00002', '[Sample] Client Bravo', 'S0000002B', '90000002'),
-  ('PI-00003', '[Sample] Client Charlie', 'S0000003C', '90000003'),
-  ('PI-00004', '[Sample] Client Delta', 'S0000004D', '90000004'),
-  ('PI-00005', '[Sample] Client Echo', 'S0000005E', '90000005'),
-  ('PI-00006', '[Sample] Client Foxtrot', 'S0000006F', '90000006')) as c(ref, name, nric, contact) on c.ref = r.ref;
+  ('PI-00001', '[Sample] Client Alpha', '90000001'),
+  ('PI-00002', '[Sample] Client Bravo', '90000002'),
+  ('PI-00003', '[Sample] Client Charlie', '90000003'),
+  ('PI-00004', '[Sample] Client Delta', '90000004'),
+  ('PI-00005', '[Sample] Client Echo', '90000005'),
+  ('PI-00006', '[Sample] Client Foxtrot', '90000006')) as c(ref, name, contact) on c.ref = r.ref;
 
 insert into public.request_events (request_id, actor_id, kind, from_status, to_status, detail, introducer_visible, at)
 select id, introducer_id, 'submitted', null, 'submitted', null, true, submitted_at from public.pi_requests;
