@@ -31,7 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       supabase.from('profiles').select('*').eq('id', s.user.id).maybeSingle(),
       supabase.rpc('my_modules'),
     ])
-    setModules((mods.data as string[] | null) ?? [])
+    // Before 1i-upgrade.sql is run the database has no modules yet: keep PI Requests working as before.
+    setModules(mods.error ? ['pi_requests'] : ((mods.data as string[] | null) ?? []))
     setProfile((data as Profile) ?? null)
   }
 

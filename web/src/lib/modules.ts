@@ -33,8 +33,8 @@ export function useModules() {
 export function usePiMembers() {
   const [ids, setIds] = useState<Set<string> | null>(null)
   useEffect(() => {
-    supabase.rpc('module_members', { p_module: 'pi_requests' }).then(({ data }) =>
-      setIds(new Set(((data as string[] | null) ?? []))))
+    supabase.rpc('module_members', { p_module: 'pi_requests' }).then(({ data, error }) =>
+      setIds(error ? null : new Set(((data as string[] | null) ?? []))))
   }, [])
   return ids
 }
