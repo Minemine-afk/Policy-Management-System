@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { isComparisonFile } from '../lib/piExcel'
 import { nameOf, usePeople } from '../lib/people'
-import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime, says } from '../lib/options'
+import { EVENT_LABEL, ageOn, dueInfo, fmtDate, fmtDateTime, planName, says } from '../lib/options'
 import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
-import { Fact, ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
+import { ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
 import Files from '../components/Files'
 import PiComparison from '../components/PiComparison'
 
@@ -77,6 +77,30 @@ export default function RequestView() {
   const urgent = !intro && r.priority === 'urgent'
   const keepUrgent = urgent && !!due?.overdue
 
+  const age = ageOn(r.date_of_birth)
+  const details: [string, ReactNode][] = [
+    ...(client ? [['Client name', client.client_name] as [string, ReactNode]] : []),
+    ...(!intro ? [['Introducer', `${nameOf(people, r.introducer_id)}${people[r.introducer_id]?.company ? ` · ${people[r.introducer_id].company}` : ''}`] as [string, ReactNode]] : []),
+    ['Date of birth', r.date_of_birth ? `${r.date_of_birth}${age != null ? ` (age ${age})` : ''}` : '—'],
+    ['Gender', r.gender],
+    ['Smoker status', r.smoker ? 'Smoker' : 'Non-smoker'],
+    ['Nationality', r.nationality ?? '—'],
+    ['Residency', r.residency ?? '—'],
+    ['Client type', r.client_type ?? '—'],
+    ['Product', planName(r)],
+    ['Currency', r.currency],
+    [r.amount_basis === 'premium' ? `Premium (${r.premium_type.toLowerCase()})` : 'Sum assured', r.amount != null ? Number(r.amount).toLocaleString('en-SG', { maximumFractionDigits: 2 }) : '—'],
+    ['Policy term', r.policy_term ?? '—'],
+    ['Premium term', r.premium_term ?? '—'],
+    ['Payment frequency', r.premium_type],
+    ['Riders', r.riders?.length ? r.riders.join(', ') : 'None'],
+    ['Term product comparison', r.compare_term ? [r.compare_product_1, r.compare_product_2].filter(Boolean).join('; ') : 'No'],
+    ...(client ? [['Client contact', client.contact ?? '—'] as [string, ReactNode]] : []),
+    ...(!intro ? [['Handled by', nameOf(people, r.assignee_id)] as [string, ReactNode]] : []),
+    ['Submitted', fmtDate(r.submitted_at)],
+    ...(!intro ? [['Due', open && r.due_at ? fmtDateTime(r.due_at) : '—'], ['Priority', urgent ? (r.urgent_auto ? 'Urgent (overdue)' : 'Urgent') : 'Normal']] as [string, ReactNode][] : []),
+  ]
+
   return (
     <main className="page">
       <div className="row between">
@@ -125,33 +149,16 @@ export default function RequestView() {
 
       <div className="split">
         <div className="main" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <section className="card">
-            <h2 className="eyebrow">Request</h2>
-            <dl className="facts">
-              <Fact label="Product">{r.product} · {r.plan_category}</Fact>
-              <Fact label="Age band">{r.age_band}</Fact>
-              <Fact label="Gender · Smoker">{r.gender} · {r.smoker ? 'Yes' : 'No'}</Fact>
-              <Fact label="Coverage term">{r.coverage_term}</Fact>
-              <Fact label="Sum assured">{r.sum_assured_band}</Fact>
-              <Fact label="Premium · CI benefit">{r.premium_type} · {r.ci_benefit ? 'Yes' : 'No'}</Fact>
-              {!intro && <Fact label="Introducer">{nameOf(people, r.introducer_id)}{people[r.introducer_id]?.company ? ` · ${people[r.introducer_id].company}` : ''}</Fact>}
-              {!intro && <Fact label="Handled by">{nameOf(people, r.assignee_id)}</Fact>}
-              <Fact label="Submitted">{fmtDate(r.submitted_at)}</Fact>
-              {!intro && <Fact label="Due">{open && r.due_at ? fmtDateTime(r.due_at) : '—'}</Fact>}
-              {!intro && <Fact label="Priority">{urgent ? (r.urgent_auto ? 'Urgent (overdue)' : 'Urgent') : 'Normal'}</Fact>}
-            </dl>
-            {r.remarks && <p style={{ margin: 0 }}><span className="muted small">Remarks</span><br />{r.remarks}</p>}
+          <section className="card" aria-label="Request details">
+            <div>
+              <h2 className="eyebrow">Request details</h2>
+              {client && <p className="small muted" style={{ margin: '4px 0 0' }}>Client name and contact are seen only by you.</p>}
+            </div>
+            <table className="facts-table"><tbody>
+              {details.map(([k, v]) => <tr key={k}><th scope="row">{k}</th><td>{v}</td></tr>)}
+            </tbody></table>
+            {r.remarks && <p style={{ margin: 0, whiteSpace: 'pre-line' }}><span className="muted small">Remarks</span><br />{r.remarks}</p>}
           </section>
-
-          {client && (
-            <section className="card" aria-label="Client details">
-              <h2 className="eyebrow">Client (only you can see this)</h2>
-              <dl className="facts">
-                <Fact label="Name">{client.client_name}</Fact>
-                <Fact label="Contact">{client.contact ?? '—'}</Fact>
-              </dl>
-            </section>
-          )}
 
           <Files title="Attachments" hint="Files the introducer adds to the request." requestId={r.id} kind="attachment" docs={docs}
             canUpload={canUploadAttachment} userId={profile.id} onChange={load} />
