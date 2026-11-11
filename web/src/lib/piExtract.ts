@@ -75,7 +75,7 @@ export const KNOWN_INSURERS: { name: string; aliases: string[] }[] = [
   { name: 'AIA', aliases: ['AIA'] },
   { name: 'Prudential', aliases: ['Prudential'] },
   { name: 'Manulife', aliases: ['Manulife'] },
-  { name: 'HSBC Life', aliases: ['HSBC Life'] },
+  { name: 'HSBC Life', aliases: ['HSBC Life', 'HSBC'] },
   { name: 'FWD', aliases: ['FWD'] },
   { name: 'China Life', aliases: ['China Life'] },
   { name: 'China Taiping', aliases: ['China Taiping'] },
@@ -318,7 +318,7 @@ function modeFactor(mode: string): number | null {
   return null
 }
 
-interface Rider { name: string; sa: string; premium: string; discount: string; page: number; line: string }
+interface Rider { name: string; sa: string; premium: string; discount: string; page: number; line: string; annual?: string }
 
 /** The rows of the "Supplementary Benefits" table on the summary page, read line by line:
  *  name, then numbers (terms, sum assured, premium before discount, discount %, premium payable). */
@@ -328,8 +328,18 @@ function readRiders(lines: Line[]): { riders: Rider[]; total: { value: string; p
   const page = lines[idx].page
   const riders: Rider[] = []
   let total: { value: string; page: number; line: string } | null = null
-  for (const l of lines.slice(idx + 1).filter((x) => x.page === page).slice(0, 30)) {
-    const t = l.text.trim()
+  const block = lines.slice(idx + 1).filter((x) => x.page === page).slice(0, 30)
+  for (let i = 0; i < block.length; i++) {
+    const l = block[i]
+    let t = l.text.trim()
+    // The premium table that follows some plan tables (e.g. HSBC "Your Premium") is read separately.
+    if (/^(?:your\s+premium|premium\s+frequency|plan\s+name)\b/i.test(t)) break
+    // A long rider name wrapped onto the lines around its numbers (e.g. HSBC):
+    // "Advance Total and Permanent Disability Payout" / "39 Years  To Age 85  100,000" / "III"
+    if (/^(?:\d|to\s+age)/i.test(t) && i > 0 && !/\d/.test(block[i - 1].text)) {
+      const after = block[i + 1]?.text.trim() ?? ''
+      t = `${block[i - 1].text.trim()}${/^(?:[IVX]+|[A-Za-z]{1,4})$/.test(after) ? ' ' + after : ''} ${t}`
+    }
     if (/^total\s*:/i.test(t)) {
       const nums = t.match(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g)
       if (nums) total = { value: amount(nums[nums.length - 1]), page, line: t }
@@ -385,6 +395,30 @@ function readPlanRows(lines: Line[]): { rows: PlanRow[]; total: { value: string;
   return null
 }
 
+/** A premium table with one column per payment frequency (e.g. HSBC "Your Premium"):
+ *  "Plan Name  Annual  Semi-Annual  Quarterly  Monthly", then one row per plan and a "Total Premium" row.
+ *  The Annual column is used, so these premiums are yearly already. */
+function readPremiumByFrequency(lines: Line[]): { rows: { name: string; annual: string; page: number; line: string }[]; total: { value: string; page: number; line: string } | null } | null {
+  const idx = lines.findIndex((l) => /\bannual\b/i.test(l.text) && /\bmonthly\b/i.test(l.text) && /\b(?:semi[\s-]?annual|half[\s-]?yearly|quarterly)\b/i.test(l.text))
+  if (idx < 0) return null
+  const order = lines[idx].text.match(/semi[\s-]?annual|half[\s-]?yearly|annual|quarterly|monthly/gi) ?? []
+  const col = order.findIndex((x) => /^annual$/i.test(x))
+  if (col < 0) return null
+  const rows: { name: string; annual: string; page: number; line: string }[] = []
+  let total: { value: string; page: number; line: string } | null = null
+  for (const l of lines.slice(idx + 1).filter((x) => x.page === lines[idx].page).slice(0, 25)) {
+    const m = l.text.match(/^(.*?[A-Za-z)\]].*?)\s+((?:\d{1,3}(?:,\d{3})*\.\d{2}\s*){2,})$/)
+    if (!m) { if (rows.length && /\d/.test(l.text)) break; continue }
+    const vals = m[2].trim().split(/\s+/)
+    if (vals.length !== order.length) continue
+    const name = m[1].trim()
+    if (/^total\b/i.test(name)) { total = { value: fmt2(num(vals[col])), page: l.page, line: l.text }; break }
+    rows.push({ name, annual: fmt2(num(vals[col])), page: l.page, line: l.text })
+  }
+  return rows.length ? { rows, total } : null
+}
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+
 /** No rider heading: any line on a page with a summary table that starts with a rider's name (TPD, CI, "... Rider")
  *  and carries a sum assured and a premium. */
 function findRiderLines(lines: Line[]): Rider[] {
@@ -412,25 +446,29 @@ interface IllRow { year: number; age: number; total: string; rest: string[]; pag
  *  A new illustration starts when the policy year goes back down (main plan first, then each rider). */
 function readIllustrations(lines: Line[]): { segments: IllRow[][]; surrender: boolean } {
   const segments: IllRow[][] = []
-  let inTable = false, surrender = false, misses = 0
+  let inTable = false, surrender = false, misses = 0, skip = 0
   lines.forEach((l, i) => {
     if (/total\s*premiums?\s*paid|paid\s+to[\s-]*date/i.test(l.text)) {
       const near = lines.slice(Math.max(0, i - 1), i + 3).filter((x) => x.page === l.page).map((x) => x.text).join(' ')
-      inTable = !/distribution\s+cost/i.test(near)
+      inTable = !/distribution/i.test(near)
+      // A column before "Total Premiums Paid" (e.g. HSBC's "Annual Premium"): the total is the next number.
+      const before = (l.text.split(/total\s*premiums?|paid\s+to[\s-]*date/i)[0] ?? '') + ' ' + (lines[i - 1]?.page === l.page && lines[i - 1].text.length < 80 && !/[.:]/.test(lines[i - 1].text) ? (lines[i - 1].text.split(/total\s*premiums?/i)[0] ?? '') : '')
+      skip = /\b(?:annual|premium)\b/i.test(before.replace(/end\s+of\s+policy|year\s*\/?\s*age/gi, '')) ? 1 : 0
       surrender = inTable && /surr?ender\s+(?:value|benefit)/i.test(near)
       misses = 0
       return
     }
     if (!inTable) return
     // "25/61  13,905 ..." or, with year and age in their own columns, "25  61  13,905 ..."
-    const m = l.text.match(/^(\d{1,3})\s*(?:\/\s*|\s+)(\d{1,3})\s+(?:S\$|\$)?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)\b\s*(.*)$/)
+    const m = l.text.match(new RegExp(`^(\\d{1,3})\\s*(?:\\/\\s*|\\s+)(\\d{1,3})\\s+${skip ? '(?:\\S+\\s+)' : ''}(?:S\\$|\\$)?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\b\\s*(.*)$`))
     if (!m) { if (++misses > 15) inTable = false; return }
     misses = 0
     const row: IllRow = { year: +m[1], age: +m[2], total: amount(m[3]), rest: m[4].split(/\s+/).filter(Boolean), page: l.page, line: l.text }
     const seg = segments[segments.length - 1]
     const last = seg?.[seg.length - 1]
     if (!last || row.year < last.year) segments.push([row])
-    else if (!(row.year === last.year && row.total === last.total)) seg.push(row)
+    // The same year again is the maturity table repeating the last row: keep the first reading.
+    else if (row.year !== last.year) seg.push(row)
     ;(row as IllRow & { surrender?: boolean }).surrender = surrender
   })
   return { segments, surrender }
@@ -445,7 +483,9 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
 
   // ----- Insured person (the "Policyholder and Plan Details" block) -----
-  const name = labelled(lines, /^life\s+assured(?:'s)?(?:\s+name)?\b/i) ?? labelled(lines, /^(?:name\s+of\s+(?:the\s+)?life\s+assured|insured\s+name)\b/i)
+  const detailsAt = lines.findIndex((l) => /^life\s+(?:insured|assured)\s+details\b/i.test(l.text.trim()))
+  const name = labelled(lines, /^life\s+assured(?:'s)?(?:\s+name)?\b/i) ?? labelled(lines, /^(?:name\s+of\s+(?:the\s+)?life\s+(?:assured|insured)|insured\s+name|life\s+insured(?:\s+name)?|proposal\s+on\s+the\s+life\s+of)\b/i)
+    ?? (detailsAt >= 0 ? labelled(lines.slice(detailsAt + 1, detailsAt + 4), /^name\b/i) : null)
   if (name) set('insured_name', name.value, name.line.page, name.line.text)
   // Another layout (e.g. FWD): a table "Name | Gender | Age | Smoker Status" with a "Person insured" row.
   for (const l of lines) {
@@ -518,7 +558,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
 
   // ----- Payment mode: premiums in the comparison are per year -----
-  const modeRow = labelled(lines, /^payment\s+mode\b/i, false)
+  const modeRow = labelled(lines, /^payment\s+(?:mode|frequency)\b/i, false) ?? labelled(lines, /^premium\s+(?:payment\s+)?(?:mode|frequency)\b/i, false)
   const mode = modeRow?.value.match(/^(monthly|quarterly|half[\s-]?yearly|semi[\s-]?annual(?:ly)?|annual(?:ly)?|yearly|single)/i)?.[1] ?? ''
 
   // ----- Summary table -----
@@ -566,28 +606,43 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
 
   // ----- Riders, and the total premium line -----
+  const byFreq = readPremiumByFrequency(lines)
   const fromTable = readRiders(lines)
+  if (byFreq) {
+    // Yearly premiums straight from the Annual column; riders matched to the plan table by name.
+    const [b, ...rs] = byFreq.rows
+    set('base_premium', b.annual, b.page, b.line)
+    for (const r of rs) {
+      const hit = fromTable.riders.find((x) => squash(x.name).startsWith(squash(r.name)) || squash(r.name).startsWith(squash(x.name)))
+      if (hit) { hit.annual = r.annual; hit.line = `${hit.line} / ${r.line}` }
+      else fromTable.riders.push({ name: r.name, sa: '', premium: '', annual: r.annual, discount: '', page: r.page, line: r.line })
+    }
+    if (byFreq.total) fromTable.total = null
+    set('annual_premium', byFreq.total?.value ?? (rs.length ? '' : b.annual), byFreq.total?.page ?? b.page, byFreq.total?.line ?? b.line)
+    fromTable.seen = true
+  }
   const riders: Rider[] = planRows ? planRows.rows.slice(1).map((r) => ({ name: r.name, sa: r.sa, premium: r.premium, discount: '', page: r.page, line: r.line })) : fromTable.riders
   const total = planRows ? planRows.total : fromTable.total
   const ridersSeen = planRows ? true : fromTable.seen
   const tpd = riders.find((r) => isTpd(r.name))
   const ci = riders.find((r) => isCi(r.name))
-  if (tpd) { set('tpd_sa', tpd.sa, tpd.page, tpd.line); set('tpd_premium', yearly(tpd.premium), tpd.page, tpd.line) }
-  if (ci) { set('ci_sa', ci.sa, ci.page, ci.line); set('ci_premium', yearly(ci.premium), ci.page, ci.line) }
+  const riderYearly = (r: Rider) => r.annual ?? yearly(r.premium)
+  if (tpd) { set('tpd_sa', tpd.sa, tpd.page, tpd.line); set('tpd_premium', riderYearly(tpd), tpd.page, tpd.line) }
+  if (ci) { set('ci_sa', ci.sa, ci.page, ci.line); set('ci_premium', riderYearly(ci), ci.page, ci.line) }
   // Spec: no CI rider -> "NA" and "NA". Same for TPD. Only once the summary page has been read.
   if (table || ridersSeen) {
     if (!ci) { set('ci_sa', 'NA', null, null); set('ci_premium', 'NA', null, null) }
     if (!tpd) { set('tpd_sa', 'NA', null, null); set('tpd_premium', 'NA', null, null) }
   }
   const others = riders.filter((r) => r !== tpd && r !== ci)
-  if (others.length) notes.push(`Other riders not in the table: ${others.map((r) => `${r.name} (${cm(r.premium)} ${modeName.toLowerCase() || 'per payment'})`).join('; ')}.`)
+  if (others.length) notes.push(`Other riders not in the table: ${others.map((r) => `${r.name} (${r.annual ? `${cm(r.annual)} a year` : `${cm(r.premium)} ${modeName.toLowerCase() || 'per payment'}`})`).join('; ')}.`)
   if (total) set('annual_premium', yearly(total.value), total.page, total.line)
   else if (table && baseModal && ridersSeen === false) set('annual_premium', yearly(baseModal), table.page, table.line)
   else if (baseRow && planRows!.rows.length === 1) set('annual_premium', yearly(baseModal), baseRow.page, baseRow.line)
-  if (factor && factor !== 1 && (found.annual_premium.value || found.base_premium.value)) {
+  if (factor && factor !== 1 && !byFreq && (found.annual_premium.value || found.base_premium.value)) {
     notes.push(`Payment mode is ${modeName}: premiums are shown per year (${factor} × the ${modeName.toLowerCase()} premium${total ? `, ${cm(total.value)} in total` : baseModal ? `, ${cm(baseModal)}` : ''}).`)
   }
-  if (!factor && (table?.values.premium || total || baseRow)) {
+  if (!factor && !byFreq && (table?.values.premium || total || baseRow)) {
     notes.push('Payment mode not found, so premiums were left blank. Fill them in as yearly amounts.')
   }
   if (mode && /single/i.test(mode)) notes.push('This is a single premium policy: the premium is paid once.')
@@ -599,6 +654,11 @@ export function extract(pages: Page[], fileName: string): Extracted {
     const sum = lasts.reduce((n, r) => n + num(r.total), 0)
     set('total_premium', fmt2(sum), lasts[0].page, lasts.map((r) => r.line).join(' + '))
     if (lasts.length > 1) notes.push(`Total premium adds the main plan (${cm(lasts[0].total)}) and ${lasts.length - 1 === 1 ? 'the rider' : `${lasts.length - 1} riders`} (${lasts.slice(1).map((r) => `${cm(r.total)}`).join(', ')}).`)
+    // "To Age 85" terms: the spec wants years, which is the main illustration's last policy year.
+    for (const k of ['policy_term', 'premium_term'] as const) {
+      const toAge = found[k].value.match(/^to\s+age\s+(\d+)/i)
+      if (toAge && +toAge[1] === lasts[0].age) found[k] = { value: String(lasts[0].year), page: lasts[0].page, line: `${found[k].line ?? ''} (to age ${toAge[1]} = ${lasts[0].year} years, from ${lasts[0].line})` }
+    }
     // Covered up till age: the age on the main illustration's last row.
     set('cover_age', String(lasts[0].age), lasts[0].page, lasts[0].line)
     // Cash value: none when every guaranteed surrender value in the main illustration is "-" or 0.
@@ -628,7 +688,6 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (ad) set('accidental_death', 'Included', ad.page, ad.text)
   // A PI lists what the plan pays for; a benefit it never mentions is not covered (spec: "NA").
   if (table || baseRow) {
-    if (!ti) set('terminal_illness', 'NA', null, 'not mentioned anywhere in the PI')
     if (!ad) set('accidental_death', 'NA', null, 'not mentioned anywhere in the PI')
   }
   const noCash = lines.find((l) => /(?:does\s+not\s+have|has\s+no|there\s+is\s+no|without)\s+(?:any\s+)?cash\s+values?/i.test(l.text))
@@ -636,6 +695,21 @@ export function extract(pages: Page[], fileName: string): Extracted {
   const coverText = lines.filter((l) => l.page <= 2).map((l) => l.text).join(' ')
   const baseCovers = /protection\s+against\s+death[^.]*(?:critical\s+illness|permanent\s+disability)/i.test(coverText)
   if (baseCovers && !tpd && !ci) notes.push('The plan itself covers more than death (see the cover page, e.g. TPD or critical illness), without a separate rider. The rider rows show NA by the spec\'s rule.')
+
+  /** A campaign written as a sentence, e.g. HSBC: "If you have chosen to attach either Advance TPD Payout III, Advance
+   *  Critical Illness Payout II ... the premiums have reflected a 20% campaign premium discount ..." */
+  function campaignSentence(): { value: string; page: number; line: string } | null {
+    for (let i = 0; i < lines.length; i++) {
+      const text = [lines[i - 1], lines[i], lines[i + 1]].filter((x) => x && x.page === lines[i].page).map((x) => x!.text).join(' ')
+      const m = lines[i].text.match(/(\d{1,2}(?:\.\d+)?)\s*%\s+((?:campaign|promotional|promo|special|perpetual)\s+)?(?:premium\s+)?discount/i)
+      if (!m) continue
+      const kinds = [/\bTPD\b|permanent\s+disab/i.test(text) ? 'TPD' : '', /\bCI\b|critical\s+illness/i.test(text) ? 'CI' : ''].filter(Boolean)
+      const perpetual = /perpetual|entire|whole\s+(?:premium|policy)\s+term|lifetime/i.test(text)
+      const value = `${m[1]}%${perpetual ? ' perpetual' : ''}${m[2] && !/perpetual/i.test(m[2]) ? ' ' + m[2].trim().toLowerCase() : ''} discount${kinds.length && /rider|supplementary|attach/i.test(text) ? ` with ${kinds.join(' or ')} rider` : ''}`
+      return { value, page: lines[i].page, line: text }
+    }
+    return null
+  }
 
   // ----- Campaigns: the discount on the summary table, promo code, and whether it lasts the whole term -----
   if (table?.values.discount) {
@@ -645,6 +719,9 @@ export function extract(pages: Page[], fileName: string): Extracted {
     const value = `${pct}${perpetual ? ' perpetual' : ''} discount${onRiders.length ? ` with ${onRiders.join(', ')}` : ''}${table.values.promo ? ` (promo code ${table.values.promo})` : ''}`
     set('campaigns', value, table.page, table.line)
     if (table.values.before) notes.unshift(`Premium is after the ${pct} discount (${cm(amount(table.values.before))}${modeName ? ' ' + modeName.toLowerCase() : ''} before it).`)
+  } else if (campaignSentence()) {
+    const c = campaignSentence()!
+    set('campaigns', c.value, c.page, c.line)
   } else if (lines.some((l) => /\b(?:promo(?:tion(?:al)?)?\s+(?:code|discount)|premium\s+discount|discount\s*\(%\))/i.test(l.text))) {
     notes.unshift('This PI mentions a premium discount or promotion. Fill in Campaigns by hand.')
   } else if (table || baseRow) {
