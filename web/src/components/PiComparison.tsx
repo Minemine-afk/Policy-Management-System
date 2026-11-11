@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { says } from '../lib/options'
-import { FIELDS, extract, readPdf, type Found } from '../lib/piExtract'
-import { TEMPLATE_URL, buildWorkbook, isComparisonFile } from '../lib/piExcel'
+import { FIELDS, SECTIONS, extract, labelWith, readPdf, type Found } from '../lib/piExtract'
+import { TEMPLATE_URL, buildWorkbook, commonCurrency, isComparisonFile } from '../lib/piExcel'
 import type { PiRequest, RequestDocument } from '../lib/types'
 
 interface Column {
@@ -87,7 +87,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           }
           const skipped = pages.filter((p) => p.skipped).map((p) => p.page)
           if (skipped.length) {
-            notes.push(`Scanned ${skipped.length === 1 ? 'page' : 'pages'} ${pageList(skipped)} ${skipped.length === 1 ? 'was' : 'were'} not read, because all six values were found before ${skipped.length === 1 ? 'it' : 'them'}.`)
+            notes.push(`Scanned ${skipped.length === 1 ? 'page' : 'pages'} ${pageList(skipped)} ${skipped.length === 1 ? 'was' : 'were'} not read, because the main values were found before ${skipped.length === 1 ? 'it' : 'them'}.`)
           }
           out.push({ fileName: doc.file_name, found, notes, discounted, values: Object.fromEntries(FIELDS.map((f) => [f.key, found[f.key]?.value ?? ''])) })
         } catch (e) {
@@ -106,6 +106,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
     setCols((cs) => cs.map((c, j) => (j === i ? { ...c, values: { ...c.values, [k]: v } } : c)))
   }
 
+  const currency = commonCurrency(cols)
   const missing = cols.reduce((n, c) => n + FIELDS.filter((f) => !c.values[f.key]).length, 0)
   const canSave = (isBsd || req.assignee_id === userId) && ['assigned', 'in_progress'].includes(req.status)
   const fileName = `${req.ref}-pi-comparison.xlsx`
@@ -204,24 +205,34 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                 </tr>
               </thead>
               <tbody>
-                {FIELDS.map((f) => (
-                  <tr key={f.key}>
-                    <td><strong>{f.label}</strong></td>
-                    {cols.map((c, i) => {
-                      const fd = c.found[f.key]
-                      const edited = (fd?.value ?? '') !== (c.values[f.key] ?? '')
+                {SECTIONS.map((sec) => (
+                  <Fragment key={sec.key}>
+                    <tr className="section-row"><th colSpan={cols.length + 1} scope="colgroup">{sec.label}</th></tr>
+                    {FIELDS.filter((f) => f.section === sec.key).map((f) => {
+                      const label = labelWith(f, currency)
                       return (
-                        <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : ''}>
-                          <input type="text" aria-label={`${f.label} for PI ${i + 1}`} value={c.values[f.key] ?? ''}
-                            onChange={(e) => setValue(i, f.key, e.target.value)} />
-                          {f.key === 'monthly_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
-                          <div className="small muted" title={fd?.line ?? ''}>
-                            {edited ? 'Changed by hand' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : 'Not found'}
-                          </div>
-                        </td>
+                        <tr key={f.key}>
+                          <td><strong>{label}</strong>{f.key === 'currency' && <div className="small muted">Sets the currency on the amounts</div>}</td>
+                          {cols.map((c, i) => {
+                            const fd = c.found[f.key]
+                            const edited = (fd?.value ?? '') !== (c.values[f.key] ?? '')
+                            const cur = (c.values.currency ?? '').toUpperCase()
+                            return (
+                              <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : ''}>
+                                <input type="text" aria-label={`${label} for PI ${i + 1}`} value={c.values[f.key] ?? ''}
+                                  onChange={(e) => setValue(i, f.key, e.target.value)} />
+                                {(f.kind === 'money' || f.kind === 'sum') && !currency && cur && c.values[f.key] && c.values[f.key] !== 'NA' && <div className="small">in {cur}</div>}
+                                {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
+                                <div className="small muted" title={fd?.line ?? ''}>
+                                  {edited ? 'Changed by hand' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : 'From the PI') : 'Not found'}
+                                </div>
+                              </td>
+                            )
+                          })}
+                        </tr>
                       )
                     })}
-                  </tr>
+                  </Fragment>
                 ))}
                 {cols.some((c) => c.notes.length > 0) && (
                   <tr>

@@ -132,6 +132,7 @@ tr.row-soon td { background: #FFF1DC; }
 table.compare th, table.compare td { min-width: 220px; }
 table.compare th:first-child, table.compare td:first-child { min-width: 180px; }
 table.compare input[type=text] { height: 38px; }
+tr.section-row th { background: var(--nav); color: #fff; text-align: left; font-size: 13px; letter-spacing: .02em; padding: 6px 12px; }
 td.empty-cell { background: var(--bad-soft); }
 td.edited-cell { background: var(--warn-soft); }
 .notices { list-style: none; margin: 0; padding: 0; }

@@ -19,7 +19,7 @@ function pdf(items) {
 }
 
 // Cover page block, then a summary table: heads = [[x, y, text]], row = [[x, text]].
-function lia({ plan, insurer, premiumTerm, policyTerm, tdc, pct, mode, heads, row, extra = [] }) {
+function lia({ plan, insurer, premiumTerm, policyTerm, tdc, pct, mode, heads, row, extra = [], currency = null }) {
   return pdf([
     [72, 770, '[SAMPLE] Made-up policy illustration for testing'],
     [200, 730, plan, 12],
@@ -29,8 +29,9 @@ function lia({ plan, insurer, premiumTerm, policyTerm, tdc, pct, mode, heads, ro
     [72, 665, 'Name of Insurer'], [250, 665, insurer],
     [72, 640, `The Total Distribution Cost for this plan is ${tdc} as shown in the Policy Illustration. This makes up ${pct}% of`],
     [72, 628, 'the total premiums payable. The minimum sum assured is $50,000.', 7],
-    [72, 560, 'Life Assured : XXXXX'], [300, 560, 'Gender / Smoker Status : Female/Non-Smoker'],
-    [72, 545, `Payment Mode : ${mode}`],
+    [72, 575, 'Life Assured : XXXXX'], [300, 575, 'Gender / Smoker Status : Female/Non-Smoker'],
+    [72, 560, 'Residency / Nationality : Singapore (SG) / Singapore (SG)'],
+    [72, 545, `Payment Mode : ${mode}`], ...(currency ? [[300, 545, `Currency : ${currency}`]] : []),
     ...heads,
     ...row.map(([x, t]) => [x, 470, t]),
     ...extra,
@@ -44,7 +45,7 @@ const PI_A = lia({
   row: [[72, 'GREAT Term Protector'], [225, 'To Age 65'], [305, '20 Years'], [385, '500,000'], [485, '105.20']],
 })
 const PI_B = lia({
-  plan: 'AIA Secure Term', insurer: 'AIA Singapore Private Limited',
+  plan: 'AIA Secure Term', insurer: 'AIA Singapore Private Limited', currency: 'USD',
   premiumTerm: '30 Years', policyTerm: '30 Years', tdc: '$3,010', pct: '9.50', mode: 'Annual',
   heads: [[72, 500, 'Your Plan'], [220, 500, 'Policy Term'], [300, 500, 'Premium Term'], [380, 500, 'Sum Assured'], [480, 500, 'Premium Payable']],
   row: [[72, 'AIA Secure Term'], [230, '30'], [310, '30'], [385, '400,000.00'], [490, '1,180.00']],
@@ -55,7 +56,11 @@ const PI_C = lia({
   heads: [[72, 510, 'Your Plan'], [170, 510, 'Policy Term'], [240, 510, 'Premium Term'], [310, 510, 'Sum Assured /'], [318, 500, 'Benefit'],
     [390, 510, 'Premium'], [392, 500, 'Before'], [390, 490, 'Discount'], [450, 510, 'Discount (%)'], [510, 510, 'Premium Payable']],
   row: [[72, 'Star Term Cover'], [180, '25'], [250, '25'], [312, '600,000.00'], [395, '80.00'], [460, '15%'], [520, '68.00']],
-  extra: [[72, 440, 'Supplementary Benefits'], [72, 425, 'Early CI Rider 25 25 200,000.00 20.00 15% 17.00'], [72, 410, 'Total: 100.00 85.00']],
+  extra: [[72, 440, 'Supplementary Benefits'], [72, 425, 'Early CI Rider 25 25 200,000.00 20.00 15% 17.00'], [72, 410, 'Total: 100.00 85.00'],
+    [72, 380, 'The discount is applied for the entire premium term. This plan offers protection against death and terminal illness.'],
+    [72, 350, 'End of Policy Year/Age  Total Premiums Paid To-date ($)  Death Benefit Guaranteed ($)  Surrender Value Guaranteed ($)'],
+    [72, 335, '1/41  1,020  600,000  -'], [72, 320, '2/42  2,040  600,000  -'], [72, 305, '25/65  25,500  600,000  -'],
+    [72, 280, 'This plan does not have any cash value.']],
 })
 
 module.exports = { pdf, PI_A, PI_B, PI_C }
