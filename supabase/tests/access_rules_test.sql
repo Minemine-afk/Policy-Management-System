@@ -35,7 +35,7 @@ end $$;
 
 -- 2. Create and edit
 select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}',
-                      '{"client_name":"[Sample] Client Golf","nric":"S0000007G"}');
+                      '{"client_name":"[Sample] Client Golf"}');
 select pg_temp.expect_error($$select create_request('{"gender":"Male"}', '{"client_name":"x"}')$$, 'Fill in');
 select pg_temp.expect_error($$select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', '{"client_name":""}')$$, 'client name');
 do $$ begin
@@ -404,4 +404,11 @@ do $$ begin
   if exists (select 1 from saved_filters) then raise exception 'delete saved filter failed'; end if;
   raise notice 'ok: saved filters and email preferences are per user';
 end $$;
+-- NRIC is not collected or stored any more.
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'request_clients' and column_name = 'nric')
+    then raise exception 'request_clients still has an nric column'; end if;
+  raise notice 'ok: no NRIC column';
+end $$;
+
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

@@ -148,7 +148,6 @@ export default function RequestView() {
               <h2 className="eyebrow">Client (only you can see this)</h2>
               <dl className="facts">
                 <Fact label="Name">{client.client_name}</Fact>
-                <Fact label="NRIC / FIN">{client.nric ?? '—'}</Fact>
                 <Fact label="Contact">{client.contact ?? '—'}</Fact>
               </dl>
             </section>

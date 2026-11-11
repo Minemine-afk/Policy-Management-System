@@ -21,7 +21,7 @@ const pick = (r: PiRequest): FormState => ({
   remarks: r.remarks ?? '',
 })
 
-interface PastClient { client_name: string; nric: string; contact: string; request: PiRequest }
+interface PastClient { client_name: string; contact: string; request: PiRequest }
 
 export default function RequestForm() {
   const { id } = useParams()
@@ -37,7 +37,7 @@ export default function RequestForm() {
   }
   const [ref, setRef] = useState('')
   const [f, setF] = useState<FormState>(DEFAULTS)
-  const [client, setClient] = useState({ client_name: '', nric: '', contact: '' })
+  const [client, setClient] = useState({ client_name: '', contact: '' })
   const [copiedFrom, setCopiedFrom] = useState('')
   const [past, setPast] = useState<PastClient[]>([])
   const [error, setError] = useState('')
@@ -56,7 +56,7 @@ export default function RequestForm() {
       setF(pick(r))
       loadDocs()
       const c = await supabase.from('request_clients').select('*').eq('request_id', id).maybeSingle()
-      if (c.data) setClient({ client_name: c.data.client_name, nric: c.data.nric ?? '', contact: c.data.contact ?? '' })
+      if (c.data) setClient({ client_name: c.data.client_name, contact: c.data.contact ?? '' })
       setReady(true)
     })()
   }, [id, nav])
@@ -70,7 +70,7 @@ export default function RequestForm() {
         supabase.from('request_clients').select('*').eq('request_id', from).maybeSingle(),
       ])
       if (data) { const r = data as PiRequest; setF(pick(r)); setCopiedFrom(r.ref) }
-      if (c.data) setClient({ client_name: c.data.client_name, nric: c.data.nric ?? '', contact: c.data.contact ?? '' })
+      if (c.data) setClient({ client_name: c.data.client_name, contact: c.data.contact ?? '' })
       setReady(true)
     })()
   }, [from])
@@ -80,7 +80,7 @@ export default function RequestForm() {
     if (id) return
     ;(async () => {
       const [cl, rq] = await Promise.all([
-        supabase.from('request_clients').select('request_id, client_name, nric, contact'),
+        supabase.from('request_clients').select('request_id, client_name, contact'),
         supabase.from('request_list').select('*').order('submitted_at', { ascending: false }),
       ])
       const byId = new Map(((rq.data as PiRequest[]) ?? []).map((r) => [r.id, r]))
@@ -88,7 +88,7 @@ export default function RequestForm() {
       for (const c of (cl.data ?? []).map((c) => ({ ...c, request: byId.get(c.request_id)! })).filter((c) => c.request)
         .sort((a, b) => b.request.submitted_at.localeCompare(a.request.submitted_at))) {
         const key = c.client_name.trim().toLowerCase()
-        if (!seen.has(key)) seen.set(key, { client_name: c.client_name, nric: c.nric ?? '', contact: c.contact ?? '', request: c.request })
+        if (!seen.has(key)) seen.set(key, { client_name: c.client_name, contact: c.contact ?? '', request: c.request })
       }
       setPast([...seen.values()].sort((a, b) => a.client_name.localeCompare(b.client_name)))
     })()
@@ -97,7 +97,7 @@ export default function RequestForm() {
   function fillFromPast(name: string) {
     const c = past.find((p) => p.client_name === name)
     if (!c) return
-    setClient({ client_name: c.client_name, nric: c.nric, contact: c.contact })
+    setClient({ client_name: c.client_name, contact: c.contact })
     setF({ ...pick(c.request), remarks: '' })
     setCopiedFrom(c.request.ref)
   }
@@ -139,9 +139,6 @@ export default function RequestForm() {
         <div className="grid">
           <label className="field">Client name
             <input type="text" value={client.client_name} onChange={(e) => setClient({ ...client, client_name: e.target.value })} />
-          </label>
-          <label className="field">NRIC / FIN (optional)
-            <input type="text" value={client.nric} onChange={(e) => setClient({ ...client, nric: e.target.value })} />
           </label>
           <label className="field">Contact (optional)
             <input type="text" value={client.contact} onChange={(e) => setClient({ ...client, contact: e.target.value })} />
