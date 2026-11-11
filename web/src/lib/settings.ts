@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: AppSettings = { deadline_hours: 48, due_soon_hour
 
 let cached: AppSettings | null = null
 
-/** The deadline settings bsd chose (Admin > Settings). Loaded once per page load. */
+/** The deadline settings an admin chose (Admin > Deadline settings). Loaded once per page load. */
 export function useSettings() {
   const [s, setS] = useState<AppSettings>(cached ?? DEFAULT_SETTINGS)
   useEffect(() => {

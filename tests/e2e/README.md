@@ -13,6 +13,6 @@ On a normal machine, use `supabase start` instead and you don't need any of this
 4. Start the web app against `http://127.0.0.1:54321` with the anon key the gateway prints.
 5. `npm i pg playwright` here, then `node run.cjs`. It walks through: submit, pick up, upload PIs, internal
    vs shared comments, complete, drag on the board, send back and resubmit, introducer isolation, bsd assign and
-   remove, user admin and the audit log, and Compare PIs on made-up Singapore-style PIs (`sample-pis.cjs`).
+   remove, admin users (add, CSV import and export), settings and the audit log, and Compare PIs on made-up Singapore-style PIs (`sample-pis.cjs`).
    Screenshots go to `shots/`. Add `PI_SAMPLES=/path/to/pi-samples` to also check the two real Singapore sample PIs
    (expected values in `../pi-extract/expected-sg-samples.json`). Without a browser: `node tests/pi-extract/check.mjs <folder> [expected.json]`.

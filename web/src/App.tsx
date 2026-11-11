@@ -38,15 +38,18 @@ export default function App() {
   }
 
   const cls = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : '')
+  // Admin manages users, settings and the audit log; it does not work on requests.
+  const admin = has('admin')
+  const home = admin ? '/admin' : '/board'
   return (
     <>
       <header className="topbar">
         <div className="brand">PI Request Tracker</div>
         <nav aria-label="Main">
           {has('introducer') && <NavLink to="/requests/new" className={cls}>New request</NavLink>}
-          <NavLink to="/board" className={cls}>Board</NavLink>
-          <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>
-          {has('bsd') && <NavLink to="/admin" className={cls}>Admin</NavLink>}
+          {!admin && <NavLink to="/board" className={cls}>Board</NavLink>}
+          {!admin && <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>}
+          {admin && <NavLink to="/admin" className={cls}>Admin</NavLink>}
         </nav>
         <div className="who">
           <NavLink to="/notifications" className={({ isActive }) => `bell${isActive ? ' active' : ''}`} aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}>
@@ -58,17 +61,17 @@ export default function App() {
         </div>
       </header>
       <Routes>
-        <Route path="/" element={<Navigate to="/board" replace />} />
-        <Route path="/board" element={<Board />} />
-        <Route path="/backlog" element={<Backlog />} />
+        <Route path="/" element={<Navigate to={home} replace />} />
+        <Route path="/board" element={admin ? <Navigate to="/admin" replace /> : <Board />} />
+        <Route path="/backlog" element={admin ? <Navigate to="/admin" replace /> : <Backlog />} />
         <Route path="/requests/new" element={has('introducer') ? <RequestForm /> : <Navigate to="/board" replace />} />
         <Route path="/requests/:id/edit" element={has('introducer') ? <RequestForm /> : <Navigate to="/board" replace />} />
-        <Route path="/requests/:id" element={<RequestView />} />
+        <Route path="/requests/:id" element={admin ? <Navigate to="/admin" replace /> : <RequestView />} />
         <Route path="/compare" element={<CompareMoved />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/account" element={<Account />} />
-        <Route path="/admin/*" element={has('bsd') ? <Admin /> : <Navigate to="/board" replace />} />
-        <Route path="*" element={<Navigate to="/board" replace />} />
+        <Route path="/admin/*" element={admin ? <Admin /> : <Navigate to="/board" replace />} />
+        <Route path="*" element={<Navigate to={home} replace />} />
       </Routes>
     </>
   )

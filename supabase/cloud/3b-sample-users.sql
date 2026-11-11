@@ -1,16 +1,17 @@
 -- ============================================================================================================
--- FAKE SAMPLE DATA ONLY: 15 made-up users (5 introducers, 5 ops, 5 bsd) and 3 made-up requests per introducer.
+-- FAKE SAMPLE DATA ONLY: 20 made-up users (5 introducers, 5 ops, 5 bsd, 5 admin) and 3 made-up requests per introducer.
 -- Every name, firm, client, NRIC and phone number below is invented. Do not use with real client data.
 --
--- Run after 1-setup.sql (and 1b/1c-upgrade.sql if you use them). Safe to run twice: it skips users that exist.
+-- Run after 1-setup.sql (and the 1b to 1e upgrade files if you use them). Safe to run twice: it skips users that exist.
 -- Remove everything it adds with 4b-remove-sample-users.sql.
 --
--- !! SET THE PASSWORD on the line marked "CHANGE THIS" first. All 15 sample logins share it, and 5 of them are
--- !! bsd (full admin). The site is online, so never use a guessable password, and remove the sample users
+-- !! SET THE PASSWORD on the line marked "CHANGE THIS" first. All 20 sample logins share it, and 5 of them are
+-- !! admin (can create users and change anyone's role). The site is online, so never use a guessable password, and remove the sample users
 -- !! before real data goes in.
 --
 -- Logins: sample.introducer1@example.com ... sample.introducer5@example.com,
---         sample.ops1@example.com ... sample.ops5@example.com, sample.bsd1@example.com ... sample.bsd5@example.com
+--         sample.ops1@example.com ... sample.ops5@example.com, sample.bsd1@example.com ... sample.bsd5@example.com,
+--         sample.admin1@example.com ... sample.admin5@example.com
 -- ============================================================================================================
 begin;
 do $$
@@ -34,11 +35,16 @@ begin
     ('sample.ops3@example.com',        '[Sample] Hui Min Ops',      'ops',        ''),
     ('sample.ops4@example.com',        '[Sample] Imran Ops',        'ops',        ''),
     ('sample.ops5@example.com',        '[Sample] Jia Hui Ops',      'ops',        ''),
-    ('sample.bsd1@example.com',        '[Sample] Kelvin Admin',       'bsd',        ''),
-    ('sample.bsd2@example.com',        '[Sample] Li Ting Admin',      'bsd',        ''),
-    ('sample.bsd3@example.com',        '[Sample] Marcus Admin',       'bsd',        ''),
-    ('sample.bsd4@example.com',        '[Sample] Nadia Admin',        'bsd',        ''),
-    ('sample.bsd5@example.com',        '[Sample] Oliver Admin',       'bsd',        '')
+    ('sample.bsd1@example.com',        '[Sample] Kelvin BSD',       'bsd',        ''),
+    ('sample.bsd2@example.com',        '[Sample] Li Ting BSD',      'bsd',        ''),
+    ('sample.bsd3@example.com',        '[Sample] Marcus BSD',       'bsd',        ''),
+    ('sample.bsd4@example.com',        '[Sample] Nadia BSD',        'bsd',        ''),
+    ('sample.bsd5@example.com',        '[Sample] Oliver BSD',       'bsd',        ''),
+    ('sample.admin1@example.com',      '[Sample] Priya Admin',      'admin',      ''),
+    ('sample.admin2@example.com',      '[Sample] Qing Admin',       'admin',      ''),
+    ('sample.admin3@example.com',      '[Sample] Rahul Admin',      'admin',      ''),
+    ('sample.admin4@example.com',      '[Sample] Siti Admin',       'admin',      ''),
+    ('sample.admin5@example.com',      '[Sample] Terence Admin',    'admin',      '')
   ) as t(email, full_name, role, company)
   loop
     if not exists (select 1 from auth.users where email = u.email) then

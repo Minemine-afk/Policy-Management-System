@@ -1,5 +1,5 @@
 -- Removes the FAKE sample users made by 3b-sample-users.sql (sample.*@example.com), their sample requests,
--- and anything they touched. Real users and real requests are kept:
+-- (including the sample admins), and anything they touched. Real users and real requests are kept:
 --   * real requests a sample ops/bsd user was handling go back to the unassigned pool (status Submitted);
 --   * comments a sample user wrote on real requests are deleted; their history entries stay, without a name.
 -- Files a sample user uploaded to a real request lose their list entry (the file itself stays in storage).
