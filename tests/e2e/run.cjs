@@ -16,7 +16,7 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
 // Row labels on the request page for PIs that are all in SGD (money rows say "(SGD)").
 const SG_LABELS = {
   insured_name: 'Insured Name', date_of_birth: 'Date of Birth', gender: 'Gender', residency: 'Residency', underwriting_class: 'Underwriting Class',
-  currency: 'Policy Currency', cover_age: 'Covered up till age', insurer: 'Insurer', policy_name: 'Policy Name', policy_term: 'Policy Term (Years)',
+  currency: 'Policy Currency', cover_age: 'Policy Term: Up till age', insurer: 'Insurer', policy_name: 'Policy Name', policy_term: 'Policy Term (Years)',
   premium_term: 'Premium Term (Years)', annual_premium: 'Annual Premium (SGD)', total_premium: 'Total Premium (SGD)', death_sa: 'Death',
   terminal_illness: 'Terminal Illness', accidental_death: 'Accidental Death', base_premium: 'Premium (SGD)', tpd_sa: 'Total & Permanent Disability',
   tpd_premium: 'TPD Premium (SGD)', ci_sa: 'Critical Illness', ci_premium: 'CI Premium (SGD)', cash_value: 'Cash Value', campaigns: 'Campaigns',
@@ -118,7 +118,7 @@ const SG_LABELS = {
   await check(Promise.all([val('Gender', 1), val('Underwriting Class', 1), val('Residency', 1)]).then((v) => v.join('|') === 'Female|Non-Smoker|Singapore'), 'reads gender, underwriting class and residency')
   await check(val('Death', 1).then((v) => v === '500000'), 'reads the death sum assured from the summary table, not the small print')
   await check(val('Policy Term (Years)', 1).then((v) => v === 'To age 65'), 'keeps "To Age 65" as a policy term')
-  await check(val('Covered up till age', 1).then((v) => v === '65'), 'works out the cover-until age')
+  await check(val('Policy Term: Up till age', 1).then((v) => v === '65'), 'works out the cover-until age')
   await check(val('Premium Term (Years)', 2).then((v) => v === '30'), 'reads premium term in years')
   await check(val('Annual Premium', 1).then((v) => v === '1262.40'), 'turns a monthly premium into a yearly one')
   await check(olivia.getByLabel('Notes for PI 1').getByText(/Payment mode is Monthly: premiums are shown per year/).isVisible(), 'says the premiums were made yearly')

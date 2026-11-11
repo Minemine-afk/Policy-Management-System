@@ -17,7 +17,8 @@
 /** text: words. money: an amount in the policy currency. sum: a sum assured (or "NA"). years: a term.
  *  age: an age. cover: "Included" or "NA". currency: a 3-letter code such as SGD. */
 export type FieldKind = 'text' | 'money' | 'sum' | 'years' | 'age' | 'cover' | 'currency'
-export type Section = 'client' | 'plan' | 'death' | 'riders' | 'other'
+/** 'meta': read and used (currency labels), but not a row of the comparison. */
+export type Section = 'client' | 'banner' | 'plan' | 'death' | 'riders' | 'other' | 'meta'
 
 export interface FieldDef {
   key: string
@@ -29,6 +30,7 @@ export interface FieldDef {
 
 export const SECTIONS: { key: Section; label: string }[] = [
   { key: 'client', label: 'Insured person' },
+  { key: 'banner', label: 'Plan type: Term plan' },
   { key: 'plan', label: 'Plan' },
   { key: 'death', label: 'Base plan cover' },
   { key: 'riders', label: 'Riders' },
@@ -41,8 +43,8 @@ export const FIELDS: FieldDef[] = [
   { key: 'gender', label: 'Gender', kind: 'text', section: 'client' },
   { key: 'residency', label: 'Residency', kind: 'text', section: 'client' },
   { key: 'underwriting_class', label: 'Underwriting Class', kind: 'text', section: 'client' },
-  { key: 'currency', label: 'Policy Currency', kind: 'currency', section: 'plan' },
-  { key: 'cover_age', label: 'Covered up till age', kind: 'age', section: 'plan' },
+  { key: 'currency', label: 'Policy Currency', kind: 'currency', section: 'meta' },
+  { key: 'cover_age', label: 'Policy Term: Up till age', kind: 'age', section: 'banner' },
   { key: 'insurer', label: 'Insurer', kind: 'text', section: 'plan' },
   { key: 'policy_name', label: 'Policy Name', kind: 'text', section: 'plan' },
   { key: 'policy_term', label: 'Policy Term (Years)', kind: 'years', section: 'plan' },
@@ -469,7 +471,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
 
   // Fallbacks: "label: value" on one line (never the next line, to avoid picking up the wrong number).
-  const insurer = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName)
+  const insurer = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName.replace(/[_.-]+/g, ' '))
   const labelRules: Record<string, RegExp[]> = {
     death_sa: [/\b(?:basic\s+)?sum\s+assured\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i],
   }
