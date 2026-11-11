@@ -132,6 +132,8 @@ export interface Extracted {
   notes: string[]
   /** True when the premium shown is after a discount. */
   discounted: boolean
+  /** True when every year-by-year illustration was read to its last year (needed before skipping scanned pages). */
+  totalComplete?: boolean
 }
 
 const NUM = /^\(?-?(?:S\$|SGD|\$)?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\)?$/i
@@ -354,7 +356,7 @@ function readIllustrations(lines: Line[]): { segments: IllRow[][]; surrender: bo
   const segments: IllRow[][] = []
   let inTable = false, surrender = false, misses = 0
   lines.forEach((l, i) => {
-    if (/total\s+premiums?\s+paid/i.test(l.text)) {
+    if (/total\s*premiums?\s*paid/i.test(l.text)) {
       const near = lines.slice(Math.max(0, i - 1), i + 3).filter((x) => x.page === l.page).map((x) => x.text).join(' ')
       inTable = !/distribution\s+cost/i.test(near)
       surrender = inTable && /surr?ender\s+value/i.test(near)
@@ -567,7 +569,8 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (plan) {
     // "Singlife Elite Term II" -> "Elite Term II": the insurer has its own row.
     const aliases = KNOWN_INSURERS.find((k) => k.name === insurer)?.aliases ?? []
-    let p = plan
+    // OCR sometimes reads one capital as small inside an all-capitals word ("CiMB"): put it back.
+    let p = plan.replace(/\b([A-Z]+)([a-z])([A-Z]+)\b/g, (_m, a: string, b: string, c: string) => a + b.toUpperCase() + c)
     for (const a of aliases) p = p.replace(new RegExp(`^${a.replace(/\s+/g, '\\s+')}\\s+`, 'i'), '')
     set('policy_name', p, planAt?.page ?? table?.page ?? null, planAt?.text ?? table?.line ?? null)
   }
@@ -575,7 +578,15 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (currency && currency !== 'SGD') notes.push(`Policy currency is ${currency}, not SGD: amounts are in ${currency}.`)
   if (!currency) notes.push('Policy currency not found. Fill it in, so amounts are labelled correctly.')
 
-  return { found, notes, discounted: !!table?.values.discount }
+  // Every illustration read to its end (last row at the policy term or the cover age), so the total premium is whole.
+  const termN = /^\d+$/.test(found.policy_term.value) ? +found.policy_term.value : null
+  const endAge = found.cover_age.value ? +found.cover_age.value : null
+  const totalComplete = segments.length > 0 && segments.every((s) => {
+    const last = s[s.length - 1]
+    return (termN !== null && last.year >= termN) || (endAge !== null && last.age >= endAge)
+  })
+
+  return { found, notes, discounted: !!table?.values.discount, totalComplete }
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
@@ -595,8 +606,8 @@ const NEEDED_FOR_EARLY_STOP = ['total_premium', 'insured_name', 'gender', 'under
 
 /** True when the pages read so far hold the main values, so the scanned pages left can be skipped. */
 export function allFound(pages: Page[]): boolean {
-  const { found } = extract(pages, '')
-  return NEEDED_FOR_EARLY_STOP.every((k) => !!found[k].value)
+  const { found, totalComplete } = extract(pages, '')
+  return !!totalComplete && NEEDED_FOR_EARLY_STOP.every((k) => !!found[k].value)
 }
 
 /** A page with fewer text pieces than this is treated as a scan and read with OCR. */
