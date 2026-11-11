@@ -54,7 +54,11 @@ export const INSURER_RULES: Record<string, Partial<Record<string, RegExp[]>>> = 
 
 export interface TextItem { str: string; x: number; y: number; w: number }
 export interface Line { page: number; text: string }
-export interface Page { page: number; items: TextItem[]; lines: Line[] }
+export interface Page {
+  page: number; items: TextItem[]; lines: Line[]
+  /** A scanned page that was not read with OCR, because all six values had already been found. */
+  skipped?: boolean
+}
 
 /** Groups positioned text into reading-order lines. Wide gaps become double spaces. */
 export function toLines(page: number, items: TextItem[]): Line[] {
@@ -326,10 +330,18 @@ export function extract(pages: Page[], fileName: string): Extracted {
   return { found, notes, discounted: !!table?.values.discount }
 }
 
-/** Called as pages are read: pages done so far, the PDF's page count, and whether OCR is being used. */
+/** Called as pages are read: pages done so far (with a fraction while OCR reads a page), the PDF's page count,
+ *  and whether OCR is being used. */
 export type PageProgress = (done: number, total: number, ocr: boolean) => void
-/** Reads a page that has no text inside it (a scanned picture). */
-export type OcrPage = (page: unknown) => Promise<TextItem[]>
+/** Reads a page that has no text inside it (a scanned picture). Calls `alive` while it works on the page,
+ *  with how much of the page is done (0 to 1). */
+export type OcrPage = (page: unknown, alive: (done: number) => void) => Promise<TextItem[]>
+
+/** True when all six values have been found in the pages read so far. */
+export function allFound(pages: Page[]): boolean {
+  const { found } = extract(pages, '')
+  return FIELDS.every((f) => !!found[f.key].value)
+}
 
 /** A page with fewer text pieces than this is treated as a scan and read with OCR. */
 const MIN_TEXT_ITEMS = 5
@@ -357,7 +369,7 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs 
     const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
     const ocr = useOcr ? (await import('./ocr')).ocrPage : undefined
-    return readWith(pdfjs, data, (d, t, o) => { arm(); onPage?.(d, t, o) }, (t) => { task = t }, ocr)
+    return readWith(pdfjs, data, (d, t, o) => { arm(); onPage?.(d, t, o) }, (t) => { task = t }, ocr, allFound)
   })()
   try {
     return await Promise.race([read, stalled])
@@ -366,9 +378,10 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs 
   }
 }
 
-/** Shared by the browser and the Node test script. */
+/** Shared by the browser and the Node test scripts. OCR is slow (seconds a page), so once `enough` says the
+ *  pages read so far hold everything, later scanned pages are skipped (marked `skipped`). */
 export async function readWith(pdfjs: { getDocument: (src: { data: Uint8Array }) => { promise: Promise<unknown> } }, data: ArrayBuffer,
-  onPage?: PageProgress, onTask?: (task: { destroy?: () => unknown }) => void, ocr?: OcrPage): Promise<Page[]> {
+  onPage?: PageProgress, onTask?: (task: { destroy?: () => unknown }) => void, ocr?: OcrPage, enough?: (pages: Page[]) => boolean): Promise<Page[]> {
   const task = pdfjs.getDocument({ data: new Uint8Array(data) })
   onTask?.(task as { destroy?: () => unknown })
   const doc = (await task.promise) as any
@@ -383,8 +396,13 @@ export async function readWith(pdfjs: { getDocument: (src: { data: Uint8Array })
       items.push({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width })
     }
     if (ocr && items.filter((i) => i.str.trim()).length < MIN_TEXT_ITEMS) {
+      if (enough?.(pages)) {
+        pages.push({ page: p, items: [], lines: [], skipped: true })
+        onPage?.(p, doc.numPages, false)
+        continue
+      }
       onPage?.(p - 1, doc.numPages, true)
-      items = await ocr(page)
+      items = await ocr(page, (done) => onPage?.(p - 1 + Math.min(0.99, done), doc.numPages, true))
     }
     pages.push({ page: p, items, lines: toLines(p, items) })
     onPage?.(p, doc.numPages, false)

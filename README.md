@@ -53,11 +53,17 @@ columns), Backlog (filterable table), and a request page with comments (shared o
 **PI comparison (ops and BSD):** on each request page, under the uploaded PIs. The first three PI PDFs are read straight away,
 with a progress bar (PI, page and percentage). A PI is reported as unreadable if nothing happens for 60 seconds, so the
 screen never waits forever. There is no separate Compare PIs page any more (old links open the request).
-**Scanned PIs (OCR):** a page with no text inside it (a scan or photo) is read with OCR (Tesseract, open source, free).
-It runs in the browser from files this site serves itself (`web/public/ocr/`, copied by `web/scripts/copy-ocr.mjs` before
-`dev` and `build`), so the PDF never leaves the computer and no outside service is called. It takes a few seconds per
-scanned page, and values read this way get a note asking ops to check them against the PDF. Tested on 200 dpi scans of
-the two real Singapore sample PIs (12 of 12 values); poor or blurred scans can still misread a value.
+**Scanned PIs (OCR):** a page with no text inside it (a scan or photo) is read with OCR: PaddleOCR (PP-OCRv5 mobile
+models, Apache 2.0) running in the browser with ONNX Runtime Web (MIT), in a background worker. Each page is first
+straightened (tilts up to 6 degrees are measured and undone), then the text is found and read, and placed like
+pdf.js text so the same reading rules apply. All files are served by this site itself (models in `web/ocr-models/`,
+copied to `public/ocr/` by `web/scripts/copy-ocr.mjs` before `dev` and `build`; licences in `web/ocr-models/README.md`),
+so the PDF never leaves the computer and no outside service is called. The OCR engine (about 28 MB) is only downloaded
+the first time a scanned page is met; digital PIs never load it. A scanned page takes about 15 seconds; once all six
+values are found, the remaining scanned pages are skipped (with a note). Values read this way get a note asking ops
+to check them against the PDF. Tested on scanned copies of the two real Singapore sample PIs (light, rough, 2 and
+4 degree tilted versions): 12 of 12 values in each (`tests/pi-extract/check-ocr.mjs` and `check-browser.cjs`).
+Poor, blurred or handwritten scans can still misread a value. Needs a browser from 2021 or later (WebAssembly SIMD).
 The text is read in the browser with pdf.js (nothing is sent anywhere), key fields are matched by label rules in
 `web/src/lib/piExtract.ts`, ops check and correct every value side by side, then export an Excel comparison with
 ExcelJS (a Comparison sheet plus a Sources sheet showing where each value came from and what was changed by hand).
