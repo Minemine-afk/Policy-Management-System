@@ -22,6 +22,7 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      Admin on the line marked `CHANGE THIS`. It stops without changing anything until you do.
    - `1f-upgrade.sql` (12 Nov: NRIC/FIN no longer collected). **Warning:** it permanently deletes every NRIC stored so far;
      client name and contact are kept. Export the request_clients table first if the firm must keep them.
+   - `1g-upgrade.sql` (13 Nov: fixes "Direct deletion from storage tables is not allowed" when removing a file)
 
    Each is safe to run again if you are not sure whether you ran it.
 4. Run it once only. If it fails part-way nothing is saved (it runs as one transaction); send me the error.

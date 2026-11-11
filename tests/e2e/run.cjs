@@ -80,6 +80,13 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await check(olivia.getByRole('button', { name: 'Mark completed' }).isDisabled(), 'cannot complete without a PI')
   await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles([piFile('insurer-a.pdf', PI_A), piFile('insurer-b.pdf', PI_B), piFile('insurer-c.pdf', PI_C)])
   await olivia.getByRole('button', { name: 'insurer-c.pdf' }).waitFor()
+  // Removing a file takes it off the request and deletes it from storage (through the Storage API, not SQL)
+  await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles([file('wrong-pi.pdf')])
+  await olivia.getByRole('button', { name: 'wrong-pi.pdf' }).waitFor()
+  await olivia.getByRole('listitem').filter({ hasText: 'wrong-pi.pdf' }).getByRole('button', { name: 'Remove' }).click()
+  await check(olivia.getByRole('button', { name: 'wrong-pi.pdf' }).waitFor({ state: 'detached', timeout: 5000 }).then(() => true, () => false), 'ops can remove a PI they uploaded')
+  await check(olivia.getByRole('alert').filter({ hasText: /storage/i }).count().then((n) => n === 0), 'removing a file shows no storage error')
+  await check(Promise.resolve(!fs.readdirSync(__dirname + '/files/request-docs', { recursive: true }).some((f) => String(f).endsWith('wrong-pi.pdf'))), 'the removed file is deleted from storage too')
   await check(olivia.getByRole('button', { name: 'Mark completed' }).isDisabled(), 'cannot complete 2+ PIs until the comparison is saved to the request')
 
   // PI comparison on the request page: the three uploaded PIs are read straight away into the Excel template

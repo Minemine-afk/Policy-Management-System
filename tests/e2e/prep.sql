@@ -16,6 +16,15 @@ create schema storage;
 create table storage.buckets (id text primary key, name text, public boolean);
 create table storage.objects (id uuid default gen_random_uuid() primary key, bucket_id text, name text, owner uuid default auth.uid());
 alter table storage.objects enable row level security;
+-- Like Supabase: SQL may not delete storage rows; only the Storage API (which sets this flag) can.
+create function storage.protect_delete() returns trigger language plpgsql as $$
+begin
+  if coalesce(current_setting('storage.allow_delete_query', true), '') <> 'true' then
+    raise exception 'Direct deletion from storage tables is not allowed. Use the Storage API instead.';
+  end if;
+  return null;
+end $$;
+create trigger protect_objects_delete before delete on storage.objects for each statement execute function storage.protect_delete();
 create function storage.foldername(name text) returns text[] language sql immutable as $$
   select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
 grant usage on schema storage to anon, authenticated;

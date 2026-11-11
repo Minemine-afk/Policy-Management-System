@@ -97,7 +97,11 @@ async function storage(req, res) {
     if (parts[0] === 'object' && req.method === 'DELETE') {
       const bucket = parts[1]
       const { prefixes } = JSON.parse((await readBody(req)).toString())
-      const { rows } = await asUser(claims, (c) => c.query('delete from storage.objects where bucket_id=$1 and name = any($2) returning name', [bucket, prefixes]))
+      const { rows } = await asUser(claims, async (c) => {
+        await c.query("select set_config('storage.allow_delete_query', 'true', true)")   // as the real Storage API does
+        return c.query('delete from storage.objects where bucket_id=$1 and name = any($2) returning name', [bucket, prefixes])
+      })
+      for (const r of rows) fs.rmSync(path.join(FILES, bucket, r.name), { force: true })
       return json(res, 200, rows)
     }
     json(res, 404, { message: 'not implemented in test gateway' })

@@ -134,7 +134,10 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       if (up.error) throw new Error(says(up.error.message))
       const ins = await supabase.rpc('add_document', { p_request: req.id, p_kind: 'pi_output', p_path: path, p_name: fileName })
       if (ins.error) { await supabase.storage.from('request-docs').remove([path]); throw new Error(says(ins.error.message)) }
-      for (const d of old) await supabase.rpc('remove_document', { p_document: d.id })
+      for (const d of old) {
+        const rm = await supabase.rpc('remove_document', { p_document: d.id })
+        if (!rm.error) await supabase.storage.from('request-docs').remove([d.storage_path])
+      }
       setSaved(`Saved ${fileName}. The introducer gets it with the PIs when you mark the request completed.`)
       onSaved()
     } catch (e) { setError((e as Error).message) }
