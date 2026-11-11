@@ -1,12 +1,3 @@
-// Form categories (same fields as the first design). Term life only for now.
-export const PLAN_CATEGORIES = ['All', 'Direct Purchase Insurance (DPI)', 'Non-DPI']
-export const PRODUCTS = ['Term life']
-export const AGE_BANDS = ['18 to 24', '25 to 29', '30 to 34', '35 to 39', '40 to 44', '45 to 49', '50 to 54', '55 to 59', '60 to 64']
-export const GENDERS = ['Male', 'Female']
-export const COVERAGE_TERMS = ['5 years or less', '6 to 10 years', '11 to 20 years', '21 to 30 years']
-export const SUM_ASSURED_BANDS = ['Up to S$100,000', 'S$100,001 to 250,000', 'S$250,001 to 500,000', 'Above S$500,000']
-export const PREMIUM_TYPES = ['Annual', 'Monthly']
-
 export const BOARD_STATUSES = ['submitted', 'assigned', 'in_progress', 'sent_back', 'completed'] as const
 
 /** Introducers see three simple stages: everything that is not sent back or completed counts as In progress. */
@@ -68,8 +59,42 @@ export function daysSince(s: string | null) {
   return Math.floor((Date.now() - new Date(s).getTime()) / 86_400_000)
 }
 
-export function summary(r: { age_band: string; gender: string; smoker: boolean; sum_assured_band: string; coverage_term: string }) {
-  return `${r.gender}, ${r.age_band}, ${r.smoker ? 'smoker' : 'non-smoker'} · ${r.sum_assured_band} · ${r.coverage_term}`
+/** Age last birthday on a given day. */
+export function ageOn(dob: string | null | undefined, on = new Date()) {
+  if (!dob) return null
+  const [y, m, d] = dob.split('-').map(Number)
+  let age = on.getFullYear() - y
+  if (on.getMonth() + 1 < m || (on.getMonth() + 1 === m && on.getDate() < d)) age--
+  return age
+}
+
+/** "SGD 300,000" */
+export function fmtMoney(currency: string, amount: number | null | undefined) {
+  if (amount == null) return '—'
+  return `${currency} ${Number(amount).toLocaleString('en-SG', { maximumFractionDigits: 2 })}`
+}
+
+/** "Sum assured SGD 300,000" or "Premium SGD 1,200 (Annual)" */
+export function amountLabel(r: { amount_basis: string; currency: string; amount: number | null; premium_type?: string }) {
+  return r.amount_basis === 'premium'
+    ? `Premium ${fmtMoney(r.currency, r.amount)}${r.premium_type ? ` (${r.premium_type.toLowerCase()})` : ''}`
+    : `Sum assured ${fmtMoney(r.currency, r.amount)}`
+}
+
+/** "Singlife Elite Term II", or "FWD Term Life" when the plan name already starts with the insurer. */
+export function planName(r: { insurer: string | null; product: string }) {
+  if (!r.insurer || r.product.toLowerCase().startsWith(r.insurer.toLowerCase())) return r.product
+  return `${r.insurer} ${r.product}`
+}
+
+/** One line for board cards and the backlog. */
+export function summary(r: { gender: string; date_of_birth: string | null; smoker: boolean; insurer: string | null; product: string
+  amount_basis: string; currency: string; amount: number | null; policy_term: string | null; compare_term?: boolean }) {
+  const age = ageOn(r.date_of_birth)
+  const who = [r.gender, age != null ? `age ${age}` : null, r.smoker ? 'smoker' : 'non-smoker'].filter(Boolean).join(', ')
+  const plan = planName(r)
+  return [who, plan, r.amount != null ? amountLabel(r) : null, r.policy_term, r.compare_term ? 'term comparison' : null]
+    .filter(Boolean).join(' · ')
 }
 
 /** "48 hours" -> "2 days". */

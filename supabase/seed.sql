@@ -32,20 +32,28 @@ update public.profiles set role = 'bsd'  where email = 'bsd@example.com';
 update public.profiles set role = 'admin' where email = 'admin@example.com';
 
 -- Requests: ids end in the same number as the sample story --------------------------
-insert into public.pi_requests (id, ref, introducer_id, status, assignee_id, age_band, gender, smoker, coverage_term,
-                                sum_assured_band, ci_benefit, remarks, status_reason, submitted_at, completed_at) values
+insert into public.pi_requests (id, ref, introducer_id, status, assignee_id, gender, client_type, residency, nationality,
+                                date_of_birth, insurer, product, currency, amount_basis, amount, smoker, policy_term, premium_term,
+                                riders, compare_term, compare_product_1, compare_product_2, remarks, status_reason, submitted_at, completed_at) values
  ('20000000-0000-0000-0000-000000000001', 'PI-00001', '00000000-0000-0000-0000-000000000001', 'submitted', null,
-  '30 to 34', 'Female', false, '11 to 20 years', 'S$250,001 to 500,000', true, 'First-time buyer, wants CI cover', null, now() - interval '1 day', null),
+  'Female', 'Individual', 'Singapore', 'Singaporean', '1993-04-12', 'Singlife', 'Singlife Elite Term II', 'SGD', 'sum_assured', 300000,
+  false, '20 years', 'Same as policy term', '{Critical illness}', true, 'FWD · FWD Term Life', 'Tokio Marine · TM TermProtect Plus',
+  'First-time buyer, wants CI cover', null, now() - interval '1 day', null),
  ('20000000-0000-0000-0000-000000000002', 'PI-00002', '00000000-0000-0000-0000-000000000001', 'assigned', '00000000-0000-0000-0000-000000000003',
-  '40 to 44', 'Male', true, '21 to 30 years', 'Above S$500,000', false, null, null, now() - interval '3 days', null),
+  'Male', 'High net worth (HNW)', 'Vietnam', 'Vietnamese', '1983-09-30', 'Manulife', 'ManuProtect Term II', 'USD', 'sum_assured', 1000000,
+  true, 'To age 65', 'Same as policy term', '{}', false, null, null, null, null, now() - interval '3 days', null),
  ('20000000-0000-0000-0000-000000000003', 'PI-00003', '00000000-0000-0000-0000-000000000002', 'in_progress', '00000000-0000-0000-0000-000000000003',
-  '35 to 39', 'Female', false, '11 to 20 years', 'S$100,001 to 250,000', true, null, null, now() - interval '5 days', null),
+  'Female', 'Mass affluent', 'Singapore', 'Malaysian', '1988-01-15', 'FWD', 'FWD Term Life', 'SGD', 'premium', 1200,
+  false, '25 years', 'Same as policy term', '{Critical illness,Total and permanent disability}', false, null, null, null, null, now() - interval '5 days', null),
  ('20000000-0000-0000-0000-000000000004', 'PI-00004', '00000000-0000-0000-0000-000000000002', 'sent_back', '00000000-0000-0000-0000-000000000004',
-  '25 to 29', 'Male', false, '6 to 10 years', 'Up to S$100,000', false, null, 'Please confirm the intended sum assured', now() - interval '6 days', null),
+  'Male', 'Individual', 'Singapore', 'Singaporean', '1998-06-02', 'Tokio Marine', 'TM TermProtect Plus', 'SGD', 'sum_assured', 100000,
+  false, '10 years', 'Same as policy term', '{}', false, null, null, null, 'Please confirm the intended sum assured', now() - interval '6 days', null),
  ('20000000-0000-0000-0000-000000000005', 'PI-00005', '00000000-0000-0000-0000-000000000001', 'completed', '00000000-0000-0000-0000-000000000004',
-  '45 to 49', 'Male', false, '11 to 20 years', 'S$250,001 to 500,000', true, null, null, now() - interval '12 days', now() - interval '8 days'),
+  'Male', 'Business owner / key person', 'Indonesia', 'Indonesian', '1979-11-30', 'Singlife', 'Singlife Term CI', 'SGD', 'sum_assured', 500000,
+  false, '20 years', 'Same as policy term', '{Terminal illness}', true, 'FWD · Future First', null, null, null, now() - interval '12 days', now() - interval '8 days'),
  ('20000000-0000-0000-0000-000000000006', 'PI-00006', '00000000-0000-0000-0000-000000000002', 'removed', null,
-  '50 to 54', 'Female', true, '5 years or less', 'Up to S$100,000', false, null, 'Duplicate of an earlier request', now() - interval '9 days', null);
+  'Female', 'Individual', 'Malaysia', 'Malaysian', '1974-03-08', 'AIA', 'AIA Secure Flexi Term', 'SGD', 'sum_assured', 80000,
+  true, '5 years', 'Same as policy term', '{}', false, null, null, null, 'Duplicate of an earlier request', now() - interval '9 days', null);
 select setval('public.request_ref_seq', 6);
 -- PI-00004 was sent back 3 days ago: its deadline clock is paused until the introducer resubmits.
 update public.pi_requests set paused_at = now() - interval '3 days' where ref = 'PI-00004';

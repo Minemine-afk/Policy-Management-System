@@ -19,15 +19,24 @@ export interface PiRequest {
   introducer_id: string
   status: RequestStatus
   assignee_id: string | null
-  plan_category: string
-  product: string
-  age_band: string
   gender: string
+  client_type: string | null
+  residency: string | null
+  nationality: string | null
+  date_of_birth: string | null      // YYYY-MM-DD; empty on requests made with the earlier form
+  insurer: string | null
+  product: string                   // the plan, e.g. "Singlife Elite Term II"
+  currency: string
+  amount_basis: 'sum_assured' | 'premium'
+  amount: number | null
   smoker: boolean
-  coverage_term: string
-  sum_assured_band: string
-  premium_type: string
-  ci_benefit: boolean
+  policy_term: string | null
+  premium_term: string | null
+  premium_type: string              // payment frequency
+  riders: string[]
+  compare_term: boolean
+  compare_product_1: string | null
+  compare_product_2: string | null
   remarks: string | null
   status_reason: string | null
   // Ops and bsd only: the database returns null for introducers (they never see priority or deadlines).

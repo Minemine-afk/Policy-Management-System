@@ -34,15 +34,26 @@ do $$ begin
 end $$;
 
 -- 2. Create and edit
-select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}',
+select create_request('{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"],"compare_term":true,"compare_product_1":"AIA · AIA Secure Flexi Term"}',
                       '{"client_name":"[Sample] Client Golf"}');
+do $$ begin
+  if (select row(insurer, product, amount, riders, compare_term, compare_product_1, date_of_birth)::text from pi_requests where ref = 'PI-00007')
+     <> row('FWD', 'FWD Term Life', 250000.00, '{"Critical illness"}'::text[], true, 'AIA · AIA Secure Flexi Term', '1992-05-01'::date)::text then
+    raise exception 'new form fields not saved: %', (select row(insurer, product, amount, riders, compare_term, compare_product_1)::text from pi_requests where ref = 'PI-00007');
+  end if;
+  raise notice 'ok: new form fields are saved';
+end $$;
+select pg_temp.expect_error($$select create_request('{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"],"insurer":""}', '{"client_name":"x"}')$$, 'Fill in insurer');
+select pg_temp.expect_error($$select create_request('{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"],"amount":-5}', '{"client_name":"x"}')$$, 'more than 0');
+select pg_temp.expect_error($$select create_request('{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"],"date_of_birth":"2999-01-01"}', '{"client_name":"x"}')$$, 'future');
+select pg_temp.expect_error($$select create_request('{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"],"compare_term":true}', '{"client_name":"x"}')$$, '1st product to compare');
 select pg_temp.expect_error($$select create_request('{"gender":"Male"}', '{"client_name":"x"}')$$, 'Fill in');
-select pg_temp.expect_error($$select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', '{"client_name":""}')$$, 'client name');
+select pg_temp.expect_error($$select create_request('{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"]}', '{"client_name":""}')$$, 'client name');
 do $$ begin
   if (select count(*) from pi_requests) <> 4 then raise exception 'new request not visible'; end if;
   raise notice 'ok: introducer created a request';
 end $$;
-select pg_temp.expect_error($$select update_request('20000000-0000-0000-0000-000000000004', '{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', null)$$, 'Not your request');
+select pg_temp.expect_error($$select update_request('20000000-0000-0000-0000-000000000004', '{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"]}', null)$$, 'Not your request');
 select pg_temp.expect_error($$select resubmit_request('20000000-0000-0000-0000-000000000001')$$, 'sent back');
 
 -- 3. Introducer 2 cannot see introducer 1's data
@@ -197,7 +208,7 @@ end $$;
 -- 8. Priority (urgent flag): ops and bsd only. Introducers can neither see nor set it, nor see due times.
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'urgent')$$, 'Only the assigned ops user or bsd');
-select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","priority":"urgent"}',
+select create_request('{"gender":"Male","client_type":"Individual","residency":"Singapore","nationality":"Singaporean","date_of_birth":"1992-05-01","insurer":"FWD","product":"FWD Term Life","currency":"SGD","amount_basis":"sum_assured","amount":250000,"smoker":false,"policy_term":"20 years","premium_term":"Same as policy term","riders":["Critical illness"],"priority":"urgent"}',
                       '{"client_name":"[Sample] Client Hotel"}');
 select pg_temp.expect_error($$select priority from pi_requests$$, 'permission denied');
 select pg_temp.expect_error($$select urgent_auto from pi_requests$$, 'permission denied');

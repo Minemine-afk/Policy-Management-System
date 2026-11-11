@@ -72,18 +72,31 @@ begin
     i := i + 1;
     continue when exists (select 1 from public.pi_requests where introducer_id = u.id);
     for k in 1..3 loop
-      insert into public.pi_requests (introducer_id, status, assignee_id, age_band, gender, smoker, coverage_term,
-                                      sum_assured_band, ci_benefit, remarks, status_reason, submitted_at, completed_at, priority)
+      insert into public.pi_requests (introducer_id, status, assignee_id, gender, client_type, residency, nationality,
+                                      date_of_birth, insurer, product, currency, amount_basis, amount, smoker, policy_term,
+                                      premium_term, riders, compare_term, compare_product_1, compare_product_2,
+                                      remarks, status_reason, submitted_at, completed_at, priority)
       values (
         u.id,
         (array['submitted', 'in_progress', 'completed'])[k]::request_status,      -- one waiting, one being worked on, one done
         case when k = 1 then null else ops_ids[1 + (i + k) % 5] end,
-        (array['25 to 29', '30 to 34', '35 to 39', '40 to 44', '45 to 49'])[1 + (i + k) % 5],
         case when (i + k) % 2 = 0 then 'Female' else 'Male' end,
+        (array['Individual', 'Mass affluent', 'High net worth (HNW)', 'Business owner / key person'])[1 + (i + k) % 4],
+        (array['Singapore', 'Malaysia', 'Indonesia', 'Vietnam', 'Singapore'])[1 + (i + k) % 5],
+        (array['Singaporean', 'Malaysian', 'Indonesian', 'Vietnamese', 'Chinese'])[1 + (i + k) % 5],
+        make_date(1970 + (i * 3 + k * 5) % 30, 1 + (i + k) % 12, 1 + (i * k) % 28),
+        (array['Singlife', 'FWD', 'Tokio Marine', 'Manulife', 'AIA'])[1 + (i + k) % 5],
+        (array['Singlife Elite Term II', 'FWD Term Life', 'TM TermProtect Plus', 'ManuProtect Term II', 'AIA Secure Flexi Term'])[1 + (i + k) % 5],
+        case when (i + k) % 5 = 3 then 'USD' else 'SGD' end,
+        case when k = 2 then 'premium' else 'sum_assured' end,
+        case when k = 2 then 1200 + i * 100 else (array[100000, 250000, 500000, 1000000])[1 + (i + k) % 4] end,
         (i + k) % 4 = 0,
-        (array['6 to 10 years', '11 to 20 years', '21 to 30 years'])[k],
-        (array['Up to S$100,000', 'S$100,001 to 250,000', 'S$250,001 to 500,000', 'Above S$500,000'])[1 + (i + k) % 4],
-        k <> 2,
+        (array['10 years', '20 years', 'To age 65'])[k],
+        'Same as policy term',
+        case when k <> 2 then '{Critical illness}'::text[] else '{}'::text[] end,
+        k = 1,
+        case when k = 1 then 'FWD · FWD Term Life' end,
+        case when k = 1 then 'AIA · AIA Secure Flexi Term' end,
         '[Sample] Made-up request for testing',
         null,
         now() - make_interval(days => (4 - k) * 2 + i, hours => i * 3),
