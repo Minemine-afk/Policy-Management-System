@@ -411,4 +411,33 @@ do $$ begin
   raise notice 'ok: no NRIC column';
 end $$;
 
+-- Files: SQL can't delete storage rows (as on Supabase). Through the Storage API only the uploader can delete,
+-- and only once the file is off the request.
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select set_config('my.req', (select id::text from pi_requests where assignee_id = auth.uid() and status = 'in_progress' limit 1), false);
+insert into storage.objects (bucket_id, name) values ('request-docs', current_setting('my.req') || '/del.pdf');
+select set_config('my.doc', add_document(current_setting('my.req')::uuid, 'pi_output', current_setting('my.req') || '/del.pdf', 'del.pdf')::text, false);
+select pg_temp.expect_error($$delete from storage.objects where name = current_setting('my.req') || '/del.pdf'$$, 'Use the Storage API');
+select set_config('storage.allow_delete_query', 'true', false);
+delete from storage.objects where name = current_setting('my.req') || '/del.pdf';
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+select pg_temp.expect_error($$select remove_document(current_setting('my.doc')::uuid)$$, 'cannot remove');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if not exists (select 1 from storage.objects where name = current_setting('my.req') || '/del.pdf') then raise exception 'a file still on the request was deleted'; end if;
+end $$;
+select remove_document(current_setting('my.doc')::uuid);
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+delete from storage.objects where name = current_setting('my.req') || '/del.pdf';
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if not exists (select 1 from storage.objects where name = current_setting('my.req') || '/del.pdf') then raise exception 'someone else deleted the uploader''s file'; end if;
+end $$;
+delete from storage.objects where name = current_setting('my.req') || '/del.pdf';
+do $$ begin
+  if exists (select 1 from storage.objects where name = current_setting('my.req') || '/del.pdf') then raise exception 'uploader could not delete their removed file'; end if;
+  raise notice 'ok: files are deleted through the Storage API, by the uploader, once off the request';
+end $$;
+select set_config('storage.allow_delete_query', '', false);
+
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

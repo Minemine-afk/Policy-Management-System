@@ -36,8 +36,11 @@ export default function Files({ title, hint, requestId, kind, docs, canUpload, u
   }
 
   async function remove(d: RequestDocument) {
+    setError('')
     const { error } = await supabase.rpc('remove_document', { p_document: d.id })
     if (error) setError(says(error.message))
+    // Supabase only allows deleting files through the Storage API, once the file is off the request.
+    else await supabase.storage.from('request-docs').remove([d.storage_path])
     onChange()
   }
 

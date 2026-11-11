@@ -422,9 +422,16 @@ begin
   if d.id is null or d.uploaded_by <> auth.uid() or not public.can_upload(d.request_id, d.kind) then
     raise exception 'You cannot remove this file';
   end if;
-  delete from public.request_documents where id = d.id;
-  delete from storage.objects where bucket_id = 'request-docs' and name = d.storage_path;
+  delete from public.request_documents where id = d.id;   -- the app then deletes the file through the Storage API
 end $$;
+
+-- True when a stored file is still listed on a request (storage policies use it; definer so it sees every row).
+create or replace function public.file_is_listed(p_path text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.request_documents where storage_path = p_path)
+$$;
+revoke execute on function public.file_is_listed(text) from public, anon;
+grant execute on function public.file_is_listed(text) to authenticated;
 
 create or replace function public.log_document_view(p_document uuid)
 returns void language plpgsql security definer set search_path = public as $$
@@ -467,8 +474,12 @@ create policy "request docs read" on storage.objects for select to authenticated
     select 1 from public.request_documents d where d.storage_path = name and public.can_view_request(d.request_id)
       and (not public.has_role('introducer') or d.kind = 'attachment'
            or exists (select 1 from public.pi_requests r where r.id = d.request_id and r.status = 'completed'))));
+-- Files are deleted through the Storage API (Supabase blocks SQL deletes on storage tables), only by the
+-- uploader and only once the file is off the request (remove_document); the uploader may see it until then.
+create policy "request docs read own unlisted" on storage.objects for select to authenticated
+  using (bucket_id = 'request-docs' and owner = auth.uid() and not public.file_is_listed(name));
 create policy "request docs delete" on storage.objects for delete to authenticated
-  using (bucket_id = 'request-docs' and owner = auth.uid());
+  using (bucket_id = 'request-docs' and owner = auth.uid() and not public.file_is_listed(name));
 
 -- log_event writes to the audit log with the definer's rights. Only the database's own
 -- functions may call it; signed-in users must not be able to add audit entries directly.
