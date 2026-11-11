@@ -3,10 +3,7 @@
 Internal web app for a Singapore insurance distribution agency. It tracks **policy illustration (PI) requests**
 from submission to delivery, in the style of a simple Jira or Taiga board.
 
-- **Introducers** submit a request through a form (client name and contact, which only they see, plus gender, client
-  type, residency, nationality, date of birth, insurer, product, currency, sum assured or premium, terms, riders, an
-  optional term comparison with up to 2 more products, and supporting documents), review it, tick the acknowledgement
-  and get the reference. The drop-down lists are in `web/src/lib/formOptions.ts`. They follow
+- **Introducers** submit a request through a form (client details plus the banded profile fields) and follow
   its progress. When ops finish, the PIs appear on the request. Each introducer sees only their own clients and requests.
 - **Ops** pick requests from an unassigned pool or get them assigned, prepare the PIs outside the portal,
   upload them back, and mark the request completed. They can send a request back to the introducer with a reason.

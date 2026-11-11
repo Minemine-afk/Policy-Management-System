@@ -23,11 +23,8 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
    - `1f-upgrade.sql` (12 Nov: NRIC/FIN no longer collected). **Warning:** it permanently deletes every NRIC stored so far;
      client name and contact are kept. Export the request_clients table first if the firm must keep them.
    - `1g-upgrade.sql` (13 Nov: fixes "Direct deletion from storage tables is not allowed" when removing a file)
-   - `1h-upgrade.sql` (14 Nov: new PI request form: insurer, product, currency, amount, date of birth, nationality,
-     residency, client type, terms, riders, term comparison). Old requests keep their details: coverage term becomes
-     the policy term, CI benefit becomes the Critical illness rider, and the age band and sum assured band are copied
-     into the remarks before those old columns are removed. **Run it before the new website goes live**, or the
-     request pages can't load.
+   - `1h-undo-new-form.sql`: **only if you ran the (withdrawn) `1h-upgrade.sql`** for the new request form. It puts the
+     original form's fields back and keeps every request's details. Harmless if you never ran 1h.
 
    Each is safe to run again if you are not sure whether you ran it.
 4. Run it once only. If it fails part-way nothing is saved (it runs as one transaction); send me the error.
