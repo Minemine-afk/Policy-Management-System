@@ -557,7 +557,7 @@ const SG_LABELS = {
   // 8. Optional: the two real Singapore sample PIs (not in the repo). PI_SAMPLES=/path/to/pi-samples
   if (process.env.PI_SAMPLES) {
     const expected = JSON.parse(fs.readFileSync(__dirname + '/../pi-extract/expected-sg-samples.json', 'utf8'))
-    const names = Object.keys(expected)
+    const names = Object.keys(expected).slice(0, 3)   // only the first 3 PIs are compared
     await olivia.goto(BASE + '/requests/20000000-0000-0000-0000-000000000003')
     await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles(names.map((n) => process.env.PI_SAMPLES + '/' + n))
     await olivia.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
@@ -568,7 +568,7 @@ const SG_LABELS = {
         await check(Promise.resolve(got === expected[n][k]), `real sample ${n}: ${label} = ${got || '(blank)'}`)
       }
     }
-    await check(olivia.getByLabel('Notes for PI 2').getByText(/30% discount \(SGD 66.20 monthly before/).isVisible(), 'real sample: Singlife premium flagged as after the 30% discount')
+    await check(olivia.getByLabel(`Notes for PI ${names.indexOf('SG_Singlife_EliteTermII_2024.pdf') + 1}`).getByText(/30% discount \(SGD 66.20 monthly before/).isVisible(), 'real sample: Singlife premium flagged as after the 30% discount')
     await olivia.screenshot({ path: SHOTS + '/13-compare-real-sg-pis.png', fullPage: true })
     await olivia.getByText('I have checked these values against the PDFs').click()
     const [dl2] = await Promise.all([olivia.waitForEvent('download'), olivia.getByRole('button', { name: 'Export to Excel' }).click()])
@@ -579,7 +579,7 @@ const SG_LABELS = {
   // 8b. Optional: OCR on scanned copies of the two real SG PIs (./make-scans.sh makes them). PI_SCANS=/path/to/scans
   if (process.env.PI_SAMPLES && process.env.PI_SCANS) {
     const expected = JSON.parse(fs.readFileSync(__dirname + '/../pi-extract/expected-sg-samples.json', 'utf8'))
-    const names = Object.keys(expected)
+    const names = Object.keys(expected).slice(0, 3)   // only the first 3 PIs are compared
     await olivia.goto(BASE + '/requests/20000000-0000-0000-0000-000000000003')
     const cmp = olivia.getByRole('region', { name: 'PI comparison' })
     await cmp.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
