@@ -323,8 +323,8 @@ interface Rider { name: string; sa: string; premium: string; discount: string; p
 /** The rows of the "Supplementary Benefits" table on the summary page, read line by line:
  *  name, then numbers (terms, sum assured, premium before discount, discount %, premium payable). */
 function readRiders(lines: Line[]): { riders: Rider[]; total: { value: string; page: number; line: string } | null; seen: boolean } {
-  const idx = lines.findIndex((l) => /^supplementary\s+benefits?\b/i.test(l.text.trim()) && l.text.trim().length < 40)
-  if (idx < 0) return { riders: [], total: null, seen: false }
+  const idx = lines.findIndex((l) => /^(?:supplementary\s+benefits?|riders?(?:\s*\(s\))?|rider\s+benefits?|optional\s+benefits?|additional\s+benefits?|add[\s-]?on\s+benefits?)\b/i.test(l.text.trim()) && l.text.trim().length < 40)
+  if (idx < 0) return { riders: findRiderLines(lines), total: null, seen: false }
   const page = lines[idx].page
   const riders: Rider[] = []
   let total: { value: string; page: number; line: string } | null = null
@@ -383,6 +383,24 @@ function readPlanRows(lines: Line[]): { rows: PlanRow[]; total: { value: string;
     if (rows.length) return { rows, total }
   }
   return null
+}
+
+/** No rider heading: any line on a page with a summary table that starts with a rider's name (TPD, CI, "... Rider")
+ *  and carries a sum assured and a premium. */
+function findRiderLines(lines: Line[]): Rider[] {
+  const out: Rider[] = []
+  for (const l of lines) {
+    const t = l.text.trim()
+    const m = t.match(/^([A-Za-z][^\d$]*?(?:\b[IVX]+\b)?)\s+((?:S\$|US\$|\$)?\d.*)$/i)
+    if (!m || !(isTpd(m[1]) || isCi(m[1]) || /\brider\b/i.test(m[1])) || m[1].length > 70) continue
+    const tokens = m[2].split(/\s+/).filter((x) => !FREQ.test(x))
+    const nums = tokens.filter((x) => NUM.test(x))
+    const big = nums.find((x) => num(x.replace(/[^\d.]/g, '')) >= 1000)
+    const prem = nums.filter((x) => x !== big && /\.\d{2}$/.test(x)).pop()
+    if (!big || !prem || out.some((r) => r.name === m[1].trim())) continue
+    out.push({ name: m[1].trim(), sa: amount(big), premium: amount(prem), discount: tokens.find((x) => /^\d{1,2}(?:\.\d+)?%$/.test(x)) ?? '', page: l.page, line: t })
+  }
+  return out
 }
 
 const isTpd = (n: string) => /\bTPD\b|total\s*(?:and|&)\s*permanent\s+disab/i.test(n)
