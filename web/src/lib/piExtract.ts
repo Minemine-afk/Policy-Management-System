@@ -1,34 +1,68 @@
-// Reads the six comparison fields out of Singapore policy illustration (PI) PDFs, in the browser.
+// Reads the term quotation comparison fields out of Singapore policy illustration (PI) PDFs, in the browser.
+// The field list follows Kumar's spec "PI Illustration - Data Extraction" (Term Quotation Comparison Excel).
 // Nothing leaves the user's computer, and no AI is used: only fixed reading rules. Results are
 // suggestions, so ops must check every value. When a rule is not sure, the field is left blank
 // for ops to fill in, rather than guessed.
 //
 // Singapore PIs follow the LIA format (LIA guidelines MU 22/18), which helps a lot:
-//  - The Cover Page has the plan name above "Product Type", then "Premium Term", "Policy Term"
-//    and "Name of Insurer" rows, and the fixed sentence
-//    "The Total Distribution Cost for this plan is $X ... This makes up Y% of the total premiums payable."
-//  - The Policy Illustration has a summary table (plan, terms, sum assured, premium). We read
-//    that table by position: each value sits under its column heading.
+//  - The Cover Page has the plan name above "Product Type", then "Premium Term", "Policy Term",
+//    "Name of Insurer" and "Policy Currency" rows.
+//  - The Policy Illustration starts with the life assured's details ("Life Assured : ...",
+//    "Gender / Smoker Status : Male/Non-Smoker", "Residency / Nationality : ..."), then a summary
+//    table (plan, terms, sum assured, premium, discount), then the riders ("Supplementary Benefits")
+//    and a "Total:" line, then year-by-year tables with "Total Premiums Paid To-date".
 // When a real insurer's PI reads wrongly, add an entry for that insurer in INSURER_RULES
 // instead of changing the generic rules.
 
-export type FieldKind = 'text' | 'money' | 'years'
+/** text: words. money: an amount in the policy currency. sum: a sum assured (or "NA"). years: a term.
+ *  age: an age. cover: "Included" or "NA". currency: a 3-letter code such as SGD. */
+export type FieldKind = 'text' | 'money' | 'sum' | 'years' | 'age' | 'cover' | 'currency'
+export type Section = 'client' | 'plan' | 'death' | 'riders' | 'other'
 
 export interface FieldDef {
   key: string
-  /** The row label in the Excel template (column A). Rows are matched on this text. */
+  /** The row label. Money rows get the policy currency added, e.g. "Annual Premium (SGD)". */
   label: string
   kind: FieldKind
+  section: Section
 }
 
-export const FIELDS: FieldDef[] = [
-  { key: 'insurer_plan', label: 'Insurer / plan', kind: 'text' },
-  { key: 'sum_assured', label: 'Sum assured (S$)', kind: 'money' },
-  { key: 'policy_term', label: 'Policy term (years)', kind: 'years' },
-  { key: 'premium_term', label: 'Premium term (years)', kind: 'years' },
-  { key: 'monthly_premium', label: 'Premium (S$, monthly)', kind: 'money' },
-  { key: 'distribution_cost', label: 'Total distribution cost (S$)', kind: 'money' },
+export const SECTIONS: { key: Section; label: string }[] = [
+  { key: 'client', label: 'Insured person' },
+  { key: 'plan', label: 'Plan' },
+  { key: 'death', label: 'Base plan cover' },
+  { key: 'riders', label: 'Riders' },
+  { key: 'other', label: 'Other' },
 ]
+
+export const FIELDS: FieldDef[] = [
+  { key: 'insured_name', label: 'Insured Name', kind: 'text', section: 'client' },
+  { key: 'date_of_birth', label: 'Date of Birth', kind: 'text', section: 'client' },
+  { key: 'gender', label: 'Gender', kind: 'text', section: 'client' },
+  { key: 'residency', label: 'Residency', kind: 'text', section: 'client' },
+  { key: 'underwriting_class', label: 'Underwriting Class', kind: 'text', section: 'client' },
+  { key: 'currency', label: 'Policy Currency', kind: 'currency', section: 'plan' },
+  { key: 'cover_age', label: 'Covered up till age', kind: 'age', section: 'plan' },
+  { key: 'insurer', label: 'Insurer', kind: 'text', section: 'plan' },
+  { key: 'policy_name', label: 'Policy Name', kind: 'text', section: 'plan' },
+  { key: 'policy_term', label: 'Policy Term (Years)', kind: 'years', section: 'plan' },
+  { key: 'premium_term', label: 'Premium Term (Years)', kind: 'years', section: 'plan' },
+  { key: 'annual_premium', label: 'Annual Premium', kind: 'money', section: 'plan' },
+  { key: 'total_premium', label: 'Total Premium', kind: 'money', section: 'plan' },
+  { key: 'death_sa', label: 'Death', kind: 'sum', section: 'death' },
+  { key: 'terminal_illness', label: 'Terminal Illness', kind: 'cover', section: 'death' },
+  { key: 'accidental_death', label: 'Accidental Death', kind: 'cover', section: 'death' },
+  { key: 'base_premium', label: 'Premium', kind: 'money', section: 'death' },
+  { key: 'tpd_sa', label: 'Total & Permanent Disability', kind: 'sum', section: 'riders' },
+  { key: 'tpd_premium', label: 'TPD Premium', kind: 'money', section: 'riders' },
+  { key: 'ci_sa', label: 'Critical Illness', kind: 'sum', section: 'riders' },
+  { key: 'ci_premium', label: 'CI Premium', kind: 'money', section: 'riders' },
+  { key: 'cash_value', label: 'Cash Value', kind: 'sum', section: 'other' },
+  { key: 'campaigns', label: 'Campaigns', kind: 'text', section: 'other' },
+]
+
+/** The row label with the policy currency, e.g. "Annual Premium (SGD)". */
+export const labelWith = (f: FieldDef, currency: string) => (f.kind === 'money' && currency ? `${f.label} (${currency})` : f.label)
 
 /** Short insurer names, and the other names they appear under in PIs. First match wins. */
 export const KNOWN_INSURERS: { name: string; aliases: string[] }[] = [
@@ -49,14 +83,24 @@ export const KNOWN_INSURERS: { name: string; aliases: string[] }[] = [
 
 /** Per-insurer extra labels for the "label then value" fallback, tried first. Fill in from real PIs. */
 export const INSURER_RULES: Record<string, Partial<Record<string, RegExp[]>>> = {
-  // Example: 'Great Eastern': { monthly_premium: [/\bmonthly\s+instalment\b/i] },
+  // Example: 'Great Eastern': { base_premium: [/\bmonthly\s+instalment\b/i] },
 }
+
+/** Currency names as PIs write them, to ISO codes. */
+const CURRENCIES: [RegExp, string][] = [
+  [/singapore\s+dollars?|\bS\$/i, 'SGD'], [/u\.?s\.?\s+dollars?|united\s+states\s+dollars?|\bUS\$/i, 'USD'],
+  [/australian\s+dollars?|\bA\$/i, 'AUD'], [/canadian\s+dollars?|\bC\$/i, 'CAD'], [/hong\s+kong\s+dollars?|\bHK\$/i, 'HKD'],
+  [/brunei\s+dollars?|\bB\$/i, 'BND'], [/new\s+zealand\s+dollars?/i, 'NZD'], [/ringgit|\bRM\s?\d/i, 'MYR'],
+  [/pounds?\s+sterling|british\s+pounds?|£/i, 'GBP'], [/\beuros?\b|€/i, 'EUR'], [/renminbi|chinese\s+yuan/i, 'CNY'],
+  [/japanese\s+yen/i, 'JPY'], [/indonesian\s+rupiah/i, 'IDR'],
+]
+const CODES = /^(SGD|USD|AUD|CAD|HKD|BND|NZD|MYR|GBP|EUR|CNY|RMB|JPY|IDR|CHF)$/
 
 export interface TextItem { str: string; x: number; y: number; w: number }
 export interface Line { page: number; text: string }
 export interface Page {
   page: number; items: TextItem[]; lines: Line[]
-  /** A scanned page that was not read with OCR, because all six values had already been found. */
+  /** A scanned page that was not read with OCR, because the main values had already been found. */
   skipped?: boolean
 }
 
@@ -88,6 +132,8 @@ export interface Extracted {
   notes: string[]
   /** True when the premium shown is after a discount. */
   discounted: boolean
+  /** True when every year-by-year illustration was read to its last year (needed before skipping scanned pages). */
+  totalComplete?: boolean
 }
 
 const NUM = /^\(?-?(?:S\$|SGD|\$)?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\)?$/i
@@ -138,7 +184,7 @@ const overlaps = (a: Cell, b: Cell) => a.x <= b.x + b.w + 4 && b.x <= a.x + a.w 
 
 interface TableRead {
   page: number
-  values: Partial<Record<'plan' | 'policy_term' | 'premium_term' | 'sum_assured' | 'premium' | 'before' | 'discount', string>>
+  values: Partial<Record<'plan' | 'policy_term' | 'premium_term' | 'sum_assured' | 'premium' | 'before' | 'discount' | 'promo', string>>
   premiumHeader: string
   line: string
 }
@@ -202,6 +248,12 @@ function readTableAt(raw: Cell[], saRaw: Cell, page: number): TableRead | null {
   const isPct = (s: string) => /^\d{1,2}(?:\.\d+)?\s*%$/.test(s)
   const disc = head.filter((h) => /\bdiscount\b/i.test(h.str)).map((h) => under(h, isPct)).find(Boolean)
   if (disc) values.discount = disc
+  // Promo code: "Promo Code: TP07" in one piece, or the code printed under the "Promo Code:" heading.
+  const promoHead = head.find((h) => /^promo\s+code/i.test(h.str))
+  const inline = raw.find((i) => Math.abs(i.y - saRaw.y) <= 30 && /promo\s+code\s*:?\s*([A-Z0-9]{3,12})\b/i.test(i.str))
+  const promo = inline?.str.match(/promo\s+code\s*:?\s*([A-Z0-9]{3,12})\b/i)?.[1]
+    ?? (promoHead ? raw.find((i) => i !== promoHead && i.y < promoHead.y && i.y > promoHead.y - 25 && overlaps(i, promoHead) && /^[A-Z]{0,6}\d[A-Z0-9]{0,8}$/.test(i.str) && !NUM.test(i.str))?.str : undefined)
+  if (promo) values.promo = promo
   const before = under(find(/^before\b|before\s+discount/i), isNum)
   if (before) values.before = before
 
@@ -225,15 +277,138 @@ function readTableAt(raw: Cell[], saRaw: Cell, page: number): TableRead | null {
 
 // ---------- Main ----------
 
+/** Reads "Label : value" from the lines. The label must start a piece of the line (pieces are split at wide
+ *  gaps); the value is the rest of that piece or, when the label stands alone, the next piece. */
+function labelled(lines: Line[], label: RegExp, needColon = true): { value: string; line: Line } | null {
+  for (const l of lines) {
+    const parts = l.text.split(/\s{2,}/)
+    for (let i = 0; i < parts.length; i++) {
+      const m = parts[i].match(label)
+      if (!m || m.index !== 0) continue
+      let rest = parts[i].slice(m[0].length)
+      if (!rest.trim() && parts[i + 1]) rest = parts[i + 1]
+      if (needColon && !/^\s*:/.test(rest)) continue
+      const value = rest.replace(/^[\s:]+/, '').trim()
+      if (value && !/^_+$/.test(value)) return { value, line: l }
+    }
+  }
+  return null
+}
+
+export function currencyCode(raw: string): string {
+  const s = raw.trim()
+  if (CODES.test(s.toUpperCase())) return s.toUpperCase() === 'RMB' ? 'CNY' : s.toUpperCase()
+  for (const [re, code] of CURRENCIES) if (re.test(s)) return code
+  return ''
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100
+const fmt2 = (n: number) => round2(n).toFixed(2)
+/** "1,000,000.00" -> "1000000"; "46.35" -> "46.35". */
+const amount = (s: string) => money(s.replace(/[^\d.,]/g, ''))
+
+/** Payments a year for each payment mode. */
+function modeFactor(mode: string): number | null {
+  if (/monthly/i.test(mode)) return 12
+  if (/quarterly/i.test(mode)) return 4
+  if (/half|semi/i.test(mode)) return 2
+  if (/annual|yearly/i.test(mode)) return 1
+  return null
+}
+
+interface Rider { name: string; sa: string; premium: string; discount: string; page: number; line: string }
+
+/** The rows of the "Supplementary Benefits" table on the summary page, read line by line:
+ *  name, then numbers (terms, sum assured, premium before discount, discount %, premium payable). */
+function readRiders(lines: Line[]): { riders: Rider[]; total: { value: string; page: number; line: string } | null; seen: boolean } {
+  const idx = lines.findIndex((l) => /^supplementary\s+benefits?\b/i.test(l.text.trim()) && l.text.trim().length < 40)
+  if (idx < 0) return { riders: [], total: null, seen: false }
+  const page = lines[idx].page
+  const riders: Rider[] = []
+  let total: { value: string; page: number; line: string } | null = null
+  for (const l of lines.slice(idx + 1).filter((x) => x.page === page).slice(0, 30)) {
+    const t = l.text.trim()
+    if (/^total\s*:/i.test(t)) {
+      const nums = t.match(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g)
+      if (nums) total = { value: amount(nums[nums.length - 1]), page, line: t }
+      break
+    }
+    const m = t.match(/^([A-Za-z][^\d]*?(?:\b[IVX]+\b)?)\s+((?:\d|to\s+age).*)$/i)
+    if (!m) continue
+    const tokens = m[2].split(/\s+/)
+    const nums = tokens.filter((x) => NUM.test(x))
+    const pct = tokens.find((x) => /^\d{1,2}(?:\.\d+)?%$/.test(x)) ?? ''
+    const big = nums.find((x) => num(x.replace(/[^\d.]/g, '')) >= 1000)
+    if (!big || nums.length < 2) continue
+    riders.push({ name: m[1].trim(), sa: amount(big), premium: amount(nums[nums.length - 1]), discount: pct, page, line: t })
+  }
+  return { riders, total, seen: true }
+}
+
+const isTpd = (n: string) => /\bTPD\b|total\s*(?:and|&)\s*permanent\s+disab/i.test(n)
+const isCi = (n: string) => /critical\s+illness|\bCI\b|dread\s+disease/i.test(n) && !/waiver|payer/i.test(n)
+
+interface IllRow { year: number; age: number; total: string; rest: string[]; page: number; line: string }
+
+/** The year-by-year tables headed "Total Premiums Paid To-date". Tables about distribution cost are left out.
+ *  A new illustration starts when the policy year goes back down (main plan first, then each rider). */
+function readIllustrations(lines: Line[]): { segments: IllRow[][]; surrender: boolean } {
+  const segments: IllRow[][] = []
+  let inTable = false, surrender = false, misses = 0
+  lines.forEach((l, i) => {
+    if (/total\s*premiums?\s*paid/i.test(l.text)) {
+      const near = lines.slice(Math.max(0, i - 1), i + 3).filter((x) => x.page === l.page).map((x) => x.text).join(' ')
+      inTable = !/distribution\s+cost/i.test(near)
+      surrender = inTable && /surr?ender\s+value/i.test(near)
+      misses = 0
+      return
+    }
+    if (!inTable) return
+    const m = l.text.match(/^(\d{1,3})\s*\/\s*(\d{1,3})\s+(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)\b\s*(.*)$/)
+    if (!m) { if (++misses > 15) inTable = false; return }
+    misses = 0
+    const row: IllRow = { year: +m[1], age: +m[2], total: amount(m[3]), rest: m[4].split(/\s+/).filter(Boolean), page: l.page, line: l.text }
+    const seg = segments[segments.length - 1]
+    const last = seg?.[seg.length - 1]
+    if (!last || row.year < last.year) segments.push([row])
+    else if (!(row.year === last.year && row.total === last.total)) seg.push(row)
+    ;(row as IllRow & { surrender?: boolean }).surrender = surrender
+  })
+  return { segments, surrender }
+}
+
 export function extract(pages: Page[], fileName: string): Extracted {
   const lines = pages.flatMap((p) => p.lines)
   const found: Record<string, Found> = Object.fromEntries(FIELDS.map((f) => [f.key, { value: '', page: null, line: null }]))
   const notes: string[] = []
-  const set = (key: string, value: string | null | undefined, page: number, line: string) => {
+  const set = (key: string, value: string | null | undefined, page: number | null, line: string | null) => {
     if (value && !found[key].value) found[key] = { value, page, line }
   }
 
-  // Cover page rows (only the first page or two, where the cover page sits).
+  // ----- Insured person (the "Policyholder and Plan Details" block) -----
+  const name = labelled(lines, /^life\s+assured(?:'s)?(?:\s+name)?\b/i) ?? labelled(lines, /^(?:name\s+of\s+(?:the\s+)?life\s+assured|insured\s+name)\b/i)
+  if (name) set('insured_name', name.value, name.line.page, name.line.text)
+  const dob = labelled(lines, /^(?:date\s+of\s+birth|DOB)\b/i)
+  if (dob) set('date_of_birth', dob.value, dob.line.page, dob.line.text)
+  const gs = labelled(lines, /^gender\s*\/\s*smok(?:er|ing)\s+status\b/i) ?? labelled(lines, /^sex\s*\/\s*smok(?:er|ing)\s+status\b/i)
+  if (gs) {
+    const g = gs.value.match(/\b(male|female)\b/i)
+    if (g) set('gender', cap(g[1]), gs.line.page, gs.line.text)
+    const sm = gs.value.match(/\b(non[\s-]?smoker|smoker)\b/i)
+    if (sm) set('underwriting_class', smoker(sm[1]), gs.line.page, gs.line.text)
+  }
+  const g2 = labelled(lines, /^(?:gender|sex)\b/i)
+  if (g2) { const g = g2.value.match(/^(male|female|m|f)\b/i); if (g) set('gender', /^f/i.test(g[1]) ? 'Female' : 'Male', g2.line.page, g2.line.text) }
+  const sm2 = labelled(lines, /^(?:smok(?:ing|er)\s+status|smoker|underwriting\s+class)\b/i)
+  if (sm2) { const sm = sm2.value.match(/^(non[\s-]?smoker|smoker|yes|no)\b/i); if (sm) set('underwriting_class', /^yes$/i.test(sm[1]) ? 'Smoker' : /^no$/i.test(sm[1]) ? 'Non-Smoker' : smoker(sm[1]), sm2.line.page, sm2.line.text) }
+  const res = labelled(lines, /^(?:residency(?:\s*\/\s*nationality)?|country\s+of\s+residence|residence)\b/i)
+  if (res) {
+    // "Indonesia - Major Cities (D1) / Indonesia (ID)" -> "Indonesia"
+    const v = res.value.split('/')[0].replace(/\s+-\s+.*$/, '').replace(/\([^)]*\)/g, '').trim()
+    set('residency', v, res.line.page, res.line.text)
+  }
+
+  // ----- Cover page rows (only the first pages, where the cover page sits) -----
   const cover = lines.filter((l) => l.page <= 2)
   const prt = coverRow(cover, /^premium\s+term\b/i)
   if (prt) set('premium_term', parseYears(prt.value), prt.line.page, prt.line.text)
@@ -250,85 +425,172 @@ export function extract(pages: Page[], fileName: string): Extracted {
     if (cand.length <= 80 && !/[.:]$/.test(cand)) { plan = cand; planAt = cover[ptIdx - 1] }
   }
 
-  // Total distribution cost: the fixed LIA cover page sentence.
+  // ----- Currency: "Currency : SGD", the cover page's "Policy Currency  Singapore Dollars", or "(S$)" headings -----
+  const cur = labelled(lines, /^(?:policy\s+)?currency\b/i, false)
+  const curCode = cur ? currencyCode(cur.value.split(/\s{2,}/)[0]) : ''
+  if (cur && curCode) set('currency', curCode, cur.line.page, cur.line.text)
+  if (!found.currency.value) {
+    const l = lines.find((x) => /\((?:S\$|SGD|US\$|USD|HK\$|A\$|RM)\)/.test(x.text))
+    const c = l?.text.match(/\((S\$|SGD|US\$|USD|HK\$|A\$|RM)\)/)?.[1]
+    if (l && c) set('currency', currencyCode(c === 'RM' ? 'RM 1' : c), l.page, l.text)
+  }
+  const currency = found.currency.value
+  /** An amount for a note: "SGD 1,089.00" (no currency when it is not known). */
+  const cm = (v: string | number) => `${currency ? currency + ' ' : ''}${num(String(v)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+  // Total distribution cost: not a comparison field any more, but useful to know.
   for (const l of lines) {
     const m = l.text.match(/total\s+distribution\s+cost\s+for\s+this\s+plan\s+is\s*(.*)$/i)
     if (!m) continue
     const v = m[1].replace(/\$\s+(?=\d)/, '$').replace(/([\d.,])\s+(?=[\d.,])/g, '$1').match(MONEY_IN_TEXT)
-    if (v) set('distribution_cost', money(v[1]), l.page, l.text)
     const pct = l.text.match(/makes\s+up\s+(\d{1,3}(?:\.\d+)?)\s*%/i)
-    if (pct) notes.push(`Total distribution cost is ${pct[1]}% of total premiums.`)
+    if (v) notes.push(`Total distribution cost is ${cm(v[1])}${pct ? ` (${pct[1]}% of total premiums)` : ''}.`)
     break
   }
 
-  // Payment mode, so we only put a premium in the monthly row when it really is monthly.
-  const modeLine = lines.find((l) => /\bpayment\s+mode\b/i.test(l.text))
-  const mode = modeLine?.text.match(/payment\s+mode\s*:?\s*(monthly|quarterly|half[\s-]?yearly|semi[\s-]?annual(?:ly)?|annual(?:ly)?|yearly|single)/i)?.[1] ?? ''
-  const monthlyMode = /monthly/i.test(mode)
+  // ----- Payment mode: premiums in the comparison are per year -----
+  const modeRow = labelled(lines, /^payment\s+mode\b/i, false)
+  const mode = modeRow?.value.match(/^(monthly|quarterly|half[\s-]?yearly|semi[\s-]?annual(?:ly)?|annual(?:ly)?|yearly|single)/i)?.[1] ?? ''
 
-  // Summary table.
+  // ----- Summary table -----
   let table: TableRead | null = null
   for (const p of pages) { table = readSummaryTable(p); if (table) break }
+  const factor = modeFactor(mode) ?? (table && /monthly/i.test(table.premiumHeader) ? 12 : table && /annual/i.test(table.premiumHeader) ? 1 : null)
+  const modeName = mode ? cap(mode) : factor === 12 ? 'Monthly' : factor === 1 ? 'Annual' : ''
+  const yearly = (v: string) => (factor ? fmt2(num(v) * factor) : '')
+  let baseModal = ''
   if (table) {
     const t = table.values
-    set('sum_assured', t.sum_assured ? money(t.sum_assured.replace(/[^\d.,]/g, '')) : '', table.page, table.line)
+    set('death_sa', t.sum_assured ? amount(t.sum_assured) : '', table.page, table.line)
     set('policy_term', t.policy_term ? parseYears(t.policy_term) : '', table.page, table.line)
     set('premium_term', t.premium_term ? parseYears(t.premium_term) : '', table.page, table.line)
-    const headerSaysMonthly = /monthly/i.test(table.premiumHeader)
-    if (t.premium && (headerSaysMonthly || monthlyMode)) set('monthly_premium', money(t.premium.replace(/[^\d.,]/g, '')), table.page, table.line)
+    if (t.premium) { baseModal = amount(t.premium); set('base_premium', yearly(baseModal), table.page, table.line) }
     if (!plan && t.plan) plan = t.plan
-    if (t.discount) {
-      const pctNote = `Premium is after a ${t.discount.replace(/\s+/g, '')} discount`
-      notes.unshift(t.before ? `${pctNote} (S$${num(t.before.replace(/[^\d.,]/g, '')).toFixed(2)} before the discount).` : `${pctNote}.`)
-    }
   }
 
   // Fallbacks: "label: value" on one line (never the next line, to avoid picking up the wrong number).
-  const insurerForRules = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName)
+  const insurer = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName)
   const labelRules: Record<string, RegExp[]> = {
-    sum_assured: [/\b(?:basic\s+)?sum\s+assured\s*(?:\(S\$\))?\s*:/i],
-    monthly_premium: [/\bMP\s*:/, /\bmonthly\s+premium\s*(?:\(S\$\))?\s*:/i],
+    death_sa: [/\b(?:basic\s+)?sum\s+assured\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i],
   }
   for (const [key, generic] of Object.entries(labelRules)) {
-    for (const re of [...(INSURER_RULES[insurerForRules]?.[key] ?? []), ...generic]) {
+    for (const re of [...(INSURER_RULES[insurer]?.[key] ?? []), ...generic]) {
       for (const l of lines) {
         const m = l.text.match(re)
         if (!m) continue
         const after = l.text.slice((m.index ?? 0) + m[0].length).trim()
-        const v = after.match(/^(?:S\$|SGD|\$)?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\b/i)
+        const v = after.match(/^(?:S\$|SGD|US\$|USD|\$)?\s*(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\b/i)
         if (v) { set(key, money(v[1]), l.page, l.text); break }
       }
       if (found[key].value) break
     }
   }
 
-  if (!found.monthly_premium.value && mode && !monthlyMode) {
-    notes.push(`Payment mode is ${mode}, so the monthly premium was left blank. Fill it in by hand if you have it.`)
+  // ----- Riders, and the total premium line -----
+  const { riders, total, seen: ridersSeen } = readRiders(lines)
+  const tpd = riders.find((r) => isTpd(r.name))
+  const ci = riders.find((r) => isCi(r.name))
+  if (tpd) { set('tpd_sa', tpd.sa, tpd.page, tpd.line); set('tpd_premium', yearly(tpd.premium), tpd.page, tpd.line) }
+  if (ci) { set('ci_sa', ci.sa, ci.page, ci.line); set('ci_premium', yearly(ci.premium), ci.page, ci.line) }
+  // Spec: no CI rider -> "NA" and "NA". Same for TPD. Only once the summary page has been read.
+  if (table || ridersSeen) {
+    if (!ci) { set('ci_sa', 'NA', null, null); set('ci_premium', 'NA', null, null) }
+    if (!tpd) { set('tpd_sa', 'NA', null, null); set('tpd_premium', 'NA', null, null) }
+  }
+  const others = riders.filter((r) => r !== tpd && r !== ci)
+  if (others.length) notes.push(`Other riders not in the table: ${others.map((r) => `${r.name} (${cm(r.premium)} ${modeName.toLowerCase() || 'per payment'})`).join('; ')}.`)
+  if (total) set('annual_premium', yearly(total.value), total.page, total.line)
+  else if (table && baseModal && ridersSeen === false) set('annual_premium', yearly(baseModal), table.page, table.line)
+  if (factor && factor !== 1 && (found.annual_premium.value || found.base_premium.value)) {
+    notes.push(`Payment mode is ${modeName}: premiums are shown per year (${factor} × the ${modeName.toLowerCase()} premium${total ? `, ${cm(total.value)} in total` : baseModal ? `, ${cm(baseModal)}` : ''}).`)
+  }
+  if (!factor && (table?.values.premium || total)) {
+    notes.push('Payment mode not found, so premiums were left blank. Fill them in as yearly amounts.')
+  }
+  if (mode && /single/i.test(mode)) notes.push('This is a single premium policy: the premium is paid once.')
+
+  // ----- Total premium: the last "Total Premiums Paid To-date" of the main illustration, plus each rider's -----
+  const { segments } = readIllustrations(lines)
+  if (segments.length) {
+    const lasts = segments.map((s) => s[s.length - 1])
+    const sum = lasts.reduce((n, r) => n + num(r.total), 0)
+    set('total_premium', fmt2(sum), lasts[0].page, lasts.map((r) => r.line).join(' + '))
+    if (lasts.length > 1) notes.push(`Total premium adds the main plan (${cm(lasts[0].total)}) and ${lasts.length - 1 === 1 ? 'the rider' : `${lasts.length - 1} riders`} (${lasts.slice(1).map((r) => `${cm(r.total)}`).join(', ')}).`)
+    // Covered up till age: the age on the main illustration's last row.
+    set('cover_age', String(lasts[0].age), lasts[0].page, lasts[0].line)
+    // Cash value: none when every guaranteed surrender value in the main illustration is "-" or 0.
+    const main = segments[0] as (IllRow & { surrender?: boolean })[]
+    if (main.some((r) => r.surrender)) {
+      // The surrender value is the last of at least two columns after the premiums (death benefit, surrender value).
+      // OCR often drops a lone "-", leaving only the death benefit: that row then has no surrender value.
+      const sv = main.map((r) => (r.rest.length >= 2 ? r.rest[r.rest.length - 1] : '-')).map((x) => (NUM.test(x) ? num(x.replace(/[^\d.]/g, '')) : 0))
+      const best = Math.max(...sv)
+      set('cash_value', best > 0 ? money(String(best)) : 'NA', lasts[0].page, best > 0 ? `highest guaranteed surrender value ${best}` : 'guaranteed surrender values are all "-" or 0')
+      if (best > 0) notes.push(`Cash value shown is the highest guaranteed surrender value in the illustration (${cm(money(String(best)))}).`)
+    }
+  }
+  if (!found.cover_age.value) {
+    const pTerm = found.policy_term.value
+    const anb = labelled(lines, /^age\s+next\s+birthday\b/i) ?? labelled(lines, /^(?:ANB|age)\b/i)
+    const anbN = anb?.value.match(/^\d{1,3}/)?.[0]
+    if (/^to\s+age\s+(\d+)/i.test(pTerm)) set('cover_age', pTerm.match(/(\d+)/)![1], found.policy_term.page, found.policy_term.line)
+    else if (anbN && /^\d+$/.test(pTerm)) set('cover_age', String(+anbN + +pTerm), anb!.line.page, `${anb!.line.text} + policy term ${pTerm}`)
   }
 
-  // Discount mentioned elsewhere (for example a promo code) but not read from the table.
-  if (!table?.values.discount && lines.some((l) => /\b(?:promo(?:tion(?:al)?)?\s+(?:code|discount)|premium\s+discount|discount\s*\(%\))/i.test(l.text))) {
-    notes.unshift('This PI mentions a premium discount. Check whether the premium shown is before or after it.')
+  // ----- Benefits of the base plan, from the cover page and product summary wording -----
+  const mention = (re: RegExp) => lines.find((l) => re.test(l.text) && !/\b(?:not|no|exclud\w*)\b[^.]*$/i.test(l.text.split(re)[0]))
+  const ti = mention(/terminal\s+illness/i)
+  if (ti) set('terminal_illness', 'Included', ti.page, ti.text)
+  const ad = mention(/accidental\s+death/i)
+  if (ad) set('accidental_death', 'Included', ad.page, ad.text)
+  const noCash = lines.find((l) => /(?:does\s+not\s+have|has\s+no|there\s+is\s+no|without)\s+(?:any\s+)?cash\s+values?/i.test(l.text))
+  if (noCash) set('cash_value', 'NA', noCash.page, noCash.text)
+  const coverText = lines.filter((l) => l.page <= 2).map((l) => l.text).join(' ')
+  const baseCovers = /protection\s+against\s+death[^.]*(?:critical\s+illness|permanent\s+disability)/i.test(coverText)
+  if (baseCovers && !tpd && !ci) notes.push('The plan itself covers more than death (see the cover page, e.g. TPD or critical illness), without a separate rider. The rider rows show NA by the spec\'s rule.')
+
+  // ----- Campaigns: the discount on the summary table, promo code, and whether it lasts the whole term -----
+  if (table?.values.discount) {
+    const pct = table.values.discount.replace(/\s+/g, '')
+    const perpetual = lines.some((l) => /discount\s+is\s+applied[^.]*(?:entire|whole|full)\s+(?:duration|premium\s+term|policy\s+term)|perpetual\s+discount|discount\s+for\s+(?:the\s+)?(?:entire|whole|full)\s+(?:premium|policy)\s+term|lifetime\s+discount/i.test(l.text))
+    const onRiders = riders.filter((r) => r.discount).map((r) => (isTpd(r.name) ? 'TPD rider' : isCi(r.name) ? 'CI rider' : r.name))
+    const value = `${pct}${perpetual ? ' perpetual' : ''} discount${onRiders.length ? ` with ${onRiders.join(', ')}` : ''}${table.values.promo ? ` (promo code ${table.values.promo})` : ''}`
+    set('campaigns', value, table.page, table.line)
+    if (table.values.before) notes.unshift(`Premium is after the ${pct} discount (${cm(amount(table.values.before))}${modeName ? ' ' + modeName.toLowerCase() : ''} before it).`)
+  } else if (lines.some((l) => /\b(?:promo(?:tion(?:al)?)?\s+(?:code|discount)|premium\s+discount|discount\s*\(%\))/i.test(l.text))) {
+    notes.unshift('This PI mentions a premium discount or promotion. Fill in Campaigns by hand.')
+  } else if (table) {
+    set('campaigns', 'NA', null, null)
   }
 
-  // Riders (supplementary benefits) are not in the six fields; say so, with the total premium if shown.
-  const riderIdx = lines.findIndex((l) => /^supplementary\s+benefits?$/i.test(l.text.trim()))
-  if (riderIdx >= 0) {
-    const page = lines[riderIdx].page
-    const after = lines.slice(riderIdx + 1).filter((l) => l.page === page).slice(0, 12)
-    const totalLine = after.find((l) => /^total\s*:/i.test(l.text))
-    const totals = totalLine?.text.match(/\d{1,3}(?:,\d{3})*\.\d{2}/g)
-    notes.push(`This PI also has supplementary benefits (riders). The premium above is for the main plan only${totals ? `; the total premium with riders is S$${totals[totals.length - 1]}` : ''}.`)
+  // ----- Insurer and policy name -----
+  const insurerName = insurer || (insurerRow?.value ?? '').replace(/\s+(?:Pte\.?\s+)?Ltd\.?$/i, '')
+  if (insurerName) set('insurer', insurerName, insurerRow?.line.page ?? planAt?.page ?? null, insurerRow?.line.text ?? null)
+  if (plan) {
+    // "Singlife Elite Term II" -> "Elite Term II": the insurer has its own row.
+    const aliases = KNOWN_INSURERS.find((k) => k.name === insurer)?.aliases ?? []
+    // OCR sometimes reads one capital as small inside an all-capitals word ("CiMB"): put it back.
+    let p = plan.replace(/\b([A-Z]+)([a-z])([A-Z]+)\b/g, (_m, a: string, b: string, c: string) => a + b.toUpperCase() + c)
+    for (const a of aliases) p = p.replace(new RegExp(`^${a.replace(/\s+/g, '\\s+')}\\s+`, 'i'), '')
+    set('policy_name', p, planAt?.page ?? table?.page ?? null, planAt?.text ?? table?.line ?? null)
   }
 
-  const insurer = insurerForRules || (insurerRow?.value ?? '').replace(/\s+(?:Pte\.?\s+)?Ltd\.?$/i, '')
-  if (plan || insurer) {
-    const value = insurer && plan ? `${insurer} – ${plan}` : insurer || plan
-    found.insurer_plan = { value, page: planAt?.page ?? insurerRow?.line.page ?? null, line: [planAt?.text, insurerRow?.line.text].filter(Boolean).join(' / ') || null }
-  }
+  if (currency && currency !== 'SGD') notes.push(`Policy currency is ${currency}, not SGD: amounts are in ${currency}.`)
+  if (!currency) notes.push('Policy currency not found. Fill it in, so amounts are labelled correctly.')
 
-  return { found, notes, discounted: !!table?.values.discount }
+  // Every illustration read to its end (last row at the policy term or the cover age), so the total premium is whole.
+  const termN = /^\d+$/.test(found.policy_term.value) ? +found.policy_term.value : null
+  const endAge = found.cover_age.value ? +found.cover_age.value : null
+  const totalComplete = segments.length > 0 && segments.every((s) => {
+    const last = s[s.length - 1]
+    return (termN !== null && last.year >= termN) || (endAge !== null && last.age >= endAge)
+  })
+
+  return { found, notes, discounted: !!table?.values.discount, totalComplete }
 }
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
+const smoker = (s: string) => (/^non/i.test(s) ? 'Non-Smoker' : 'Smoker')
 
 /** Called as pages are read: pages done so far (with a fraction while OCR reads a page), the PDF's page count,
  *  and whether OCR is being used. */
@@ -337,10 +599,15 @@ export type PageProgress = (done: number, total: number, ocr: boolean) => void
  *  with how much of the page is done (0 to 1). */
 export type OcrPage = (page: unknown, alive: (done: number) => void) => Promise<TextItem[]>
 
-/** True when all six values have been found in the pages read so far. */
+/** Fields that many PIs never show (date of birth, residency, accidental death, cash value), or that are only
+ *  complete once every illustration has been read (total premium), are not needed to stop reading scans early. */
+const NEEDED_FOR_EARLY_STOP = ['total_premium', 'insured_name', 'gender', 'underwriting_class', 'currency', 'insurer', 'policy_name', 'policy_term',
+  'premium_term', 'annual_premium', 'death_sa', 'terminal_illness', 'base_premium', 'tpd_sa', 'ci_sa', 'campaigns', 'cover_age']
+
+/** True when the pages read so far hold the main values, so the scanned pages left can be skipped. */
 export function allFound(pages: Page[]): boolean {
-  const { found } = extract(pages, '')
-  return FIELDS.every((f) => !!found[f.key].value)
+  const { found, totalComplete } = extract(pages, '')
+  return !!totalComplete && NEEDED_FOR_EARLY_STOP.every((k) => !!found[k].value)
 }
 
 /** A page with fewer text pieces than this is treated as a scan and read with OCR. */

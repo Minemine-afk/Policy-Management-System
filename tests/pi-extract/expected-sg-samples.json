@@ -1,10 +1,19 @@
 {
   "SG_TokioMarine-CIMB_TermProtectPlus_2022.pdf": {
-    "insurer_plan": "Tokio Marine – CIMB Term Protect Plus", "sum_assured": "50000", "policy_term": "1", "premium_term": "1",
-    "monthly_premium": "13.45", "distribution_cost": "41.80", "discounted": false
+    "insured_name": "LIONEL LINWOOD TUPPER", "date_of_birth": "", "gender": "Male", "residency": "", "underwriting_class": "Non-Smoker",
+    "currency": "SGD", "cover_age": "36", "insurer": "Tokio Marine", "policy_name": "CIMB Term Protect Plus",
+    "policy_term": "1", "premium_term": "1", "annual_premium": "161.40", "total_premium": "161.40",
+    "death_sa": "50000", "terminal_illness": "Included", "accidental_death": "", "base_premium": "161.40",
+    "tpd_sa": "NA", "tpd_premium": "NA", "ci_sa": "NA", "ci_premium": "NA", "cash_value": "NA", "campaigns": "NA",
+    "discounted": false
   },
   "SG_Singlife_EliteTermII_2024.pdf": {
-    "insurer_plan": "Singlife – Singlife Elite Term II", "sum_assured": "1000000", "policy_term": "25", "premium_term": "25",
-    "monthly_premium": "46.35", "distribution_cost": "1089", "discounted": true
+    "insured_name": "Mr Client", "date_of_birth": "", "gender": "Male", "residency": "Singapore", "underwriting_class": "Non-Smoker",
+    "currency": "SGD", "cover_age": "61", "insurer": "Singlife", "policy_name": "Elite Term II",
+    "policy_term": "25", "premium_term": "25", "annual_premium": "651.00", "total_premium": "16275.00",
+    "death_sa": "1000000", "terminal_illness": "Included", "accidental_death": "Included", "base_premium": "556.20",
+    "tpd_sa": "1000000", "tpd_premium": "94.80", "ci_sa": "NA", "ci_premium": "NA", "cash_value": "NA",
+    "campaigns": "30% perpetual discount with TPD rider (promo code TP05)",
+    "discounted": true
   }
 }

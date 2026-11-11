@@ -13,6 +13,14 @@ const file = (name) => ({ name, mimeType: 'application/pdf', buffer: Buffer.from
 // Made-up Singapore-style PIs (see sample-pis.cjs). Set PI_SAMPLES to a folder with the two real SG sample PIs to check those too.
 const { PI_A, PI_B, PI_C } = require('./sample-pis.cjs')
 const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
+// Row labels on the request page for PIs that are all in SGD (money rows say "(SGD)").
+const SG_LABELS = {
+  insured_name: 'Insured Name', date_of_birth: 'Date of Birth', gender: 'Gender', residency: 'Residency', underwriting_class: 'Underwriting Class',
+  currency: 'Policy Currency', cover_age: 'Covered up till age', insurer: 'Insurer', policy_name: 'Policy Name', policy_term: 'Policy Term (Years)',
+  premium_term: 'Premium Term (Years)', annual_premium: 'Annual Premium (SGD)', total_premium: 'Total Premium (SGD)', death_sa: 'Death',
+  terminal_illness: 'Terminal Illness', accidental_death: 'Accidental Death', base_premium: 'Premium (SGD)', tpd_sa: 'Total & Permanent Disability',
+  tpd_premium: 'TPD Premium (SGD)', ci_sa: 'Critical Illness', ci_premium: 'CI Premium (SGD)', cash_value: 'Cash Value', campaigns: 'Campaigns',
+}
 
 ;(async () => {
   const browser = await chromium.launch()
@@ -92,7 +100,7 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   // PI comparison on the request page: the three uploaded PIs are read straight away into the Excel template
   await check(olivia.getByRole('link', { name: /Compare/ }).count().then((n) => n === 0), 'there is no separate Compare PIs page or link any more')
   const cmp = olivia.getByRole('region', { name: 'PI comparison' })
-  await cmp.getByLabel('Insurer / plan for PI 3').waitFor()
+  await cmp.getByLabel('Insurer for PI 3', { exact: true }).waitFor()
   ok('the uploaded PIs are compared directly on the request page')
   // Progress bar: slow the next download down so the bar can be seen
   await olivia.route('**/storage/v1/object/**', async (route) => { await new Promise((r) => setTimeout(r, 1500)); await route.continue() })
@@ -100,23 +108,36 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await check(cmp.getByRole('status', { name: 'Reading PIs' }).getByText(/Reading PI \d of 3: insurer-.\.pdf/).waitFor({ timeout: 4000 }).then(() => true, () => false), 'a progress bar shows which PI is being read')
   await check(cmp.locator('progress').isVisible(), 'with a percentage bar')
   await olivia.screenshot({ path: SHOTS + '/14-pi-comparison-progress.png' })
-  await cmp.getByLabel('Insurer / plan for PI 3').waitFor()
+  await cmp.getByLabel('Insurer for PI 3', { exact: true }).waitFor()
   await olivia.unroute('**/storage/v1/object/**')
-  const val = (f, i) => olivia.getByLabel(`${f} for PI ${i}`).inputValue()
-  await check(val('Insurer / plan', 1).then((v) => v === 'Great Eastern – GREAT Term Protector'), 'reads insurer and plan name from the cover page')
-  await check(val('Sum assured (S$)', 1).then((v) => v === '500000'), 'reads sum assured from the summary table, not the small print')
-  await check(val('Policy term (years)', 1).then((v) => v === 'To age 65'), 'keeps "To Age 65" as a policy term')
-  await check(val('Premium term (years)', 2).then((v) => v === '30'), 'reads premium term in years')
-  await check(val('Premium (S$, monthly)', 1).then((v) => v === '105.20'), 'reads the monthly premium column')
-  await check(val('Premium (S$, monthly)', 2).then((v) => v === ''), 'leaves the monthly premium blank when the PI is annual')
-  await check(olivia.getByLabel('Notes for PI 2').getByText(/Payment mode is Annual/).isVisible(), 'says why the annual premium was left blank')
-  await check(val('Sum assured (S$)', 3).then((v) => v === '600000'), 'reads sum assured when headings are joined together')
-  await check(val('Premium (S$, monthly)', 3).then((v) => v === '68'), 'reads the premium payable after discount')
+  // The PIs are in SGD, USD and an unknown currency, so the money labels carry no currency code.
+  const val = (f, i) => olivia.getByLabel(`${f} for PI ${i}`, { exact: true }).inputValue()
+  await check(val('Insurer', 1).then((v) => v === 'Great Eastern'), 'reads the insurer from the cover page')
+  await check(val('Policy Name', 2).then((v) => v === 'Secure Term'), 'policy name without the insurer name in front (as in the spec)')
+  await check(val('Insured Name', 1).then((v) => v === 'XXXXX'), 'reads the insured name (Life Assured)')
+  await check(Promise.all([val('Gender', 1), val('Underwriting Class', 1), val('Residency', 1)]).then((v) => v.join('|') === 'Female|Non-Smoker|Singapore'), 'reads gender, underwriting class and residency')
+  await check(val('Death', 1).then((v) => v === '500000'), 'reads the death sum assured from the summary table, not the small print')
+  await check(val('Policy Term (Years)', 1).then((v) => v === 'To age 65'), 'keeps "To Age 65" as a policy term')
+  await check(val('Covered up till age', 1).then((v) => v === '65'), 'works out the cover-until age')
+  await check(val('Premium Term (Years)', 2).then((v) => v === '30'), 'reads premium term in years')
+  await check(val('Annual Premium', 1).then((v) => v === '1262.40'), 'turns a monthly premium into a yearly one')
+  await check(olivia.getByLabel('Notes for PI 1').getByText(/Payment mode is Monthly: premiums are shown per year/).isVisible(), 'says the premiums were made yearly')
+  await check(val('Annual Premium', 2).then((v) => v === '1180.00'), 'keeps an annual premium as it is')
+  await check(val('Policy Currency', 2).then((v) => v === 'USD'), 'reads the policy currency (USD)')
+  await check(olivia.getByLabel('Notes for PI 3').getByText(/Policy currency not found/).isVisible(), 'asks for the currency when the PI does not say')
+  await check(val('Death', 3).then((v) => v === '600000'), 'reads sum assured when headings are joined together')
+  await check(val('Premium', 3).then((v) => v === '816.00'), 'base premium is the premium payable after discount, per year')
   await check(olivia.getByText('After discount').isVisible(), 'flags a discounted premium')
-  await check(olivia.getByLabel('Notes for PI 3').getByText(/15% discount \(S\$80.00 before/).isVisible(), 'notes the discount and the premium before it')
-  await check(val('Total distribution cost (S$)', 3).then((v) => v === '990.40'), 'reads total distribution cost from the cover page sentence')
+  await check(olivia.getByLabel('Notes for PI 3').getByText(/15% discount \(80.00 monthly before/).isVisible(), 'notes the discount and the premium before it')
+  await check(val('Annual Premium', 3).then((v) => v === '1020.00'), 'annual premium is the Total line (plan + riders)')
+  await check(Promise.all([val('Critical Illness', 3), val('CI Premium', 3)]).then((v) => v.join('|') === '200000|204.00'), 'reads the CI rider and its premium')
+  await check(Promise.all([val('Critical Illness', 1), val('CI Premium', 1)]).then((v) => v.join('|') === 'NA|NA'), 'no CI rider shows NA and NA')
+  await check(val('Total Premium', 3).then((v) => v === '25500.00'), 'total premium from the last row of the illustration')
+  await check(val('Cash Value', 3).then((v) => v === 'NA'), 'no cash value shows NA')
+  await check(val('Campaigns', 3).then((v) => v === '15% perpetual discount with CI rider'), 'describes the discount campaign')
+  await check(val('Terminal Illness', 3).then((v) => v === 'Included'), 'terminal illness included when the PI says so')
   await check(olivia.getByRole('button', { name: 'Export to Excel' }).isDisabled(), 'export needs the values-checked box')
-  await olivia.getByLabel('Premium (S$, monthly) for PI 2').fill('98.50')
+  await olivia.getByLabel('Annual Premium for PI 2', { exact: true }).fill('1200.00')
   await olivia.screenshot({ path: SHOTS + '/8-compare-pis.png', fullPage: true })
   await olivia.getByText('I have checked these values against the PDFs').click()
   const [dl] = await Promise.all([olivia.waitForEvent('download'), olivia.getByRole('button', { name: 'Export to Excel' }).click()])
@@ -126,10 +147,12 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(xlsxPath)
   const ws = wb.getWorksheet('PI comparison')
   const rowOf = (label) => { let r = null; ws.eachRow((row) => { if (row.getCell(1).value === label) r = row }); return r }
-  await check(Promise.resolve(ws && ['Field', 'PI1', 'PI2', 'PI3'].every((h, i) => ws.getRow(1).getCell(i + 1).value === h)), 'Excel uses the template headings Field, PI1, PI2, PI3')
-  await check(Promise.resolve(rowOf('Sum assured (S$)').getCell(2).value === 500000 && rowOf('Premium (S$, monthly)').getCell(4).value === 68 && rowOf('Total distribution cost (S$)').getCell(4).value === 990.4), 'Excel has the values as numbers in the PI columns')
-  await check(Promise.resolve(rowOf('Premium (S$, monthly)').getCell(3).value === 98.5 && wb.getWorksheet('Sources').rowCount === 19), 'Excel keeps hand corrections and a Sources sheet')
-  await check(Promise.resolve(ws.getColumn(1).values.some((v) => typeof v === 'string' && v.startsWith('PI3: Premium is after a 15% discount'))), 'Excel notes the discount under the table')
+  await check(Promise.resolve(ws && ws.getCell('A1').value === 'Insured Name: XXXXX' && ws.getCell('A9').value === 'Sum Assured: SGD 500,000' && ws.getCell('A10').value === 'Policy Term: Up till age 65'), 'Excel has the insured header block and the sum assured / policy term banner')
+  await check(Promise.resolve(['Great Eastern', 'AIA', 'Income'].every((h, i) => rowOf('Insurer').getCell(i + 2).value === h)), 'Excel puts the insurer names over the PI columns')
+  await check(Promise.resolve(rowOf('Death').getCell(2).value === 500000 && /SGD/.test(rowOf('Death').getCell(2).numFmt) && /USD/.test(rowOf('Death').getCell(3).numFmt)), 'Excel amounts carry each policy’s own currency')
+  await check(Promise.resolve(rowOf('Annual Premium').getCell(4).value === 1020 && rowOf('Critical Illness').getCell(2).value === 'NA' && rowOf('Campaigns').getCell(4).value === '15% perpetual discount with CI rider'), 'Excel has the values in the PI columns')
+  await check(Promise.resolve(rowOf('Annual Premium').getCell(3).value === 1200 && wb.getWorksheet('Sources').rowCount === 70), 'Excel keeps hand corrections and a Sources sheet')
+  await check(Promise.resolve(ws.getColumn(1).values.some((v) => typeof v === 'string' && v.startsWith('PI3: Premium is after the 15% discount'))), 'Excel notes the discount under the table')
   await olivia.getByRole('button', { name: /^Save to PI-\d+ for the introducer$/ }).click()
   await olivia.getByRole('status').getByText(/Saved PI-\d+-pi-comparison\.xlsx/).waitFor()
   ok('ops saved the comparison Excel to the request')
@@ -232,7 +255,7 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
   await check(pat.getByRole('link', { name: 'Compare PIs' }).count().then((n) => n === 0), 'bsd has no Compare PIs option')
   await pat.goto(BASE + '/board')
   await col(pat, 'Completed').locator('.cardlet[data-ref="PI-00007"]').click()
-  await pat.getByRole('region', { name: 'PI comparison' }).getByLabel('Insurer / plan for PI 3').waitFor()
+  await pat.getByRole('region', { name: 'PI comparison' }).getByLabel('Insurer for PI 3', { exact: true }).waitFor()
   ok('bsd also sees the PI comparison on a request')
   await pat.getByRole('link', { name: /Notifications/ }).click()
   await pat.getByText('PI-00002 is overdue').waitFor()
@@ -537,15 +560,15 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
     const names = Object.keys(expected)
     await olivia.goto(BASE + '/requests/20000000-0000-0000-0000-000000000003')
     await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles(names.map((n) => process.env.PI_SAMPLES + '/' + n))
-    await olivia.getByLabel('Insurer / plan for PI 2').waitFor()
-    const labels = { insurer_plan: 'Insurer / plan', sum_assured: 'Sum assured (S$)', policy_term: 'Policy term (years)', premium_term: 'Premium term (years)', monthly_premium: 'Premium (S$, monthly)', distribution_cost: 'Total distribution cost (S$)' }
+    await olivia.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
+    const labels = SG_LABELS
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
-        const got = await olivia.getByLabel(`${label} for PI ${i + 1}`).inputValue()
+        const got = await olivia.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()
         await check(Promise.resolve(got === expected[n][k]), `real sample ${n}: ${label} = ${got || '(blank)'}`)
       }
     }
-    await check(olivia.getByLabel('Notes for PI 2').getByText(/30% discount \(S\$66.20 before/).isVisible(), 'real sample: Singlife premium flagged as after the 30% discount')
+    await check(olivia.getByLabel('Notes for PI 2').getByText(/30% discount \(SGD 66.20 monthly before/).isVisible(), 'real sample: Singlife premium flagged as after the 30% discount')
     await olivia.screenshot({ path: SHOTS + '/13-compare-real-sg-pis.png', fullPage: true })
     await olivia.getByText('I have checked these values against the PDFs').click()
     const [dl2] = await Promise.all([olivia.waitForEvent('download'), olivia.getByRole('button', { name: 'Export to Excel' }).click()])
@@ -559,16 +582,16 @@ const piFile = (name, buffer) => ({ name, mimeType: 'application/pdf', buffer })
     const names = Object.keys(expected)
     await olivia.goto(BASE + '/requests/20000000-0000-0000-0000-000000000003')
     const cmp = olivia.getByRole('region', { name: 'PI comparison' })
-    await cmp.getByLabel('Insurer / plan for PI 2').waitFor()
+    await cmp.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
     for (const n of names) await olivia.getByRole('listitem').filter({ hasText: n }).getByRole('button', { name: 'Remove' }).click()
     await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles(names.map((n) => process.env.PI_SCANS + '/SCAN_' + n))
     await check(cmp.getByText(/reading it with OCR/).waitFor({ timeout: 60000 }).then(() => true, () => false), 'scanned pages are read with OCR, shown on the progress bar')
     await olivia.screenshot({ path: SHOTS + '/14-ocr-progress.png' })
-    await cmp.getByLabel('Insurer / plan for PI 2').waitFor({ timeout: 600000 })
-    const labels = { insurer_plan: 'Insurer / plan', sum_assured: 'Sum assured (S$)', policy_term: 'Policy term (years)', premium_term: 'Premium term (years)', monthly_premium: 'Premium (S$, monthly)', distribution_cost: 'Total distribution cost (S$)' }
+    await cmp.getByLabel('Insurer for PI 2', { exact: true }).waitFor({ timeout: 600000 })
+    const labels = SG_LABELS
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
-        const got = await cmp.getByLabel(`${label} for PI ${i + 1}`).inputValue()
+        const got = await cmp.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()
         await check(Promise.resolve(got === expected[n][k]), `scanned ${n} (OCR): ${label} = ${got || '(blank)'}`)
       }
     }
