@@ -19,6 +19,18 @@ interface Progress { file: number; files: number; name: string; page: number; pa
 const failed = (fileName: string, error: string): Column => ({ fileName, found: {}, values: {}, notes: [], discounted: false, error })
 
 const MAX = 3
+
+/** "6–27" for a run of pages, "3, 5" otherwise. */
+function pageList(ps: number[]): string {
+  const runs: string[] = []
+  for (let i = 0; i < ps.length; i++) {
+    let j = i
+    while (j + 1 < ps.length && ps[j + 1] === ps[j] + 1) j++
+    runs.push(j > i ? `${ps[i]}–${ps[j]}` : String(ps[i]))
+    i = j
+  }
+  return runs.join(', ')
+}
 /** A PI is given up on when its download, or its reading, makes no progress for this long. */
 export const READ_LIMIT_MS = 60_000
 
@@ -61,7 +73,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           if (!dl.data) { out.push(failed(doc.file_name, dl.error?.message ?? 'Download failed')); continue }
           const ocrPages = new Set<number>()
           const pages = await readPdf(await dl.data.arrayBuffer(), (page, total, ocr) => {
-            if (ocr) ocrPages.add(page + 1)
+            if (ocr) ocrPages.add(Math.floor(page) + 1)
             if (!cancelled) setProgress({ file: i, files: list.length, name: doc.file_name, page, pages: total, ocr })
           }, READ_LIMIT_MS)
           if (!pages.some((p) => p.lines.length)) {
@@ -72,6 +84,10 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           if (ocrPages.size) {
             const list = [...ocrPages].join(', ')
             notes.unshift(`Scanned ${ocrPages.size === 1 ? 'page' : 'pages'} ${list} read with OCR: check every value from ${ocrPages.size === 1 ? 'it' : 'them'} against the PDF.`)
+          }
+          const skipped = pages.filter((p) => p.skipped).map((p) => p.page)
+          if (skipped.length) {
+            notes.push(`Scanned ${skipped.length === 1 ? 'page' : 'pages'} ${pageList(skipped)} ${skipped.length === 1 ? 'was' : 'were'} not read, because all six values were found before ${skipped.length === 1 ? 'it' : 'them'}.`)
           }
           out.push({ fileName: doc.file_name, found, notes, discounted, values: Object.fromEntries(FIELDS.map((f) => [f.key, found[f.key]?.value ?? ''])) })
         } catch (e) {
@@ -155,12 +171,12 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         <div className="progress" role="status" aria-label="Reading PIs">
           <div className="row between small">
             <span>Reading PI {progress.file + 1} of {progress.files}: {progress.name}
-              {progress.ocr ? ` · scanned page ${progress.page + 1} of ${progress.pages}, reading it with OCR (slower)`
-                : progress.pages ? ` · page ${progress.page} of ${progress.pages}` : ' · downloading'}</span>
+              {progress.ocr ? ` · scanned page ${Math.floor(progress.page) + 1} of ${progress.pages}, reading it with OCR (slower)`
+                : progress.pages ? ` · page ${Math.floor(progress.page)} of ${progress.pages}` : ' · downloading'}</span>
             <strong>{pct}%</strong>
           </div>
           <progress max={100} value={pct} aria-label={`${pct}% read`} />
-          <span className="small muted">A PI is stopped if nothing happens for {READ_LIMIT_MS / 1000} seconds. Scanned pages are read with OCR, which takes a few seconds each.</span>
+          <span className="small muted">A PI is stopped if nothing happens for {READ_LIMIT_MS / 1000} seconds. Scanned pages are read with OCR, which takes several seconds each (the first one also downloads the OCR engine, about 28 MB).</span>
         </div>
       )}
 

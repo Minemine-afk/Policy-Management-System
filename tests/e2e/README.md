@@ -16,3 +16,7 @@ On a normal machine, use `supabase start` instead and you don't need any of this
    remove, admin users (add, CSV import and export), settings and the audit log, and Compare PIs on made-up Singapore-style PIs (`sample-pis.cjs`).
    Screenshots go to `shots/`. Add `PI_SAMPLES=/path/to/pi-samples` to also check the two real Singapore sample PIs
    (expected values in `../pi-extract/expected-sg-samples.json`). Without a browser: `node tests/pi-extract/check.mjs <folder> [expected.json]`.
+   Add `PI_SCANS=/path/to/scans` (made by `./make-scans.sh <pi-samples> <scans> [tilt]`) to also check OCR on scanned copies.
+6. OCR only: `node tests/pi-extract/check-ocr.mjs <scans> ../pi-extract/expected-sg-samples.json` (Node, same models and
+   rules; needs `npm i onnxruntime-node pngjs` in `tests/pi-extract` and pdftoppm), or `node tests/pi-extract/check-browser.cjs
+   <folder> <expected.json>` (real Chromium through the Vite dev server, with timings and download size).
