@@ -18,6 +18,8 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
    - `1b-upgrade.sql` (9 Nov: notifications, new workflow rules, tighter privacy)
    - `1c-upgrade.sql` (10 Nov: urgent flag, deadline settings, reopen, bulk assign, saved filters)
    - `1d-upgrade.sql` (11 Nov: urgent and due times hidden from introducers, overdue requests marked urgent automatically)
+   - `1e-upgrade.sql` (12 Nov: separate Admin role). **Edit it first:** put the email of the login that should become
+     Admin on the line marked `CHANGE THIS`. It stops without changing anything until you do.
 
    Each is safe to run again if you are not sure whether you ran it.
 4. Run it once only. If it fails part-way nothing is saved (it runs as one transaction); send me the error.
@@ -28,8 +30,16 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
 
 ## 4. Add yourself and testers
 **Authentication** → **Users** → **Add user** → **Create new user**. Enter the email and a password and tick
-**Auto Confirm User**. You only need to do this for yourself (the first bsd); once step 4b is done, bsd can add
+**Auto Confirm User**. You only need to do this for yourself (the first admin); once step 4b is done, an admin can add
 everyone else from the website.
+
+## Roles
+- **Introducer** submits PI requests and sees only their own.
+- **Ops** picks up requests, uploads PIs, compares them.
+- **BSD** sees every request, assigns, reassigns, bulk assigns, removes and reopens requests.
+- **Admin** manages the system: adds users (one by one or from a CSV file), changes roles, deactivates people,
+  sets the deadline and reads the audit log. Admin does not see requests or client details.
+One role per login.
 
 ## 5. Give people roles
 New query → paste `2-assign-roles.sql`, change the emails, names and roles, **Run**. The result lists everyone.
@@ -37,12 +47,12 @@ Until this step a new user sees "Waiting for access". Afterwards, an admin can c
 
 ## 4b. Let admins create users from the website (about 5 minutes, once)
 Creating a login needs Supabase's secret key, which must never be in the web app. So the website asks a small
-server function, `admin-create-user`, which runs on Supabase, checks the caller is an active bsd user, creates the
+server function, `admin-create-user`, which runs on Supabase, checks the caller is an active admin user, creates the
 login and sets the role. No command line needed:
 1. Left menu: **Edge Functions** → **Deploy a new function** → **Via Editor**.
 2. Name it exactly `admin-create-user`.
 3. Delete the example code, paste the whole of `supabase/functions/admin-create-user/index.ts`, click **Deploy**.
-4. Sign in as bsd → **Admin** → **Users and roles** → **Add a user**. Pick the role, keep or change the suggested
+4. Sign in as an admin → **Admin** → **Users and roles** → **Add a user**. Pick the role, keep or change the suggested
    temporary password, **Create user**, and pass the email and password to the person privately. They can change
    the password under **Account** (top right) after signing in.
 
@@ -53,12 +63,14 @@ Command-line alternative: `npx supabase functions deploy admin-create-user --pro
 ## 6. (Optional) Load sample requests
 Run `3-sample-data.sql` after step 5. `4-remove-sample-data.sql` removes them again.
 
-## 6a. (Optional) 15 fake sample users with 3 requests each per introducer
-`3b-sample-users.sql` adds 5 introducers, 5 ops and 5 bsd users (`sample.introducer1@example.com` …
-`sample.bsd5@example.com`, all named "[Sample] …") and 3 requests for each sample introducer (one waiting,
-one in progress with a sample ops user, one completed). **First change `sample_password` near the top**; the script
-refuses to run until you do. All 15 share that password and five are bsd, so pick a strong one.
-`4b-remove-sample-users.sql` removes all of them and their requests again (real users and requests are kept).
+## 6a. (Optional) 20 fake sample users with 3 requests each per introducer
+`3b-sample-users.sql` adds 5 introducers, 5 ops, 5 bsd and 5 admin users (`sample.introducer1@example.com` …
+`sample.bsd5@example.com`, `sample.admin1@example.com` … `sample.admin5@example.com`, all named "[Sample] …") and
+3 requests for each sample introducer (one waiting, one in progress with a sample ops user, one completed).
+**First change `sample_password` near the top**; the script refuses to run until you do. All 20 share that password
+and five are admins, so pick a strong one. Already ran it before 12 Nov? Run it again to add the 5 admins
+(users that exist are skipped).
+`4b-remove-sample-users.sql` removes all of them (admins included) and their requests again (real users and requests are kept).
 Remove them before any real client data goes in.
 
 ## 6b. (Optional) Deadline checks on a schedule

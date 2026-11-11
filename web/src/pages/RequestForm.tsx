@@ -125,7 +125,7 @@ export default function RequestForm() {
         <div>
           <h2 id="client-head" className="eyebrow">Client</h2>
           <p className="small muted" style={{ margin: '4px 0 0' }}>
-            Only you can see these details. Ops and admins see the request reference and profile below, never the client's name.
+            Only you can see these details. Ops and BSD see the request reference and profile below, never the client's name.
           </p>
         </div>
         {!id && past.length > 0 && (

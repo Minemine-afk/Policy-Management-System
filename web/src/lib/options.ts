@@ -42,7 +42,8 @@ export function statusLabel(status: string, isIntroducer: boolean) {
 export const ROLE_LABEL: Record<string, string> = {
   introducer: 'Introducer',
   ops: 'Ops',
-  bsd: 'Admin',
+  bsd: 'BSD',
+  admin: 'Admin',
 }
 
 export const EVENT_LABEL: Record<string, string> = {
@@ -102,11 +103,7 @@ export function byPriorityThenDue(a: Sortable, b: Sortable) {
     || (a.due_at ?? a.submitted_at).localeCompare(b.due_at ?? b.submitted_at)
 }
 
-/**
- * Server messages still say "bsd" (the database's internal name for the admin role). Show "admin" instead.
- * e.g. "Only the assigned ops user or bsd can change the status" -> "... or an admin can ...".
- */
+/** Server messages use the database's lower-case role name "bsd". Show it as "BSD". */
 export function says(msg: string) {
-  return msg.replace(/\bor bsd\b/gi, 'or an admin').replace(/\bown bsd access\b/gi, 'own admin access')
-    .replace(/\bonly bsd\b/gi, 'Only an admin').replace(/\bbsd\b/gi, 'admin')
+  return msg.replace(/\bbsd\b/gi, 'BSD')
 }

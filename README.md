@@ -7,29 +7,31 @@ from submission to delivery, in the style of a simple Jira or Taiga board.
   its progress. When ops finish, the PIs appear on the request. Each introducer sees only their own clients and requests.
 - **Ops** pick requests from an unassigned pool or get them assigned, prepare the PIs outside the portal,
   upload them back, and mark the request completed. They can send a request back to the introducer with a reason.
-- **Admin** (stored as `bsd` in the database) sees every request, assigns or reassigns it to an ops user,
-  removes requests, manages users and reads the audit log (filter it by date range, user, role and action, in any combination).
+- **BSD** sees every request, assigns or reassigns it to an ops user and removes requests.
+- **Admin** manages the system: adds users (one by one, or many at once by **importing a CSV file**), **exports the user list
+  as CSV**, changes roles and deactivates people, sets the deadline, and reads the audit log (filter it by date range, user,
+  role and action, in any combination). Admin does not see requests or client details. One role per login.
 
 Ops can assign a pooled request to themselves (**Assign to me**). Requests are due a set time after submission
-(two days by default; an admin changes it under **Admin → Deadline settings**). Ops and admins see them in orange in the "due soon"
+(two days by default; an admin changes it under **Admin → Deadline settings**). Ops and BSD see them in orange in the "due soon"
 window (one day by default) and in red once overdue, until they are completed or removed. While a request is sent back,
 its clock is paused (an admin can switch that off) and the time is added back when the introducer resubmits.
 
-**Priority (ops and admins only):** introducers never see the urgent flag, due times or the deadline colours, and cannot set urgent.
-Every overdue request is marked **Urgent** automatically. The assigned ops user or an admin can also mark a request urgent by hand, and
+**Priority (ops and BSD only):** introducers never see the urgent flag, due times or the deadline colours, and cannot set urgent.
+Every overdue request is marked **Urgent** automatically. The assigned ops user or BSD can also mark a request urgent by hand, and
 can remove a flag unless the request is overdue. An automatic flag clears again once the request is no longer late (an admin lengthens the
 deadline, or it is reopened with a fresh deadline) or when it is completed or removed; while a request is sent back with the clock
 paused, the flag stays as it was. A flag set by hand is never cleared automatically. Urgent cards are listed first, and the ops user is
-told when bsd marks their request urgent.
+told when BSD marks their request urgent.
 
-**Reopen:** the introducer (or an admin) can reopen a completed request with a reason when the client wants changes. It goes back
+**Reopen:** the introducer (or BSD) can reopen a completed request with a reason when the client wants changes. It goes back
 to the same ops user (In progress) if they are still active, otherwise to the unassigned pool, and the deadline starts again.
 
 **Introducer shortcuts:** **Duplicate** on a request starts a new one with the same profile and client details; on a new
 request, **Previous client** fills in an earlier client's details and last profile; **My requests** can be searched by client name.
 
 **Backlog (staff):** filters for status, handler, priority, deadline (overdue, due soon, paused), submission dates and text;
-**saved filters** per user; **Export CSV** of the filtered list (no client details). Admins also see a **Workload** table (open
+**saved filters** per user; **Export CSV** of the filtered list (no client details). BSD also see a **Workload** table (open
 requests per ops user: assigned, in progress, sent back, urgent, overdue) and can tick several requests and **assign them at once**.
 
 **Email alerts:** off for now; notifications are in-app only (the bell). The email code is parked in `docs/email-alerts/`
@@ -39,8 +41,8 @@ Board columns: staff see Unassigned, Assigned, In progress, Sent back, Completed
 request freely between Unassigned, Assigned and In progress. Introducers see only In progress (anything not yet sent back
 or completed), Sent back and Completed, and never see who is handling a request. Sent-back requests are closed to comments;
 the introducer edits any field and resubmits. Notifications (bell): introducers on sent back / completed; ops on
-assignments, deadlines and resubmissions of their requests; admins on all deadlines. Deadline notices are generated when
-ops/admins have the app open (every minute), or every 15 minutes on a schedule once `supabase/cloud/5-schedule-deadline-checks.sql` is run.
+assignments, deadlines and resubmissions of their requests; BSD on all deadlines. Deadline notices are generated when
+ops/BSD have the app open (every minute), or every 15 minutes on a schedule once `supabase/cloud/5-schedule-deadline-checks.sql` is run.
 
 Statuses: Submitted, Assigned, In progress, Sent back, Completed, Removed. Views: Board (drag cards between
 columns), Backlog (filterable table), and a request page with comments (shared or internal), files and an activity timeline.
@@ -48,7 +50,7 @@ columns), Backlog (filterable table), and a request page with comments (shared o
 > **Prototype.** All names and clients are made-up sample data. Real client details are personal data under
 > PDPA: do not enter any until the go-live checklist below is done.
 
-**PI comparison (ops and admins):** on each request page, under the uploaded PIs. The first three PI PDFs are read straight away,
+**PI comparison (ops and BSD):** on each request page, under the uploaded PIs. The first three PI PDFs are read straight away,
 with a progress bar (PI, page and percentage). A PI is reported as unreadable if nothing happens for 60 seconds, so the
 screen never waits forever. There is no separate Compare PIs page any more (old links open the request).
 **Scanned PIs (OCR):** a page with no text inside it (a scan or photo) is read with OCR (Tesseract, open source, free).
@@ -96,7 +98,8 @@ npm run dev                 # open http://127.0.0.1:5173
 | introducer2@example.com | Introducer (Dana) | Reply to a request that ops sent back |
 | ops1@example.com | Ops (Olivia) | Pick up a request, upload PIs, complete it, drag cards |
 | ops2@example.com | Ops (Omar) | See only your own work and the unassigned pool |
-| bsd@example.com | Admin (Pat) | Backlog of everything, assign, remove, users, audit log |
+| bsd@example.com | BSD (Pat) | Backlog of everything, assign, remove |
+| admin@example.com | Admin (Alex) | Users (add, import and export CSV), deadline settings, audit log |
 
 ## What the database enforces
 
@@ -104,12 +107,12 @@ These rules live in `supabase/migrations/` and hold even if someone bypasses the
 
 - Requests change only through database functions (`create_request`, `claim_request`, `assign_request`,
   `change_status`, `resubmit_request`, `remove_request`, ...). Nobody can edit the status directly.
-- Client name, NRIC and contact are readable only by the introducer who submitted the request. Ops and admins never see them.
-- An introducer sees only their own requests. Ops see the unassigned pool and their own assignments. Admins see all.
+- Client name, NRIC and contact are readable only by the introducer who submitted the request. Ops, BSD and admins never see them.
+- An introducer sees only their own requests. Ops see the unassigned pool and their own assignments. BSD see all. Admins see none.
 - Internal comments and internal events never reach introducers. PIs reach the introducer only once the request is completed.
 - Introducers cannot read the priority, due time or paused clock of a request: the app reads requests through the `request_list`
-  view, which returns those fields only to ops and admins, and introducers cannot read those columns of `pi_requests` at all.
-- Sending back or removing needs a reason. Completing needs at least one uploaded PI. Only admins assign, reassigns and removes.
+  view, which returns those fields only to ops and BSD, and introducers cannot read those columns of `pi_requests` at all.
+- Sending back or removing needs a reason. Completing needs at least one uploaded PI. Only BSD assign, reassign and remove. Only admins manage users, change settings and read the audit log.
 - Deactivated users see nothing. Removal keeps the record. Every status change, assignment, removal, document view
   and user change is written to an append-only audit log.
 

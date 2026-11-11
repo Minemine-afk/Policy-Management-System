@@ -1,18 +1,18 @@
-// Supabase Edge Function: lets a bsd user create a new login from the Admin page.
+// Supabase Edge Function: lets an admin user create a new login from the Admin page.
 //
 // Why a server function: creating a user needs the service_role (secret) key, which must never be in the
 // web app. This function runs on Supabase's servers, where that key is provided automatically.
 //
 // What it does, in order:
-//   1. Checks the caller is signed in and is an active bsd user (the database rule has_role('bsd')).
+//   1. Checks the caller is signed in and is an active admin user (the database rule has_role('admin')).
 //   2. Creates the login (email + temporary password, already confirmed).
 //   3. Gives it the chosen role, name and firm by calling admin_update_user AS THE CALLER, so the database
-//      checks bsd again and the audit log records who did it. If that fails, the new login is deleted again.
+//      checks admin again and the audit log records who did it. If that fails, the new login is deleted again.
 //
 // Deploy: see supabase/cloud/README.md ("Let admins create users"). It uses only fetch, no imports, so it can
 // be pasted into the dashboard editor as one file.
 
-const ROLES = ['introducer', 'ops', 'bsd'] as const
+const ROLES = ['introducer', 'ops', 'bsd', 'admin'] as const
 const MIN_PASSWORD = 8
 
 export interface Env { url: string; anonKey: string; serviceKey: string }
@@ -38,12 +38,12 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
   if (!token) return reply(401, { error: 'Sign in first' })
 
-  // 1. Who is calling, and are they bsd? Both answered by Supabase with the caller's own token.
+  // 1. Who is calling, and are they an admin? Both answered by Supabase with the caller's own token.
   const me = await fetch(`${env.url}/auth/v1/user`, { headers: { apikey: env.anonKey, authorization: `Bearer ${token}` } })
   if (!me.ok) return reply(401, { error: 'Your session has expired. Sign in again.' })
   const asCaller = { apikey: env.anonKey, authorization: `Bearer ${token}`, 'content-type': 'application/json' }
-  const isBsd = await fetch(`${env.url}/rest/v1/rpc/has_role`, { method: 'POST', headers: asCaller, body: JSON.stringify({ r: 'bsd' }) })
-  if (!isBsd.ok || (await isBsd.json()) !== true) return reply(403, { error: 'Only an admin can create users' })
+  const isAdmin = await fetch(`${env.url}/rest/v1/rpc/has_role`, { method: 'POST', headers: asCaller, body: JSON.stringify({ r: 'admin' }) })
+  if (!isAdmin.ok || (await isAdmin.json()) !== true) return reply(403, { error: 'Only an admin can create users' })
 
   // Check the form.
   let body: Record<string, unknown>
@@ -56,7 +56,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply(400, { error: 'Enter a valid email address' })
   if (password.length < MIN_PASSWORD) return reply(400, { error: `The temporary password needs at least ${MIN_PASSWORD} characters` })
   if (!fullName) return reply(400, { error: 'Enter the person’s name' })
-  if (!(ROLES as readonly string[]).includes(role)) return reply(400, { error: 'Choose a role: introducer, ops or bsd (admin)' })
+  if (!(ROLES as readonly string[]).includes(role)) return reply(400, { error: 'Choose a role: introducer, ops, bsd or admin' })
 
   // 2. Create the login. Only this call uses the secret key.
   const admin = { apikey: env.serviceKey, authorization: `Bearer ${env.serviceKey}`, 'content-type': 'application/json' }
@@ -72,7 +72,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   const user = await created.json()
   const id: string = user.id ?? user.user?.id
 
-  // 3. Role, name and firm, as the caller (database re-checks bsd and writes the audit log).
+  // 3. Role, name and firm, as the caller (database re-checks admin and writes the audit log).
   const assign = await fetch(`${env.url}/rest/v1/rpc/admin_update_user`, {
     method: 'POST', headers: asCaller,
     body: JSON.stringify({ p_user: id, p_role: role, p_active: true, p_full_name: fullName, p_company: company }),

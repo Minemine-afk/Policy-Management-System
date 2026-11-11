@@ -7,7 +7,8 @@ const SAMPLE = [
   ['introducer2@example.com', 'Introducer Dana'],
   ['ops1@example.com', 'Ops Olivia'],
   ['ops2@example.com', 'Ops Omar'],
-  ['bsd@example.com', 'Admin Pat'],
+  ['bsd@example.com', 'BSD Pat'],
+  ['admin@example.com', 'Admin Alex'],
 ]
 
 // Sample-login shortcuts only appear against a local Supabase, never a hosted project.

@@ -7,6 +7,8 @@ import { forgetSettings } from '../lib/settings'
 import { nameOf, usePeople } from '../lib/people'
 import { auditActionLabel, describeAudit } from '../lib/audit'
 import type { AppSettings, AuditRow, Profile, Role } from '../lib/types'
+import { createUser, tempPassword } from '../lib/users'
+import UserCsv from '../components/UserCsv'
 
 export default function Admin() {
   const cls = ({ isActive }: { isActive: boolean }) => `btn small ${isActive ? 'primary' : ''}`
@@ -50,6 +52,7 @@ function Users() {
   return (
     <>
     <AddUser onCreated={load} />
+    <UserCsv myId={profile?.id ?? ''} onChanged={load} />
     <div className="card">
       <h2 style={{ margin: 0 }}>Everyone</h2>
       {error && <div className="error" role="alert">{error}</div>}
@@ -81,16 +84,9 @@ function Users() {
   )
 }
 
-/** A readable temporary password, e.g. "Kite-7342-Moss". */
-function tempPassword() {
-  const words = ['Kite', 'Moss', 'Reef', 'Pine', 'Lark', 'Opal', 'Fern', 'Dune', 'Cove', 'Teal', 'Wren', 'Jade']
-  const n = new Uint32Array(3); crypto.getRandomValues(n)
-  return `${words[n[0] % words.length]}-${1000 + (n[1] % 9000)}-${words[n[2] % words.length]}`
-}
-
 const BLANK = { full_name: '', email: '', role: 'introducer' as Role, company: '', password: '' }
 
-/** bsd creates a login with a role straight away (runs the admin-create-user server function). */
+/** An admin creates a login with a role straight away (runs the admin-create-user server function). */
 function AddUser({ onCreated }: { onCreated: () => void }) {
   const [f, setF] = useState({ ...BLANK, password: tempPassword() })
   const [busy, setBusy] = useState(false)
@@ -101,22 +97,10 @@ function AddUser({ onCreated }: { onCreated: () => void }) {
   async function create(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true); setError(''); setDone(null)
-    const { data, error } = await supabase.functions.invoke('admin-create-user', {
-      body: { ...f, company: f.role === 'introducer' ? f.company : '' },
-    })
+    const msg = await createUser(f)
     setBusy(false)
-    if (error) {
-      let msg = says(error.message)
-      const ctx = (error as { context?: Response }).context
-      if (ctx && typeof ctx.json === 'function') {
-        try { msg = says((await ctx.json()).error ?? msg) } catch { /* not JSON */ }
-      } else if (/fetch|send a request|not found/i.test(msg)) {
-        msg = 'Could not reach the user-creation function. It may not be deployed yet (see supabase/cloud/README.md, "Let admins create users").'
-      }
-      setError(msg)
-      return
-    }
-    setDone({ email: data.email, password: f.password, role: f.role })
+    if (msg) { setError(msg); return }
+    setDone({ email: f.email.trim().toLowerCase(), password: f.password, role: f.role })
     setF({ ...BLANK, role: f.role, company: f.role === 'introducer' ? f.company : '', password: tempPassword() })
     onCreated()
   }
@@ -288,7 +272,7 @@ function Settings() {
   return (
     <div className="card" style={{ maxWidth: 620 }}>
       <p className="small muted" style={{ margin: 0 }}>
-        Requests are due a set time after they are submitted. Ops and admins see them in orange when the "due soon" window starts,
+        Requests are due a set time after they are submitted. Ops and BSD see them in orange when the "due soon" window starts,
         and in red once overdue. Changing the deadline moves the due time of every open request by the same amount.
       </p>
       <div className="grid">

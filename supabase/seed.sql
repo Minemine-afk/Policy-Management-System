@@ -9,7 +9,8 @@ begin
     ('00000000-0000-0000-0000-000000000002'::uuid, 'introducer2@example.com', 'Dana Introducer'),
     ('00000000-0000-0000-0000-000000000003'::uuid, 'ops1@example.com',        'Olivia Ops'),
     ('00000000-0000-0000-0000-000000000004'::uuid, 'ops2@example.com',        'Omar Ops'),
-    ('00000000-0000-0000-0000-000000000005'::uuid, 'bsd@example.com',         'Pat Admin')
+    ('00000000-0000-0000-0000-000000000005'::uuid, 'bsd@example.com',         'Pat BSD'),
+    ('00000000-0000-0000-0000-000000000006'::uuid, 'admin@example.com',       'Alex Admin')
   ) as t(id, email, full_name)
   loop
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -28,6 +29,7 @@ update public.profiles set role = 'introducer', company = '[Sample] Harbour Prop
 update public.profiles set role = 'introducer', company = '[Sample] Lion City Accounting'       where email = 'introducer2@example.com';
 update public.profiles set role = 'ops'  where email in ('ops1@example.com', 'ops2@example.com');
 update public.profiles set role = 'bsd'  where email = 'bsd@example.com';
+update public.profiles set role = 'admin' where email = 'admin@example.com';
 
 -- Requests: ids end in the same number as the sample story --------------------------
 insert into public.pi_requests (id, ref, introducer_id, status, assignee_id, age_band, gender, smoker, coverage_term,

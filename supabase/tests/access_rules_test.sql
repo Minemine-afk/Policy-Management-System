@@ -164,11 +164,26 @@ select pg_temp.expect_error($$select assign_request((select id from pi_requests 
 select pg_temp.expect_error($$select remove_request((select id from pi_requests where ref = 'PI-00002'), '')$$, 'reason is required');
 select remove_request((select id from pi_requests where ref = 'PI-00002'), 'Client withdrew');
 select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00002'), 'in_progress')$$, 'removed');
-select pg_temp.expect_error($$select admin_update_user('00000000-0000-0000-0000-000000000005', 'ops', true)$$, 'own bsd');
+-- bsd no longer manages users, settings or the audit log; admin does (and does not see requests).
+select pg_temp.expect_error($$select admin_update_user('00000000-0000-0000-0000-000000000004', 'ops', false)$$, 'Only an admin');
+select pg_temp.expect_error($$select update_settings(72, 24, true)$$, 'Only an admin');
+do $$ begin
+  if exists (select 1 from audit_log) then raise exception 'bsd should not read the audit log'; end if;
+  if (select count(*) from profiles) < 6 then raise exception 'bsd should still see everyone (to assign requests)'; end if;
+  raise notice 'ok: bsd cannot manage users, change settings or read the audit log';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select pg_temp.expect_error($$select admin_update_user('00000000-0000-0000-0000-000000000006', 'bsd', true)$$, 'own admin');
+select pg_temp.expect_error($$select admin_update_user('00000000-0000-0000-0000-000000000006', 'admin', false)$$, 'own admin');
+select pg_temp.expect_error($$select admin_update_user('00000000-0000-0000-0000-0000000000ff', 'ops', true)$$, 'User not found');
+select pg_temp.expect_error($$select assign_request((select id from pi_requests where ref = 'PI-00001'), '00000000-0000-0000-0000-000000000004')$$, 'Only bsd');
 select admin_update_user('00000000-0000-0000-0000-000000000004', 'ops', false);
 do $$ begin
   if (select count(*) from audit_log where action = 'request.removed') < 1 then raise exception 'removal not audited'; end if;
-  raise notice 'ok: assign, remove and user changes work and are audited';
+  if (select count(*) from profiles) < 6 then raise exception 'admin should see everyone'; end if;
+  if exists (select 1 from pi_requests) or exists (select 1 from request_clients) or exists (select 1 from request_list) then
+    raise exception 'admin should not see requests or client details'; end if;
+  raise notice 'ok: admin manages users and reads the audit log, but sees no requests';
 end $$;
 select pg_temp.expect_error($$delete from audit_log$$, 'permission denied');
 select pg_temp.expect_error($$select log_event('fake', 'x', 'y')$$, 'permission denied');
@@ -295,23 +310,25 @@ do $$ begin
   raise notice 'ok: completed requests can be reopened by their introducer or bsd';
 end $$;
 
--- 10. Configurable deadline (bsd only)
+-- 10. Configurable deadline (admin only)
 do $$ begin
   if (select deadline_hours from app_settings) <> 48 then raise exception 'introducers should be able to read the settings'; end if;
 end $$;
-select pg_temp.expect_error($$select update_settings(72, 24, true)$$, 'Only bsd');
+select pg_temp.expect_error($$select update_settings(72, 24, true)$$, 'Only an admin');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+create temp table due_before as select ref, due_at from request_list;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
 select pg_temp.expect_error($$select update_settings(24, 24, true)$$, 'shorter than the deadline');
 select pg_temp.expect_error($$select update_settings(0, 0, true)$$, 'between 1 and 720');
-create temp table due_before as select ref, due_at from request_list;
 select update_settings(72, 24, true);
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
 do $$ begin
   if exists (select 1 from request_list r join due_before b using (ref)
              where r.status not in ('completed', 'removed') and r.due_at <> b.due_at + interval '24 hours') then
     raise exception 'open requests should move by the change in deadline'; end if;
   if exists (select 1 from request_list r join due_before b using (ref) where r.status in ('completed', 'removed') and r.due_at <> b.due_at) then
     raise exception 'closed requests should not move'; end if;
-  raise notice 'ok: bsd changes the deadline and open requests follow';
+  raise notice 'ok: admin changes the deadline and open requests follow';
   if (select priority from request_list where ref = 'PI-00007') <> 'normal' then raise exception 'automatic urgent should clear when the deadline moves later'; end if;
   if not exists (select 1 from request_events e join pi_requests r on r.id = e.request_id where r.ref = 'PI-00007'
                  and e.detail = 'Urgent flag removed automatically: no longer overdue') then raise exception 'automatic clear not on the timeline'; end if;
