@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { useRequests } from '../lib/requests'
 import { nameOf, usePeople } from '../lib/people'
+import { usePiMembers } from '../lib/modules'
 import { useSettings } from '../lib/settings'
 import { STATUS_LABEL, byPriorityThenDue, daysSince, dueInfo, fmtDate, introGroup, summary, says } from '../lib/options'
 import { downloadCsv } from '../lib/csv'
@@ -17,6 +18,7 @@ export default function Backlog() {
   const { has } = useAuth()
   const { rows, loading, reload } = useRequests()
   const people = usePeople()
+  const piMembers = usePiMembers()
   const settings = useSettings()
   const intro = has('introducer')
   const staff = has('ops') || has('bsd')
@@ -32,7 +34,7 @@ export default function Backlog() {
   const [saveName, setSaveName] = useState<string | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [bulkTo, setBulkTo] = useState('')
-  const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active)
+  const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active && (!piMembers || piMembers.has(p.id)))
   const due = useCallback((r: PiRequest) => dueInfo(r, settings.due_soon_hours), [settings.due_soon_hours])
 
   // Introducers can search by their own clients' names (ops and bsd never receive them).

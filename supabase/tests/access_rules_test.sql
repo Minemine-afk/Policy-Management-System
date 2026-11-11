@@ -440,4 +440,64 @@ do $$ begin
 end $$;
 select set_config('storage.allow_delete_query', '', false);
 
+-- Module access: admin switches modules per user and per role; switched off = blocked in the database too.
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if my_modules() <> '{pi_requests}' then raise exception 'ops should start with PI Requests only, got %', my_modules(); end if;
+end $$;
+select pg_temp.expect_error($$select admin_set_user_module('00000000-0000-0000-0000-000000000003', 'pi_requests', true)$$, 'Only an admin');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select admin_set_role_module('ops', 'pi_requests', false)$$, 'Only an admin');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select admin_set_user_module('00000000-0000-0000-0000-000000000003', 'pi_requests', false);
+select pg_temp.expect_error($$select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'introducer_intelligence', true)$$, 'can''t be given to the introducer role');
+select pg_temp.expect_error($$select admin_set_role_module('introducer', 'content_studio', true)$$, 'can''t be given');
+select pg_temp.expect_error($$select admin_set_user_module('00000000-0000-0000-0000-000000000006', 'pi_requests', true)$$, 'can''t be given to the admin role');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if my_modules() <> '{}' then raise exception 'switched-off ops still has modules'; end if;
+  if exists (select 1 from pi_requests) then raise exception 'switched-off ops still sees requests'; end if;
+  raise notice 'ok: switched-off user sees no requests';
+end $$;
+select pg_temp.expect_error($$select claim_request((select id from pi_requests limit 1))$$, '*');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select assign_request((select id from pi_requests where status not in ('completed','removed') limit 1), '00000000-0000-0000-0000-000000000003')$$, '*');
+do $$ begin
+  if '00000000-0000-0000-0000-000000000003' in (select module_members('pi_requests')) then raise exception 'switched-off ops listed as PI member'; end if;
+  if '00000000-0000-0000-0000-000000000005' not in (select module_members('pi_requests')) then raise exception 'bsd missing from PI members'; end if;
+  raise notice 'ok: requests cannot be given to a switched-off user';
+end $$;
+-- Role default off for introducers; a per-user switch overrides it.
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select admin_set_role_module('introducer', 'pi_requests', false);
+select admin_set_user_module('00000000-0000-0000-0000-000000000002', 'pi_requests', true);
+select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'knowledge_hub', true);
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+do $$ begin
+  if exists (select 1 from pi_requests) or exists (select 1 from request_clients) then raise exception 'introducer sees requests with PI off by role'; end if;
+  if my_modules() <> '{knowledge_hub}' then raise exception 'introducer 1 modules wrong: %', my_modules(); end if;
+end $$;
+select pg_temp.expect_error($$select create_request('{}'::jsonb, '{}'::jsonb)$$, '*');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+do $$ begin
+  if not exists (select 1 from pi_requests) then raise exception 'introducer 2 switched on but sees nothing'; end if;
+  if (select count(*) from user_module_access) <> 1 then raise exception 'users should see only their own switches'; end if;
+  raise notice 'ok: role defaults and per-user switches';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select admin_set_role_module('introducer', 'pi_requests', true);
+select admin_set_user_module('00000000-0000-0000-0000-000000000002', 'pi_requests', null);
+select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'knowledge_hub', null);
+select admin_set_user_module('00000000-0000-0000-0000-000000000003', 'pi_requests', null);
+do $$ begin
+  if exists (select 1 from user_module_access) then raise exception 'back-to-default should remove switches'; end if;
+  if (select count(*) from audit_log where action like 'access.%') < 8 then raise exception 'module changes not audited'; end if;
+  raise notice 'ok: module changes are audit-logged';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if my_modules() <> '{pi_requests}' then raise exception 'ops1 not restored'; end if;
+  raise notice 'ok: module access';
+end $$;
+
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

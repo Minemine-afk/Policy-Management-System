@@ -599,6 +599,46 @@ const SG_LABELS = {
     await olivia.screenshot({ path: SHOTS + '/15-ocr-result.png', fullPage: true })
   }
 
+
+  // 8. Module access: admin switches modules per person and per role; switched-off modules disappear and are blocked.
+  await alex.goto(BASE + '/admin/access')
+  await alex.getByRole('heading', { name: 'Role defaults' }).waitFor()
+  await check(alex.getByLabel('PI Requests for Introducer by default').isChecked(), 'module access: PI Requests on by default for introducers')
+  await check(alex.getByLabel('Knowledge Hub for Introducer by default').isChecked().then((c) => !c), 'module access: future modules off by default')
+  await check(alex.getByRole('row', { name: /Introducer Intelligence/ }).first().getByLabel('Not available for this role').count().then((n) => n === 1),
+    'module access: staff-only module cannot be given to introducers')
+  await alex.getByLabel('PI Requests for Dana Introducer').selectOption('off')
+  await alex.getByRole('status').filter({ hasText: 'PI Requests for Dana Introducer: off' }).waitFor()
+  await alex.getByLabel('Knowledge Hub for Dana Introducer').selectOption('on')
+  await alex.getByRole('status').filter({ hasText: 'Knowledge Hub for Dana Introducer: on' }).waitFor()
+  await alex.screenshot({ path: SHOTS + '/18-admin-module-access.png', fullPage: true })
+  ok('module access: admin switched PI Requests off and Knowledge Hub on for one introducer')
+  await dana.goto(BASE + '/board')
+  await dana.getByRole('heading', { name: 'Home' }).waitFor()
+  await check(dana.getByRole('link', { name: 'Board' }).count().then((n) => n === 0), 'module access: switched-off introducer has no Board or New request')
+  await check(dana.getByText('Knowledge Hub').isVisible(), 'module access: switched-on module shows as a tile')
+  await check(dana.getByText('Coming soon').isVisible(), 'module access: planned module tile says coming soon')
+  await dana.screenshot({ path: SHOTS + '/19-home-tiles.png', fullPage: true })
+  await dana.goto(BASE + '/requests/20000000-0000-0000-0000-000000000004')
+  await dana.getByRole('heading', { name: 'Home' }).waitFor()
+  ok('module access: a direct request link sends a switched-off user home')
+  const danaRows = await dana.evaluate(async () => {
+    const k = Object.keys(localStorage).find((x) => x.includes('auth-token'))
+    const t = JSON.parse(localStorage.getItem(k)).access_token
+    const r = await fetch('http://127.0.0.1:54321/rest/v1/request_list?select=id', { headers: { apikey: t, Authorization: 'Bearer ' + t } })
+    return (await r.json()).length
+  })
+  await check(Promise.resolve(danaRows === 0), 'module access: the database returns no requests to a switched-off user')
+  await alex.getByLabel('PI Requests for Dana Introducer').selectOption('default')
+  await alex.getByRole('status').filter({ hasText: 'back to the role default' }).waitFor()
+  await alex.getByLabel('Knowledge Hub for Dana Introducer').selectOption('default')
+  await alex.getByRole('status').filter({ hasText: 'Knowledge Hub for Dana Introducer: back to the role default' }).waitFor()
+  await dana.goto(BASE + '/board')
+  await dana.getByRole('heading', { name: 'Board' }).waitFor()
+  await check(dana.getByRole('link', { name: 'Home' }).count().then((n) => n === 0), 'module access: back to default, the introducer works as before')
+  await alex.goto(BASE + '/admin/audit')
+  await check(alex.getByText('PI Requests switched off for Dana Introducer').first().waitFor().then(() => true, () => false), 'module access: changes are in the audit log')
+
   await check(Promise.resolve(errors.length === 0), 'no uncaught page errors' + (errors.length ? ': ' + errors[0] : ''))
   console.log(`\n${pass} passed, ${failed} failed`)
   await browser.close()

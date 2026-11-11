@@ -10,10 +10,11 @@ import Backlog from './pages/Backlog'
 import Admin from './pages/Admin'
 import Notifications from './pages/Notifications'
 import Account from './pages/Account'
+import Home from './pages/Home'
 import { useUnreadCount } from './lib/notifications'
 
 export default function App() {
-  const { session, profile, loading, has, recovering } = useAuth()
+  const { session, profile, loading, has, can, modules, recovering } = useAuth()
   const unread = useUnreadCount()
 
   if (loading) return <div className="empty">Loading…</div>
@@ -40,15 +41,19 @@ export default function App() {
   const cls = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : '')
   // Admin manages users, settings and the audit log; it does not work on requests.
   const admin = has('admin')
-  const home = admin ? '/admin' : '/board'
+  // Modules: the admin switches them per user. Inside a module the role decides what the user sees.
+  const pi = !admin && can('pi_requests')
+  const showHome = !admin && (!pi || modules.length > 1)
+  const home = admin ? '/admin' : pi ? '/board' : '/home'
   return (
     <>
       <header className="topbar">
         <div className="brand">PI Request Tracker</div>
         <nav aria-label="Main">
-          {has('introducer') && <NavLink to="/requests/new" className={cls}>New request</NavLink>}
-          {!admin && <NavLink to="/board" className={cls}>Board</NavLink>}
-          {!admin && <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>}
+          {showHome && <NavLink to="/home" className={cls}>Home</NavLink>}
+          {pi && has('introducer') && <NavLink to="/requests/new" className={cls}>New request</NavLink>}
+          {pi && <NavLink to="/board" className={cls}>Board</NavLink>}
+          {pi && <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>}
           {admin && <NavLink to="/admin" className={cls}>Admin</NavLink>}
         </nav>
         <div className="who">
@@ -62,15 +67,16 @@ export default function App() {
       </header>
       <Routes>
         <Route path="/" element={<Navigate to={home} replace />} />
-        <Route path="/board" element={admin ? <Navigate to="/admin" replace /> : <Board />} />
-        <Route path="/backlog" element={admin ? <Navigate to="/admin" replace /> : <Backlog />} />
-        <Route path="/requests/new" element={has('introducer') ? <RequestForm /> : <Navigate to="/board" replace />} />
-        <Route path="/requests/:id/edit" element={has('introducer') ? <RequestForm /> : <Navigate to="/board" replace />} />
-        <Route path="/requests/:id" element={admin ? <Navigate to="/admin" replace /> : <RequestView />} />
+        <Route path="/home" element={admin ? <Navigate to="/admin" replace /> : <Home />} />
+        <Route path="/board" element={pi ? <Board /> : <Navigate to={home} replace />} />
+        <Route path="/backlog" element={pi ? <Backlog /> : <Navigate to={home} replace />} />
+        <Route path="/requests/new" element={pi && has('introducer') ? <RequestForm /> : <Navigate to={home} replace />} />
+        <Route path="/requests/:id/edit" element={pi && has('introducer') ? <RequestForm /> : <Navigate to={home} replace />} />
+        <Route path="/requests/:id" element={pi ? <RequestView /> : <Navigate to={home} replace />} />
         <Route path="/compare" element={<CompareMoved />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/account" element={<Account />} />
-        <Route path="/admin/*" element={admin ? <Admin /> : <Navigate to="/board" replace />} />
+        <Route path="/admin/*" element={admin ? <Admin /> : <Navigate to={home} replace />} />
         <Route path="*" element={<Navigate to={home} replace />} />
       </Routes>
     </>

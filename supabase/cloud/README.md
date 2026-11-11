@@ -23,6 +23,8 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
    - `1f-upgrade.sql` (12 Nov: NRIC/FIN no longer collected). **Warning:** it permanently deletes every NRIC stored so far;
      client name and contact are kept. Export the request_clients table first if the firm must keep them.
    - `1g-upgrade.sql` (13 Nov: fixes "Direct deletion from storage tables is not allowed" when removing a file)
+   - `1i-upgrade.sql` (14 Nov: module access, so an admin can switch modules on or off per role and per person).
+     Nobody's access changes when you run it.
    - `1h-undo-new-form.sql`: **only if you ran the (withdrawn) `1h-upgrade.sql`** for the new request form. It puts the
      original form's fields back and keeps every request's details. Harmless if you never ran 1h.
 

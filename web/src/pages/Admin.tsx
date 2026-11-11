@@ -9,6 +9,7 @@ import { auditActionLabel, describeAudit } from '../lib/audit'
 import type { AppSettings, AuditRow, Profile, Role } from '../lib/types'
 import { createUser, tempPassword } from '../lib/users'
 import UserCsv from '../components/UserCsv'
+import ModuleAccess from '../components/ModuleAccess'
 
 export default function Admin() {
   const cls = ({ isActive }: { isActive: boolean }) => `btn small ${isActive ? 'primary' : ''}`
@@ -17,11 +18,13 @@ export default function Admin() {
       <h1>Admin</h1>
       <nav className="row" aria-label="Admin sections">
         <NavLink to="/admin/users" className={cls}>Users and roles</NavLink>
+        <NavLink to="/admin/access" className={cls}>Module access</NavLink>
         <NavLink to="/admin/settings" className={cls}>Deadline settings</NavLink>
         <NavLink to="/admin/audit" className={cls}>Audit log</NavLink>
       </nav>
       <Routes>
         <Route path="users" element={<Users />} />
+        <Route path="access" element={<ModuleAccess />} />
         <Route path="audit" element={<Audit />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="users" replace />} />
