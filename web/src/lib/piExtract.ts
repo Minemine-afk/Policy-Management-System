@@ -483,44 +483,51 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
 
   // ----- Insured person (the "Policyholder and Plan Details" block) -----
-  const detailsAt = lines.findIndex((l) => /^life\s+(?:insured|assured)\s+details\b/i.test(l.text.trim()))
-  const name = labelled(lines, /^life\s+assured(?:'s)?(?:\s+name)?\b/i) ?? labelled(lines, /^(?:name\s+of\s+(?:the\s+)?life\s+(?:assured|insured)|insured\s+name|life\s+insured(?:\s+name)?|proposal\s+on\s+the\s+life\s+of)\b/i)
-    ?? (detailsAt >= 0 ? labelled(lines.slice(detailsAt + 1, detailsAt + 4), /^name\b/i) : null)
-  if (name) set('insured_name', name.value, name.line.page, name.line.text)
+  // Insurers word these labels differently; each list covers the variants seen in Singapore PIs.
+  const detailsAt = lines.findIndex((l) => /^(?:life\s+(?:insured|assured)|insured(?:\s+person)?|person\s+insured)(?:'s)?\s+(?:details|particulars)\b/i.test(l.text.trim()))
+  const name = labelled(lines, /^(?:name\s+of\s+(?:the\s+)?)?(?:proposed\s+)?(?:life|person)\s+(?:to\s+be\s+)?(?:assured|insured)(?:'s)?(?:\s+name)?\b/i)
+    ?? labelled(lines, /^(?:(?:name\s+of\s+(?:the\s+)?)?insured(?:\s+person)?(?:'s)?(?:\s+name)?|proposal\s+on\s+the\s+life\s+of|policyholder\s*(?:&|and|\/)\s*life\s+(?:assured|insured))\b/i)
+    ?? (detailsAt >= 0 ? labelled(lines.slice(detailsAt + 1, detailsAt + 5), /^(?:full\s+)?name\b/i) : null)
+  if (name && !/^(?:same|as above|-)$/i.test(name.value)) set('insured_name', name.value, name.line.page, name.line.text)
   // Another layout (e.g. FWD): a table "Name | Gender | Age | Smoker Status" with a "Person insured" row.
   for (const l of lines) {
-    const m = l.text.match(/^(?:person|life)\s+(?:insured|assured)\s{2,}(.+?)\s{2,}(male|female)\s{2,}(?:(\d{1,3})\s{2,})?(non[\s-]?smoker|smoker)\b/i)
+    const m = l.text.match(/^(?:person|life)\s+(?:insured|assured)\s{2,}(.+?)\s{2,}(male|female|m|f)\s{2,}(?:(\d{1,3})\s{2,})?(non[\s-]?smoker|smoker|ns|s)\b/i)
     if (!m) continue
     set('insured_name', m[1].trim(), l.page, l.text)
-    set('gender', cap(m[2]), l.page, l.text)
-    set('underwriting_class', smoker(m[4]), l.page, l.text)
+    set('gender', gender(m[2])!, l.page, l.text)
+    set('underwriting_class', smokerOf(m[4])!, l.page, l.text)
     break
   }
-  const dob = labelled(lines, /^(?:date\s+of\s+birth|DOB)\b/i)
-  if (dob) set('date_of_birth', dob.value, dob.line.page, dob.line.text)
-  const gs = labelled(lines, /^gender\s*\/\s*smok(?:er|ing)\s+status\b/i) ?? labelled(lines, /^sex\s*\/\s*smok(?:er|ing)\s+status\b/i)
+  const dob = labelled(lines, /^(?:date\s+of\s+birth|D\.?O\.?B\b\.?|birth\s+date\b)(?:\s*\([^)]*\))?/i)
+  if (dob) { const d = dob.value.match(/^\d{1,2}[\/.\-\s](?:\d{1,2}|[A-Za-z]{3,9})[\/.\-\s]\d{2,4}|^[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}/); if (d) set('date_of_birth', d[0], dob.line.page, dob.line.text) }
+  // Gender and smoker status, together ("Gender / Smoker Status : Male/Non-Smoker", "Sex/Smoker : M/NS") or apart.
+  const gs = labelled(lines, /^(?:gender|sex)\s*(?:\/|&|and)\s*(?:smok(?:er|ing)(?:\s+(?:status|habit))?|underwriting\s+class)\b/i)
   if (gs) {
-    const g = gs.value.match(/\b(male|female)\b/i)
-    if (g) set('gender', cap(g[1]), gs.line.page, gs.line.text)
-    const sm = gs.value.match(/\b(non[\s-]?smoker|smoker)\b/i)
-    if (sm) set('underwriting_class', smoker(sm[1]), gs.line.page, gs.line.text)
+    const [a, b] = gs.value.split(/\s*[\/,]\s*|\s+/)
+    if (gender(a)) set('gender', gender(a)!, gs.line.page, gs.line.text)
+    const sm = gs.value.match(/\b(non[\s-]?smoker|smoker|ns)\b/i)?.[1] ?? b
+    if (smokerOf(sm)) set('underwriting_class', smokerOf(sm)!, gs.line.page, gs.line.text)
   }
   const g2 = labelled(lines, /^(?:gender|sex)\b/i)
-  if (g2) { const g = g2.value.match(/^(male|female|m|f)\b/i); if (g) set('gender', /^f/i.test(g[1]) ? 'Female' : 'Male', g2.line.page, g2.line.text) }
-  const sm2 = labelled(lines, /^(?:smok(?:ing|er)\s+status|smoker|underwriting\s+class)\b/i)
-  if (sm2) { const sm = sm2.value.match(/^(non[\s-]?smoker|smoker|yes|no)\b/i); if (sm) set('underwriting_class', /^yes$/i.test(sm[1]) ? 'Smoker' : /^no$/i.test(sm[1]) ? 'Non-Smoker' : smoker(sm[1]), sm2.line.page, sm2.line.text) }
-  const res = labelled(lines, /^(?:residency(?:\s*\/\s*nationality)?|country\s+of\s+residence|residence)\b/i)
+  if (g2) {
+    const g = gender(g2.value.split(/[\s(\/,]/)[0]); if (g) set('gender', g, g2.line.page, g2.line.text)
+    // "Gender: Male (Non-Smoker)"
+    const sm = g2.value.match(/\((non[\s-]?smoker|smoker)\)/i); if (sm) set('underwriting_class', smokerOf(sm[1])!, g2.line.page, g2.line.text)
+  }
+  const sm2 = labelled(lines, /^(?:smok(?:ing|er)(?:\s+(?:status|habit|class))?|underwriting\s+class|tobacco(?:\s+use)?|nicotine(?:\s+use)?|risk\s+class)\b/i)
+  if (sm2) { const v = smokerOf(sm2.value.split(/\s{2,}|\s*\(/)[0]); if (v) set('underwriting_class', v, sm2.line.page, sm2.line.text) }
+  const res = labelled(lines, /^(?:residency(?:\s+status)?(?:\s*\/\s*nationality)?|residential\s+status|country\s+of\s+residen(?:ce|cy)|residence|nationality\s*\/\s*residency)\b/i)
   if (res) {
     // "Indonesia - Major Cities (D1) / Indonesia (ID)" -> "Indonesia"
     const v = res.value.split('/')[0].replace(/\s+-\s+.*$/, '').replace(/\([^)]*\)/g, '').trim()
-    set('residency', v, res.line.page, res.line.text)
+    if (v && !/^\d/.test(v)) set('residency', v, res.line.page, res.line.text)
   }
 
   // ----- Cover page rows (only the first pages, where the cover page sits) -----
   const cover = lines.filter((l) => l.page <= 2)
-  const prt = coverRow(cover, /^premium\s+term\b/i)
+  const prt = coverRow(cover, /^premium\s+term\b/i) ?? coverRow(cover, /^(?:premium\s+)?payment\s+(?:term|period)\b/i) ?? coverRow(cover, /^premium\s+paying\s+(?:term|period)\b/i)
   if (prt) set('premium_term', parseYears(prt.value), prt.line.page, prt.line.text)
-  const pt = coverRow(cover, /^policy\s+(?:coverage\s+)?term\b/i) ?? coverRow(cover, /^(?:coverage|policy)\s+period\b/i)
+  const pt = coverRow(cover, /^policy\s+(?:coverage\s+)?term\b/i) ?? coverRow(cover, /^(?:coverage|policy|benefit)\s+(?:period|term)\b/i) ?? coverRow(cover, /^(?:term|period)\s+of\s+(?:cover(?:age)?|policy|insurance)\b/i)
   if (pt) set('policy_term', parseYears(pt.value), pt.line.page, pt.line.text)
   const insurerRow = coverRow(cover, /^name\s+of\s+insurer\b/i)
 
@@ -559,6 +566,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
 
   // ----- Payment mode: premiums in the comparison are per year -----
   const modeRow = labelled(lines, /^payment\s+(?:mode|frequency)\b/i, false) ?? labelled(lines, /^premium\s+(?:payment\s+)?(?:mode|frequency)\b/i, false)
+    ?? labelled(lines, /^(?:mode|frequency)\s+of\s+(?:premium\s+)?payment\b/i, false) ?? labelled(lines, /^(?:billing|payment)\s+(?:mode|frequency|cycle)\b/i, false)
   const mode = modeRow?.value.match(/^(monthly|quarterly|half[\s-]?yearly|semi[\s-]?annual(?:ly)?|annual(?:ly)?|yearly|single)/i)?.[1] ?? ''
 
   // ----- Summary table -----
@@ -590,7 +598,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   // Fallbacks: "label: value" on one line (never the next line, to avoid picking up the wrong number).
   const insurer = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName.replace(/[_.-]+/g, ' '))
   const labelRules: Record<string, RegExp[]> = {
-    death_sa: [/\b(?:basic\s+)?sum\s+assured\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i],
+    death_sa: [/\b(?:basic\s+)?sum\s+(?:assured|insured)\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i, /^(?:basic\s+)?(?:death\s+(?:benefit|cover(?:age)?)|amount\s+of\s+cover(?:age)?|coverage\s+amount)\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i],
   }
   for (const [key, generic] of Object.entries(labelRules)) {
     for (const re of [...(INSURER_RULES[insurer]?.[key] ?? []), ...generic]) {
@@ -743,6 +751,32 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (currency && currency !== 'SGD') notes.push(`Policy currency is ${currency}, not SGD: amounts are in ${currency}.`)
   if (!currency) notes.push('Policy currency not found. Fill it in, so amounts are labelled correctly.')
 
+  // ----- Calculated fallbacks and cross-checks -----
+  // Only where the PI gives every part; a calculated value says so in its source line and in a note.
+  const n = (k: string) => (/^\d+(?:\.\d+)?$/.test(found[k].value) ? +found[k].value : null)
+  const riderParts = riders.map((r) => (r.annual || r.premium ? num(riderYearly(r)) : NaN))
+  const riderSum = riderParts.reduce((a, b) => a + b, 0)
+  const ridersKnown = ridersSeen && riderParts.every((x) => Number.isFinite(x) && x > 0)
+  if (!found.annual_premium.value && n('base_premium') !== null && ridersKnown) {
+    const v = fmt2(n('base_premium')! + riderSum)
+    found.annual_premium = { value: v, page: null, line: `Calculated: premium ${found.base_premium.value}${riders.map((r) => ` + ${r.name} ${riderYearly(r)}`).join('')}` }
+    notes.push(`Annual premium was calculated as the base premium plus the riders (${cm(v)}): the PI has no total line.`)
+  } else if (n('annual_premium') !== null && n('base_premium') !== null && ridersKnown && Math.abs(n('annual_premium')! - n('base_premium')! - riderSum) > 1) {
+    notes.push(`Check the annual premium: ${cm(found.annual_premium.value)} is not the base premium plus the riders (${cm(fmt2(n('base_premium')! + riderSum))}).`)
+  }
+  if (!found.total_premium.value && !segments.length && n('annual_premium') !== null && n('premium_term') !== null) {
+    const v = fmt2(n('annual_premium')! * n('premium_term')!)
+    found.total_premium = { value: v, page: null, line: `Calculated: annual premium ${found.annual_premium.value} × premium term ${found.premium_term.value} years` }
+    notes.push(`Total premium was calculated as the annual premium × the premium term (${cm(v)}), as the PI has no illustration table. It assumes the premium stays level.`)
+  } else if (segments.length === 1 && !riders.length && n('total_premium') !== null && n('annual_premium') !== null && n('premium_term') !== null) {
+    const est = n('annual_premium')! * n('premium_term')!
+    if (Math.abs(est - n('total_premium')!) > Math.max(5, est * 0.02)) notes.push(`Check the total premium: ${cm(found.total_premium.value)} differs from the annual premium × the premium term (${cm(fmt2(est))}). This is expected if premiums change over time.`)
+  }
+  for (const k of ['tpd_sa', 'ci_sa'] as const) {
+    if (n(k) !== null && n('death_sa') !== null && n(k)! > n('death_sa')!) notes.push(`Check the ${k === 'tpd_sa' ? 'TPD' : 'CI'} sum assured: ${cm(found[k].value)} is more than the death sum assured.`)
+  }
+  if (n('policy_term') !== null && n('premium_term') !== null && n('premium_term')! > n('policy_term')!) notes.push(`Check the terms: the premium term (${found.premium_term.value}) is longer than the policy term (${found.policy_term.value}).`)
+
   // Every illustration read to its end (last row at the policy term or the cover age), so the total premium is whole.
   const termN = /^\d+$/.test(found.policy_term.value) ? +found.policy_term.value : null
   const endAge = found.cover_age.value ? +found.cover_age.value : null
@@ -754,8 +788,16 @@ export function extract(pages: Page[], fileName: string): Extracted {
   return { found, notes, discounted: !!table?.values.discount, totalComplete }
 }
 
+/** "Male", "M", "female" -> "Male" / "Female"; anything else -> null. */
+const gender = (v: string | undefined): string | null => (!v ? null : /^m(?:ale)?$/i.test(v.trim()) ? 'Male' : /^f(?:emale)?$/i.test(v.trim()) ? 'Female' : null)
+/** "Non-Smoker", "Non Smoker", "NS", "No" -> "Non-Smoker"; "Smoker", "S", "Yes" -> "Smoker". */
+const smokerOf = (v: string | undefined): string | null => {
+  const t = (v ?? '').trim()
+  if (/^(?:non[\s-]?smoker|ns|no|non[\s-]?tobacco|non[\s-]?smoking)\b/i.test(t)) return 'Non-Smoker'
+  if (/^(?:smoker|s|yes|tobacco|smoking)\b/i.test(t)) return 'Smoker'
+  return null
+}
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
-const smoker = (s: string) => (/^non/i.test(s) ? 'Non-Smoker' : 'Smoker')
 
 /** Called as pages are read: pages done so far (with a fraction while OCR reads a page), the PDF's page count,
  *  and whether OCR is being used. */
