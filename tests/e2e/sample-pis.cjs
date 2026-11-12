@@ -19,9 +19,10 @@ function pdf(items) {
 }
 
 // Cover page block, then a summary table: heads = [[x, y, text]], row = [[x, text]].
-function lia({ plan, insurer, premiumTerm, policyTerm, tdc, pct, mode, heads, row, extra = [], currency = null }) {
+function lia({ plan, insurer, premiumTerm, policyTerm, tdc, pct, mode, heads, row, extra = [], currency = null, date = null, genderLine = true }) {
   return pdf([
     [72, 770, '[SAMPLE] Made-up policy illustration for testing'],
+    ...(date ? [[430, 785, `Date : ${date}`]] : []),
     [200, 730, plan, 12],
     [72, 710, 'Product Type'], [250, 710, 'Non-Participating Term Plan'],
     [72, 695, 'Premium Term'], [250, 695, premiumTerm],
@@ -29,7 +30,7 @@ function lia({ plan, insurer, premiumTerm, policyTerm, tdc, pct, mode, heads, ro
     [72, 665, 'Name of Insurer'], [250, 665, insurer],
     [72, 640, `The Total Distribution Cost for this plan is ${tdc} as shown in the Policy Illustration. This makes up ${pct}% of`],
     [72, 628, 'the total premiums payable. The minimum sum assured is $50,000.', 7],
-    [72, 575, 'Life Assured : XXXXX'], [300, 575, 'Gender / Smoker Status : Female/Non-Smoker'],
+    [72, 575, 'Life Assured : XXXXX'], ...(genderLine ? [[300, 575, 'Gender / Smoker Status : Female/Non-Smoker']] : []),
     [72, 560, 'Residency / Nationality : Singapore (SG) / Singapore (SG)'],
     [72, 545, `Payment Mode : ${mode}`], ...(currency ? [[300, 545, `Currency : ${currency}`]] : []),
     ...heads,
@@ -40,19 +41,19 @@ function lia({ plan, insurer, premiumTerm, policyTerm, tdc, pct, mode, heads, ro
 
 const PI_A = lia({
   plan: 'GREAT Term Protector', insurer: 'The Great Eastern Life Assurance Company Limited',
-  premiumTerm: '20 Years', policyTerm: 'To Age 65', tdc: '$2,345.60', pct: '20.10', mode: 'Monthly',
+  premiumTerm: '20 Years', policyTerm: 'To Age 65', tdc: '$2,345.60', pct: '20.10', mode: 'Monthly', date: '05/11/2026',
   heads: [[72, 500, 'Plan Name'], [220, 500, 'Policy Term'], [300, 500, 'Premium Term'], [380, 500, 'Sum Assured (S$)'], [480, 505, 'Monthly Premium'], [500, 494, '(S$)']],
   row: [[72, 'GREAT Term Protector'], [225, 'To Age 65'], [305, '20 Years'], [385, '500,000'], [485, '105.20']],
 })
 const PI_B = lia({
-  plan: 'AIA Secure Term', insurer: 'AIA Singapore Private Limited', currency: 'USD',
+  plan: 'AIA Secure Term', insurer: 'AIA Singapore Private Limited', currency: 'USD', genderLine: false,
   premiumTerm: '30 Years', policyTerm: '30 Years', tdc: '$3,010', pct: '9.50', mode: 'Annual',
   heads: [[72, 500, 'Your Plan'], [220, 500, 'Policy Term'], [300, 500, 'Premium Term'], [380, 500, 'Sum Assured'], [480, 500, 'Premium Payable']],
   row: [[72, 'AIA Secure Term'], [230, '30'], [310, '30'], [385, '400,000.00'], [490, '1,180.00']],
 })
 const PI_C = lia({
   plan: 'Star Term Cover', insurer: 'Income Insurance Limited',
-  premiumTerm: '25 Years', policyTerm: '25 Years', tdc: '$ 9 9 0 . 4 0', pct: '12.00', mode: 'Monthly',
+  premiumTerm: '25 Years', policyTerm: '25 Years', tdc: '$ 9 9 0 . 4 0', pct: '12.00', mode: 'Monthly', date: '6 November 2026',
   heads: [[72, 510, 'Your Plan'], [170, 510, 'Policy Term'], [240, 510, 'Premium Term'], [310, 510, 'Sum Assured /'], [318, 500, 'Benefit'],
     [390, 510, 'Premium'], [392, 500, 'Before'], [390, 490, 'Discount'], [450, 510, 'Discount (%)'], [510, 510, 'Premium Payable']],
   row: [[72, 'Star Term Cover'], [180, '25'], [250, '25'], [312, '600,000.00'], [395, '80.00'], [460, '15%'], [520, '68.00']],
