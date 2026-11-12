@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { says } from '../lib/options'
 
@@ -20,12 +21,14 @@ export default function Login() {
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [busy, setBusy] = useState(false)
+  const nav = useNavigate()
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setBusy(true); setError(''); setInfo('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) setError(says(error.message))
+    else nav('/home', { replace: true })   // every login starts on the module picker
     setBusy(false)
   }
 
@@ -40,7 +43,7 @@ export default function Login() {
     <div className="login">
       <div className="card">
         <div>
-          <p className="eyebrow">PI Request Tracker</p>
+          <p className="eyebrow">PWS Service Hub</p>
           <h1>Sign in</h1>
         </div>
         <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

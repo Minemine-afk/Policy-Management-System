@@ -36,10 +36,19 @@ const SG_LABELS = {
     await p.getByRole('button', { name: 'Sign out' }).waitFor()
     return p
   }
+  const picker = (p) => p.getByRole('navigation', { name: 'Modules', exact: true }).waitFor()
   const col = (p, name) => p.getByRole('region', { name, exact: true })
 
   // 1. Introducer Sam: board, new request
   let sam = await session('introducer1@example.com')
+  await picker(sam)
+  ok('after login the introducer lands on the module picker')
+  await check(sam.getByRole('heading', { name: /^Good (morning|afternoon|evening), Sam$/ }).isVisible(), 'the picker greets the user by first name')
+  await check(sam.getByRole('navigation', { name: 'Modules', exact: true }).getByRole('link').count().then((n) => n === 1), 'the picker shows only the modules the user can open (one here)')
+  await check(sam.locator('.tile', { hasText: 'PI Requests' }).getByText(/^\d+ in progress$/).waitFor().then(() => true, () => false), 'the PI Requests tile shows the introducer how many requests are in progress')
+  await check(sam.locator('.tile', { hasText: 'PI Requests' }).getByText(/overdue|unassigned/).count().then((n) => n === 0), 'the introducer tile shows no staff counts')
+  await sam.screenshot({ path: SHOTS + '/0-module-picker-introducer.png' })
+  await sam.getByRole('link', { name: /PI Requests/ }).click()
   await sam.getByRole('heading', { name: 'Board' }).waitFor()
   await check(sam.locator('.cardlet').count().then((n) => n === 3), 'introducer sees only their own 3 cards on the board')
   await check(col(sam, 'Completed').getByText('PI-00005').isVisible(), 'completed request is in the Completed column')
@@ -65,6 +74,11 @@ const SG_LABELS = {
 
   // 2. Ops Olivia: pool, pick up, complete
   let olivia = await session('ops1@example.com')
+  await picker(olivia)
+  await check(olivia.locator('.tile', { hasText: 'PI Requests' }).getByText(/^\d+ unassigned$/).waitFor().then(() => true, () => false), 'the ops PI Requests tile shows the unassigned count')
+  await check(olivia.locator('.tile', { hasText: 'PI Requests' }).getByText(/^\d+ overdue$/).waitFor().then(() => true, () => false), 'the ops PI Requests tile shows the overdue count')
+  await olivia.screenshot({ path: SHOTS + '/0-module-picker-ops.png' })
+  await olivia.getByRole('link', { name: /PI Requests/ }).click()
   await olivia.locator('.cardlet').first().waitFor()
   await check(olivia.locator('.cardlet.late[data-ref="PI-00002"]').getByText(/Overdue by 1d/).isVisible(), 'ops sees a 3-day-old request highlighted red (1 day past the 2-day limit) as overdue')
   await check(sam.locator('.cardlet.late, .cardlet.soon').count().then((n) => n === 0), 'introducers do not see overdue flags')
@@ -212,6 +226,8 @@ const SG_LABELS = {
 
   // 5. Dana: isolated from Sam, resubmits her sent-back request
   let dana = await session('introducer2@example.com')
+  await picker(dana)
+  await dana.getByRole('link', { name: 'Board', exact: true }).click()
   await dana.locator('.cardlet').first().waitFor()
   await check(dana.locator('.cardlet').count().then((n) => n === 2), 'second introducer sees only their own 2 open cards')
   const samReq = await sam.evaluate(() => location.pathname)
@@ -279,7 +295,7 @@ const SG_LABELS = {
   await check(pat.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Admin' }).count().then((n) => n === 0), 'bsd has no Admin menu any more')
   await check(pat.locator('.who').textContent().then((t) => t.includes('Pat BSD · BSD')), 'bsd is shown as BSD, not Admin')
   await pat.goto(BASE + '/admin/users')
-  await pat.getByRole('heading', { name: 'Board' }).waitFor()
+  await picker(pat)
   ok('bsd is redirected away from the Admin pages')
   const bsdTry = await pat.evaluate(async (base) => {
     const key = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'))
@@ -292,12 +308,16 @@ const SG_LABELS = {
 
   // 6b. Admin Alex: users, audit log, settings; no requests
   let alex = await session('admin@example.com')
+  await alex.getByRole('navigation', { name: 'Admin tools' }).waitFor()
+  ok('admin lands on the picker with the admin tools')
+  await check(alex.getByRole('navigation', { name: 'Admin tools' }).getByRole('link').count().then((n) => n === 4), 'admin picker has users, module access, settings and audit log')
+  await alex.screenshot({ path: SHOTS + '/0-module-picker-admin.png' })
+  await alex.getByRole('link', { name: /Users and roles/ }).click()
   await alex.getByRole('heading', { name: 'Admin' }).waitFor()
-  ok('admin lands on the Admin page')
   await check(alex.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Board|Backlog/ }).count().then((n) => n === 0), 'admin has no Board or Backlog')
   await alex.goto(BASE + '/board')
-  await alex.getByRole('heading', { name: 'Admin' }).waitFor()
-  ok('admin is sent from the board to the Admin page')
+  await alex.getByRole('navigation', { name: 'Admin tools' }).waitFor()
+  ok('admin is sent from the board to the picker')
   await alex.goto(BASE + '/requests/20000000-0000-0000-0000-000000000003')
   await check(alex.getByText('[Sample] Client Charlie').count().then((n) => n === 0), 'admin cannot open requests or client details')
   await alex.goto(BASE + '/admin/users')
@@ -512,7 +532,7 @@ const SG_LABELS = {
   await csvBox.getByLabel('Import users CSV').setInputFiles({ name: 'empty.csv', mimeType: 'text/csv', buffer: Buffer.from('Who,What\r\nx,y') })
   await check(csvBox.getByRole('alert').filter({ hasText: 'at least an "Email" column' }).waitFor().then(() => true, () => false), 'a file without an Email column is refused')
   const csvOps = await session('csv.ops@example.com', 'Csv-Pass-123')
-  await csvOps.getByRole('heading', { name: 'Board' }).waitFor()
+  await picker(csvOps)
   ok('an imported user signs in with the temporary password from the file')
   await csvOps.context().close()
 
@@ -528,6 +548,8 @@ const SG_LABELS = {
 
   // The new introducer signs in with the temporary password, sees nothing of others, changes the password
   const newbie = await session('new.introducer@example.com', temp)
+  await picker(newbie)
+  await newbie.getByRole('link', { name: /PI Requests/ }).click()
   await newbie.getByRole('heading', { name: 'Board' }).waitFor()
   await check(newbie.locator('.cardlet').count().then((n) => n === 0), 'the new introducer sees no one else’s requests')
   await newbie.getByRole('link', { name: 'Account', exact: true }).click()
@@ -547,7 +569,7 @@ const SG_LABELS = {
 
   // 7. Non-bsd cannot open admin
   await olivia.goto(BASE + '/admin')
-  await olivia.getByRole('heading', { name: 'Board' }).waitFor()
+  await picker(olivia)
   ok('ops is redirected away from admin')
 
   await olivia.goto(BASE + '/compare?request=20000000-0000-0000-0000-000000000003')
@@ -614,13 +636,13 @@ const SG_LABELS = {
   await alex.screenshot({ path: SHOTS + '/18-admin-module-access.png', fullPage: true })
   ok('module access: admin switched PI Requests off and Knowledge Hub on for one introducer')
   await dana.goto(BASE + '/board')
-  await dana.getByRole('heading', { name: 'Home' }).waitFor()
+  await picker(dana)
   await check(dana.getByRole('link', { name: 'Board' }).count().then((n) => n === 0), 'module access: switched-off introducer has no Board or New request')
   await check(dana.getByText('Knowledge Hub').waitFor().then(() => true, () => false), 'module access: switched-on module shows as a tile')
   await check(dana.getByText('Coming soon').waitFor().then(() => true, () => false), 'module access: planned module tile says coming soon')
   await dana.screenshot({ path: SHOTS + '/19-home-tiles.png', fullPage: true })
   await dana.goto(BASE + '/requests/20000000-0000-0000-0000-000000000004')
-  await dana.getByRole('heading', { name: 'Home' }).waitFor()
+  await picker(dana)
   ok('module access: a direct request link sends a switched-off user home')
   const danaRows = await dana.evaluate(async () => {
     const k = Object.keys(localStorage).find((x) => x.includes('auth-token'))
@@ -635,7 +657,8 @@ const SG_LABELS = {
   await alex.getByRole('status').filter({ hasText: 'Knowledge Hub for Dana Introducer: back to the role default' }).waitFor()
   await dana.goto(BASE + '/board')
   await dana.getByRole('heading', { name: 'Board' }).waitFor()
-  await check(dana.getByRole('link', { name: 'Home' }).count().then((n) => n === 0), 'module access: back to default, the introducer works as before')
+  await dana.getByRole('link', { name: 'Modules', exact: true }).click()
+  await check(dana.getByRole('navigation', { name: 'Modules', exact: true }).getByRole('link', { name: /PI Requests/ }).waitFor().then(() => true, () => false), 'module access: back to default, PI Requests is on the picker again')
   await alex.goto(BASE + '/admin/audit')
   await check(alex.getByText('PI Requests switched off for Dana Introducer').first().waitFor().then(() => true, () => false), 'module access: changes are in the audit log')
 
