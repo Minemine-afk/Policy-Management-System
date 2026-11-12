@@ -152,6 +152,16 @@ const SG_LABELS = {
   await check(val('Terminal Illness', 3).then((v) => v === 'Included'), 'terminal illness included when the PI says so')
   await check(olivia.getByRole('button', { name: 'Export to Excel' }).isDisabled(), 'export needs the values-checked box')
   await olivia.getByLabel('Annual Premium for PI 2', { exact: true }).fill('1200.00')
+  // All three PI columns fit without scrolling left to right, on a laptop screen and on a full HD one.
+  for (const width of [1366, 1920]) {
+    await olivia.setViewportSize({ width, height: 900 })
+    await check(olivia.locator('.tablewrap:has(table.compare)').evaluate((el) => el.scrollWidth <= el.clientWidth + 1), `comparison fits ${width}px wide without scrolling sideways`)
+  }
+  await olivia.setViewportSize({ width: 1360, height: 900 })
+  await check(olivia.getByRole('dialog', { name: 'Activity' }).count().then((n) => n === 0), 'activity history is hidden until asked for')
+  await olivia.getByRole('button', { name: /^History \(\d+\)$/ }).click()
+  await check(olivia.getByRole('dialog', { name: 'Activity' }).getByText('PI document uploaded').first().isVisible(), 'History opens the activity panel')
+  await olivia.getByRole('dialog', { name: 'Activity' }).getByRole('button', { name: 'Close' }).click()
   await olivia.screenshot({ path: SHOTS + '/8-compare-pis.png', fullPage: true })
   await olivia.getByText('I have checked these values against the PDFs').click()
   const [dl] = await Promise.all([olivia.waitForEvent('download'), olivia.getByRole('button', { name: 'Export to Excel' }).click()])
@@ -425,7 +435,9 @@ const SG_LABELS = {
   await pat.getByLabel('Assign selected to').selectOption({ label: 'Olivia Ops' })
   await pat.getByRole('button', { name: 'Assign selected' }).click()
   await pat.getByText('Assigned 2 requests to Olivia Ops').waitFor()
-  await check(pat.getByLabel('Assign PI-00008').inputValue().then((v) => v === '00000000-0000-0000-0000-000000000003'), 'bsd bulk-assigned two requests')
+  // The backlog reloads after the toast appears, so give the row's select a moment to show the new handler.
+  const bulkOk = async () => { for (let i = 0; i < 20; i++) { if (await pat.getByLabel('Assign PI-00008').inputValue() === '00000000-0000-0000-0000-000000000003') return true; await pat.waitForTimeout(250) } return false }
+  await check(bulkOk(), 'bsd bulk-assigned two requests')
   await pat.screenshot({ path: SHOTS + '/9-backlog-workload-bsd.png', fullPage: true })
   await check(pat.getByRole('row', { name: /PI-00004/ }).getByText('Clock paused').isVisible(), 'a sent-back request shows its deadline clock as paused')
   await pat.getByLabel('Priority').selectOption('urgent')
