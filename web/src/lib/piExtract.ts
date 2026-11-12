@@ -500,6 +500,18 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
   const dob = labelled(lines, /^(?:date\s+of\s+birth|D\.?O\.?B\b\.?|birth\s+date\b)(?:\s*\([^)]*\))?/i)
   if (dob) { const d = dob.value.match(/^\d{1,2}[\/.\-\s](?:\d{1,2}|[A-Za-z]{3,9})[\/.\-\s]\d{2,4}|^[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}/); if (d) set('date_of_birth', d[0], dob.line.page, dob.line.text) }
+  // Most PIs give only the age, not the date of birth: say so, so ops know where to look.
+  let ageNote = ''
+  if (!found.date_of_birth.value) {
+    const anb = labelled(lines, /^age\s+next\s+birthday\b/i) ?? labelled(lines, /^(?:ANB|age\s+last\s+birthday|ALB|age)\b(?:\s*\([^)]*\))?/i)
+    const n = anb?.value.match(/^\d{1,3}\b/)?.[0]
+    if (anb && n) ageNote = `Date of birth is not in this PI; it gives the age only (${/next/i.test(anb.line.text) ? 'age next birthday' : /last/i.test(anb.line.text) ? 'age last birthday' : 'age'} ${n}).`
+    else {
+      const row = lines.map((l) => l.text.match(/^(?:person|life)\s+(?:insured|assured)\s{2,}.+?\s{2,}(?:male|female|m|f)\s{2,}(\d{1,3})\s{2,}/i)).find(Boolean)
+      if (row) ageNote = `Date of birth is not in this PI; it gives the age only (${lines.some((l) => /age\s+last\s+birthday/i.test(l.text) || /^\s*age\s+last\s*$/i.test(l.text)) ? 'age last birthday' : 'age'} ${row[1]}).`
+    }
+  }
+  if (ageNote) notes.push(ageNote)
   // Gender and smoker status, together ("Gender / Smoker Status : Male/Non-Smoker", "Sex/Smoker : M/NS") or apart.
   const gs = labelled(lines, /^(?:gender|sex)\s*(?:\/|&|and)\s*(?:smok(?:er|ing)(?:\s+(?:status|habit))?|underwriting\s+class)\b/i)
   if (gs) {
