@@ -6,7 +6,7 @@
 //    names; the other rows are matched on their label in column A.
 // Amounts follow each policy's own currency: money row labels say "(SGD)" when every PI is in SGD, and each
 // amount carries its currency in its number format, so a USD policy never shows as SGD.
-// ExcelJS is loaded only when someone exports.
+// ExcelJS is loaded in the background when the comparison first shows (preloadExcel), not with the app.
 import { FIELDS, labelWith, type FieldDef } from './piExtract.ts'
 
 export interface ExportColumn {
@@ -51,8 +51,18 @@ function numFmt(f: FieldDef, cur: string, inLabel: boolean, n: number): string {
   return prefix ? `"${prefix}"${dp}` : dp
 }
 
+let excelLoad: Promise<{ default: typeof import('exceljs') }> | null = null
+/** Loads ExcelJS. Called when the comparison first shows, so the file is fetched while it still matches the page:
+ *  after a site update the old file is gone, and loading it only at export time would fail. */
+export function preloadExcel() {
+  excelLoad ??= import('exceljs').catch((e) => { excelLoad = null; throw e })
+  return excelLoad
+}
+
 export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer): Promise<Blob> {
-  const ExcelJS = (await import('exceljs')).default
+  let ExcelJS: typeof import('exceljs')
+  try { ExcelJS = (await preloadExcel()).default }
+  catch { throw new Error('The site was updated after this page was opened, so the Excel tool could not load. Note any values you changed, refresh the page, then export again.') }
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(template)
   const ws = wb.worksheets[0]

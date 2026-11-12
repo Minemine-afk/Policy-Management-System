@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { says } from '../lib/options'
 import { FIELDS, SECTIONS, extract, labelWith, readPdf, type Found } from '../lib/piExtract'
-import { TEMPLATE_URL, buildWorkbook, commonCurrency, isComparisonFile } from '../lib/piExcel'
+import { TEMPLATE_URL, buildWorkbook, preloadExcel, commonCurrency, isComparisonFile } from '../lib/piExcel'
 import type { PiRequest, RequestDocument } from '../lib/types'
 
 interface Column {
@@ -58,6 +58,8 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   const [saving, setSaving] = useState(false)
 
   // Read the request's PIs whenever the set of PI PDFs changes (or "Read again").
+  // Fetch the Excel tool now, while it matches this page (see preloadExcel).
+  useEffect(() => { preloadExcel().catch(() => {}) }, [])
   useEffect(() => {
     if (!key) { setCols([]); return }
     let cancelled = false
