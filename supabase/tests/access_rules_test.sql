@@ -76,6 +76,22 @@ select pg_temp.expect_error($$select change_status((select id from pi_requests w
 select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00001'), 'sent_back', ' ')$$, 'reason is required');
 select add_document((select id from pi_requests where ref = 'PI-00001'), 'pi_output', (select id::text from pi_requests where ref = 'PI-00001') || '/pi.pdf', 'pi.pdf');
 select pg_temp.expect_error($$select add_document((select id from pi_requests where ref = 'PI-00001'), 'attachment', (select id::text from pi_requests where ref = 'PI-00001') || '/x.pdf', 'x.pdf')$$, 'cannot upload');
+-- PI pack: completion needs a pack made from every PI PDF on the request (Excel files are not part of it)
+select add_document((select id from pi_requests where ref = 'PI-00001'), 'pi_output', (select id from pi_requests where ref = 'PI-00001')::text || '/PI-00001-pi-comparison.xlsx', 'PI-00001-pi-comparison.xlsx');
+select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00001'), 'completed')$$, 'Save the PI pack');
+select pg_temp.expect_error($$select add_pi_pack((select id from pi_requests where ref = 'PI-00001'), (select id from pi_requests where ref = 'PI-00001')::text || '/p.pdf', 'p.pdf', 'nope', array[(select id from request_documents where file_name = 'pi.pdf')])$$, 'fingerprint');
+select pg_temp.expect_error($$select add_pi_pack((select id from pi_requests where ref = 'PI-00001'), (select id from pi_requests where ref = 'PI-00001')::text || '/p.pdf', 'p.pdf', repeat('a', 64), array[(select id from request_documents where file_name = 'PI-00001-pi-comparison.xlsx')])$$, 'changed while');
+select pg_temp.expect_error($$select add_pi_pack((select id from pi_requests where ref = 'PI-00001'), (select id from pi_requests where ref = 'PI-00001')::text || '/p.xlsx', 'p.xlsx', repeat('a', 64), array[(select id from request_documents where file_name = 'pi.pdf')])$$, 'must be a PDF');
+select add_pi_pack((select id from pi_requests where ref = 'PI-00001'), (select id from pi_requests where ref = 'PI-00001')::text || '/PI-00001-pi-pack-1.pdf', 'PI-00001-pi-pack.pdf', repeat('a', 64), array[(select id from request_documents where file_name = 'pi.pdf')]);
+-- a PI added after the pack makes it out of date
+select add_document((select id from pi_requests where ref = 'PI-00001'), 'pi_output', (select id from pi_requests where ref = 'PI-00001')::text || '/pi2.pdf', 'pi2.pdf');
+select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00001'), 'completed')$$, 'Save the PI pack');
+select add_pi_pack((select id from pi_requests where ref = 'PI-00001'), (select id from pi_requests where ref = 'PI-00001')::text || '/PI-00001-pi-pack-2.pdf', 'PI-00001-pi-pack.pdf', repeat('b', 64),
+  array(select id from request_documents where request_id = (select id from pi_requests where ref = 'PI-00001') and file_name in ('pi.pdf', 'pi2.pdf')));
+do $$ begin
+  if not pack_is_current((select id from pi_requests where ref = 'PI-00001')) then raise exception 'pack should be current'; end if;
+  raise notice 'ok: completion needs an up-to-date PI pack';
+end $$;
 select change_status((select id from pi_requests where ref = 'PI-00001'), 'completed');
 select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00001'), 'in_progress')$$, 'cannot move');
 select pg_temp.expect_error($$select remove_request((select id from pi_requests where ref = 'PI-00002'), 'x')$$, 'Only bsd');
@@ -98,11 +114,21 @@ select claim_request((select id from pi_requests where ref = 'PI-00007'));
 select pg_temp.expect_error($$select change_status((select id from pi_requests where ref = 'PI-00007'), 'completed')$$, 'cannot move');
 select change_status((select id from pi_requests where ref = 'PI-00007'), 'submitted');
 
--- 5. Introducer 1 now sees the finished PI
+-- 5. Introducer 1 now sees the finished PI (an Excel file on an older completed request stays hidden)
+reset role;
+insert into request_documents (request_id, kind, storage_path, file_name, uploaded_by) values
+ ('20000000-0000-0000-0000-000000000005', 'pi_output', '20000000-0000-0000-0000-000000000005/old-comparison.xlsx', 'old-comparison.xlsx', '00000000-0000-0000-0000-000000000004');
+set role authenticated;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 do $$ begin
-  if (select count(*) from request_documents where kind = 'pi_output') <> 3 then raise exception 'introducer should see 3 PIs on completed requests, saw %', (select count(*) from request_documents where kind = 'pi_output'); end if;
-  raise notice 'ok: PIs reach the introducer once completed';
+  -- 2 PI PDFs on the older completed request (no pack), and only the newest pack of PI-00001
+  if (select count(*) from request_documents where kind = 'pi_output') <> 3 then raise exception 'introducer should see 3 PI files on completed requests, saw %', (select count(*) from request_documents where kind = 'pi_output'); end if;
+  if exists (select 1 from request_documents where file_name ilike '%.xlsx') then raise exception 'introducer must never see Excel files'; end if;
+  if (select count(*) from request_documents where request_id = (select id from pi_requests where ref = 'PI-00001')) <> 1
+     or not (select is_pack and sha256 = repeat('b', 64) from request_documents where request_id = (select id from pi_requests where ref = 'PI-00001')) then
+    raise exception 'introducer should see only the newest PI pack of PI-00001';
+  end if;
+  raise notice 'ok: introducers get only the PI pack (or PI PDFs on older requests), never Excel';
 end $$;
 
 -- 5b. Notifications

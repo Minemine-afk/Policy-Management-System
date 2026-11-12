@@ -25,6 +25,8 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
    - `1g-upgrade.sql` (13 Nov: fixes "Direct deletion from storage tables is not allowed" when removing a file)
    - `1i-upgrade.sql` (14 Nov: module access, so an admin can switch modules on or off per role and per person).
      Nobody's access changes when you run it.
+   - `1j-upgrade.sql` (15 Nov: PI pack). Introducers get one restricted PDF (the comparison, then the PIs) and never the
+     Excel; "Mark completed" needs an up-to-date PI pack. Requests completed earlier keep their PI PDFs (Excel hidden).
    - `1h-undo-new-form.sql`: **only if you ran the (withdrawn) `1h-upgrade.sql`** for the new request form. It puts the
      original form's fields back and keeps every request's details. Harmless if you never ran 1h.
 
