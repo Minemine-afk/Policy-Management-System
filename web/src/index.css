@@ -119,6 +119,9 @@ main.page.wide { max-width: 1480px; }
 .cardlet.soon { border-color: #E9A23B; border-left: 4px solid #E9A23B; background: #FFF1DC; }
 .overlay { position: fixed; inset: 0; background: rgba(15, 27, 45, .45); display: grid; place-items: center; padding: 16px; z-index: 10; }
 .dialog { width: 100%; max-width: 460px; }
+/* History: a panel that slides over the right edge of the page. */
+.drawer-overlay { place-items: stretch end; padding: 0; }
+.drawer { width: min(420px, 100vw); height: 100vh; border-radius: 0; overflow-y: auto; }
 .comments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .comments li { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
 .comments li.internal { background: var(--warn-soft); border-color: #F0D9A8; }
@@ -129,8 +132,11 @@ main.page.wide { max-width: 1480px; }
 .due.soon { background: #B45309; }
 tr.row-late td { background: var(--bad-soft); }
 tr.row-soon td { background: #FFF1DC; }
-table.compare th, table.compare td { min-width: 220px; }
-table.compare th:first-child, table.compare td:first-child { min-width: 180px; }
+/* All PI columns fit the page from the start: fixed layout, equal PI columns, text wraps inside its cell. */
+table.compare { table-layout: fixed; min-width: 720px; }
+table.compare th, table.compare td { overflow-wrap: anywhere; }
+table.compare thead th { white-space: normal; }
+table.compare th:first-child, table.compare td:first-child { width: 170px; }
 table.compare input[type=text] { height: 38px; }
 tr.section-row th { background: var(--nav); color: #fff; text-align: left; font-size: 13px; letter-spacing: .02em; padding: 6px 12px; }
 td.empty-cell { background: var(--bad-soft); }

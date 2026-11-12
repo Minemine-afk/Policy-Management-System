@@ -27,6 +27,7 @@ export default function RequestView() {
   const [internal, setInternal] = useState(false)
   const [assignTo, setAssignTo] = useState('')
   const [dialog, setDialog] = useState<'send_back' | 'remove' | 'reopen' | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -80,13 +81,14 @@ export default function RequestView() {
   const keepUrgent = urgent && !!due?.overdue
 
   return (
-    <main className="page">
+    <main className={`page${intro ? '' : ' wide'}`}>
       <div className="row between">
         <div>
           <p className="muted small" style={{ margin: 0 }}><Link to="/board">Board</Link> / {r.ref}</p>
           <h1>{r.ref} <StatusPill status={r.status} />{urgent && <> <UrgentPill auto={r.urgent_auto} /></>}{due && <span className={`due ${due.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{due.label}</span>}</h1>
         </div>
         <div className="row">
+          <button className="btn" aria-haspopup="dialog" onClick={() => setHistoryOpen(true)}>History ({events.length})</button>
           {has('introducer') && r.introducer_id === profile.id && r.status === 'submitted' &&
             <Link className="btn" to={`/requests/${r.id}/edit`}>Edit request</Link>}
           {owner && <Link className="btn" to={`/requests/new?from=${r.id}`}>Duplicate</Link>}
@@ -125,8 +127,19 @@ export default function RequestView() {
         </section>
       )}
 
-      <div className="split">
-        <div className="main" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="main" style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+        {has('bsd') && !['completed', 'removed'].includes(r.status) && (
+          <section className="card" aria-label="Assign" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: '16px 24px' }}>
+            <h2 className="eyebrow">Assign</h2>
+            <select style={{ maxWidth: 320 }} aria-label="Assign to" value={assignTo || r.assignee_id || ''} onChange={(e) => setAssignTo(e.target.value)}>
+              <option value="">Choose an ops user</option>
+              {ops.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+            </select>
+            <div><button className="btn small" disabled={!assignTo || assignTo === r.assignee_id}
+              onClick={async () => { if (await call('assign_request', { p_request: r.id, p_user: assignTo })) setAssignTo('') }}>
+              {r.assignee_id ? 'Reassign' : 'Assign'}</button></div>
+          </section>
+        )}
           <section className="card">
             <h2 className="eyebrow">Request</h2>
             <dl className="facts">
@@ -194,23 +207,16 @@ export default function RequestView() {
             )}
           </section>
           )}
-        </div>
+      </div>
 
-        <aside className="side" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {has('bsd') && !['completed', 'removed'].includes(r.status) && (
-            <section className="card" aria-label="Assign">
-              <h2 className="eyebrow">Assign</h2>
-              <select aria-label="Assign to" value={assignTo || r.assignee_id || ''} onChange={(e) => setAssignTo(e.target.value)}>
-                <option value="">Choose an ops user</option>
-                {ops.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-              </select>
-              <div><button className="btn small" disabled={!assignTo || assignTo === r.assignee_id}
-                onClick={async () => { if (await call('assign_request', { p_request: r.id, p_user: assignTo })) setAssignTo('') }}>
-                {r.assignee_id ? 'Reassign' : 'Assign'}</button></div>
-            </section>
-          )}
-          <section className="card" aria-label="Activity">
-            <h2 className="eyebrow">Activity</h2>
+      {historyOpen && (
+        <div className="overlay drawer-overlay" onClick={(e) => { if (e.target === e.currentTarget) setHistoryOpen(false) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setHistoryOpen(false) }}>
+          <section className="card drawer" role="dialog" aria-modal="true" aria-label="Activity">
+            <div className="row between">
+              <h2 className="eyebrow" style={{ margin: 0 }}>Activity</h2>
+              <button className="btn small" autoFocus onClick={() => setHistoryOpen(false)}>Close</button>
+            </div>
             <ol className="timeline">
               {events.map((e) => (
                 <li key={e.id}>
@@ -218,11 +224,11 @@ export default function RequestView() {
                   <div className="small muted">{who(e.actor_id)} · {fmtDateTime(e.at)}</div>
                 </li>
               ))}
+              {!events.length && <li className="muted small">No activity yet</li>}
             </ol>
           </section>
-        </aside>
-      </div>
-
+        </div>
+      )}
       {dialog === 'send_back' && (
         <ReasonDialog title="Send back to the introducer" confirmLabel="Send back" onCancel={() => setDialog(null)}
           onConfirm={(reason) => { setDialog(null); call('change_status', { p_request: r.id, p_to: 'sent_back', p_reason: reason }) }} />
