@@ -226,10 +226,11 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                             const edited = (fd?.value ?? '') !== (c.values[f.key] ?? '')
                             const cur = (c.values.currency ?? '').toUpperCase()
                             return (
-                              <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : ''}>
+                              <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : fd?.guess ? 'guess-cell' : ''}>
                                 <input type="text" aria-label={`${label} for PI ${i + 1}`} value={c.values[f.key] ?? ''}
                                   onChange={(e) => setValue(i, f.key, e.target.value)} />
                                 {(f.kind === 'money' || f.kind === 'sum') && !currency && cur && c.values[f.key] && c.values[f.key] !== 'NA' && <div className="small">in {cur}</div>}
+                                {fd?.guess && !edited && c.values[f.key] && <div className="pill info" style={{ margin: '4px 0 2px', fontSize: 12 }} title="This PI's layout is new to the reader: this value was read by general rules. Check it against the PI.">Check</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
                                   {edited ? 'Changed by hand' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}
