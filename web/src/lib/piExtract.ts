@@ -127,7 +127,11 @@ export function toLines(page: number, items: TextItem[]): Line[] {
   })
 }
 
-export interface Found { value: string; page: number | null; line: string | null }
+export interface Found {
+  value: string; page: number | null; line: string | null
+  /** Read by the general rules (piGeneric.ts), not by rules for this layout: ops should check it. */
+  guess?: boolean
+}
 export interface Extracted {
   found: Record<string, Found>
   /** Things ops should know, such as a discounted premium. Shown on screen and written under the table. */
@@ -177,6 +181,8 @@ function coverRow(lines: Line[], label: RegExp): { value: string; line: Line } |
   }
   return null
 }
+
+import { extractGeneric } from './piGeneric.ts'
 
 // ---------- Summary table, read by position ----------
 
@@ -288,9 +294,11 @@ function labelled(lines: Line[], label: RegExp, needColon = true): { value: stri
       const m = parts[i].match(label)
       if (!m || m.index !== 0) continue
       let rest = parts[i].slice(m[0].length)
+      // "Smoking Status:  Non-Smoker": the colon ends the label's piece and the value is the next piece.
+      if (/^\s*(?:\(s\))?\s*:\s*$/.test(rest) && parts[i + 1]) rest = `: ${parts[i + 1]}`
       if (!rest.trim() && parts[i + 1]) rest = parts[i + 1]
-      if (needColon && !/^\s*:/.test(rest)) continue
-      const value = rest.replace(/^[\s:]+/, '').trim()
+      if (needColon && !/^\s*(?:\(s\))?\s*:/.test(rest)) continue
+      const value = rest.replace(/^\s*(?:\(s\))?[\s:]+/, '').trim()
       if (value && !/^_+$/.test(value)) return { value, line: l }
     }
   }
@@ -323,7 +331,7 @@ interface Rider { name: string; sa: string; premium: string; discount: string; p
 /** The rows of the "Supplementary Benefits" table on the summary page, read line by line:
  *  name, then numbers (terms, sum assured, premium before discount, discount %, premium payable). */
 function readRiders(lines: Line[]): { riders: Rider[]; total: { value: string; page: number; line: string } | null; seen: boolean } {
-  const idx = lines.findIndex((l) => /^(?:supplementary\s+benefits?|riders?(?:\s*\(s\))?|rider\s+benefits?|optional\s+benefits?|additional\s+benefits?|add[\s-]?on\s+benefits?)\b/i.test(l.text.trim()) && l.text.trim().length < 40)
+  const idx = lines.findIndex((l) => /^(?:supplementary\s+benefits?|riders?(?:\s*\(s\))?|rider\s+benefits?|optional\s+benefits?|additional\s+benefits?|add[\s-]?on\s+benefits?)(?:\s*\(s\))?(?:\s*:?\s*$|\s{2,})/i.test(l.text.trim()) && l.text.trim().length < 40)
   if (idx < 0) return { riders: findRiderLines(lines), total: null, seen: false }
   const page = lines[idx].page
   const riders: Rider[] = []
@@ -350,8 +358,9 @@ function readRiders(lines: Line[]): { riders: Rider[]; total: { value: string; p
     const tokens = m[2].split(/\s+/)
     const nums = tokens.filter((x) => NUM.test(x))
     const pct = tokens.find((x) => /^\d{1,2}(?:\.\d+)?%$/.test(x)) ?? ''
-    const big = nums.find((x) => num(x.replace(/[^\d.]/g, '')) >= 1000)
-    if (!big || nums.length < 2) continue
+    // A sum assured is written "100,000" or "100000.00"; a bare "1881" is more likely a phone number or a year.
+    const big = nums.find((x) => num(x.replace(/[^\d.]/g, '')) >= 1000 && /[,.]/.test(x))
+    if (!big || nums.length < 2 || /@|www\.|\.(?:com|ca|sg|my)\b/i.test(m[1])) continue
     riders.push({ name: m[1].trim(), sa: amount(big), premium: amount(nums[nums.length - 1]), discount: pct, page, line: t })
   }
   return { riders, total, seen: true }
@@ -488,7 +497,8 @@ export function extract(pages: Page[], fileName: string): Extracted {
   const name = labelled(lines, /^(?:name\s+of\s+(?:the\s+)?)?(?:proposed\s+)?(?:life|person)\s+(?:to\s+be\s+)?(?:assured|insured)(?:'s)?(?:\s+name)?\b/i)
     ?? labelled(lines, /^(?:(?:name\s+of\s+(?:the\s+)?)?insured(?:\s+person)?(?:'s)?(?:\s+name)?|proposal\s+on\s+the\s+life\s+of|policyholder\s*(?:&|and|\/)\s*life\s+(?:assured|insured))\b/i)
     ?? (detailsAt >= 0 ? labelled(lines.slice(detailsAt + 1, detailsAt + 5), /^(?:full\s+)?name\b/i) : null)
-  if (name && !/^(?:same|as above|-)$/i.test(name.value)) set('insured_name', name.value, name.line.page, name.line.text)
+  // Not another label ("Insured(s):  Issue Date: ...") and not a date or number.
+  if (name && !/^(?:same|as above|-)$/i.test(name.value) && !/:|\d/.test(name.value)) set('insured_name', name.value, name.line.page, name.line.text)
   // Another layout (e.g. FWD): a table "Name | Gender | Age | Smoker Status" with a "Person insured" row.
   for (const l of lines) {
     const m = l.text.match(/^(?:person|life)\s+(?:insured|assured)\s{2,}(.+?)\s{2,}(male|female|m|f)\s{2,}(?:(\d{1,3})\s{2,})?(non[\s-]?smoker|smoker|ns|s)\b/i)
@@ -638,15 +648,29 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (tpd) { set('tpd_sa', tpd.sa, tpd.page, tpd.line); set('tpd_premium', riderYearly(tpd), tpd.page, tpd.line) }
   if (ci) { set('ci_sa', ci.sa, ci.page, ci.line); set('ci_premium', riderYearly(ci), ci.page, ci.line) }
   // Spec: no CI rider -> "NA" and "NA". Same for TPD. Only once the summary page has been read.
+  // But a layout we don't know may list a rider where the rules above don't look: if the PI shows a TPD or CI
+  // rider with an amount anywhere, leave the rows blank for ops instead of saying "NA".
+  const unread = (isKind: (n: string) => boolean) => lines.find((l, i) => {
+    // A table row (short, not a sentence) naming the benefit, with a sum of 1,000 or more on it or just below it.
+    if (!isKind(l.text) || l.text.length > 90 || /[.;]\s*$/.test(l.text.trim()) || /\b(?:if|when|upon|for\s+the|which|will|shall)\b/i.test(l.text)) return false
+    const near = [l.text, lines[i + 1]?.page === l.page ? lines[i + 1].text : ''].join('  ')
+    return /\d{1,3}(?:,\d{3})+/.test(near)
+  })
+  /** Riders seem to be in the PI, but none were read: totals can't be trusted to be the base plan alone. */
+  const ridersUnread = !riders.length && !baseCoversAll(lines) && !!(unread(isTpd) || unread(isCi))
   if (table || ridersSeen) {
-    if (!ci) { set('ci_sa', 'NA', null, null); set('ci_premium', 'NA', null, null) }
-    if (!tpd) { set('tpd_sa', 'NA', null, null); set('tpd_premium', 'NA', null, null) }
+    for (const [kind, has, sa, prem, isKind] of [['CI', ci, 'ci_sa', 'ci_premium', isCi], ['TPD', tpd, 'tpd_sa', 'tpd_premium', isTpd]] as const) {
+      if (has) continue
+      const hint = baseCoversAll(lines) ? undefined : unread(isKind)
+      if (hint) notes.push(`This PI seems to have a ${kind} rider (page ${hint.page}: "${hint.text.slice(0, 60)}") that could not be read: fill in the ${kind} rows by hand.`)
+      else { set(sa, 'NA', null, null); set(prem, 'NA', null, null) }
+    }
   }
   const others = riders.filter((r) => r !== tpd && r !== ci)
   if (others.length) notes.push(`Other riders not in the table: ${others.map((r) => `${r.name} (${r.annual ? `${cm(r.annual)} a year` : `${cm(r.premium)} ${modeName.toLowerCase() || 'per payment'}`})`).join('; ')}.`)
   if (total) set('annual_premium', yearly(total.value), total.page, total.line)
-  else if (table && baseModal && ridersSeen === false) set('annual_premium', yearly(baseModal), table.page, table.line)
-  else if (baseRow && planRows!.rows.length === 1) set('annual_premium', yearly(baseModal), baseRow.page, baseRow.line)
+  else if (table && baseModal && ridersSeen === false && !riders.length && !ridersUnread) set('annual_premium', yearly(baseModal), table.page, table.line)
+  else if (baseRow && planRows!.rows.length === 1 && !ridersUnread) set('annual_premium', yearly(baseModal), baseRow.page, baseRow.line)
   if (factor && factor !== 1 && !byFreq && (found.annual_premium.value || found.base_premium.value)) {
     notes.push(`Payment mode is ${modeName}: premiums are shown per year (${factor} × the ${modeName.toLowerCase()} premium${total ? `, ${cm(total.value)} in total` : baseModal ? `, ${cm(baseModal)}` : ''}).`)
   }
@@ -689,7 +713,11 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
 
   // ----- Benefits of the base plan, from the cover page and product summary wording -----
-  const mention = (re: RegExp) => lines.find((l) => re.test(l.text) && !/\b(?:not|no|exclud\w*)\b[^.]*$/i.test(l.text.split(re)[0]))
+  // A benefit named only in a list of riders you can add ("Additional Coverage / Benefits: Accidental Death Benefit,
+  // ...") is not part of the plan, so it does not count.
+  const optional = (i: number) => [lines[i - 2], lines[i - 1], lines[i], lines[i + 1], lines[i + 2]].filter((x) => x && x.page === lines[i].page)
+    .some((x) => /\b(?:additional\s+(?:coverage|benefits?)|optional\s+(?:riders?|benefits?)|riders?\s+(?:and\s+benefits\s+)?available|available\s+riders?)\b/i.test(x!.text))
+  const mention = (re: RegExp) => lines.find((l, i) => re.test(l.text) && !/\b(?:not|no|exclud\w*)\b[^.]*$/i.test(l.text.split(re)[0]) && !optional(i))
   const ti = mention(/terminal\s+illness/i)
   if (ti) set('terminal_illness', 'Included', ti.page, ti.text)
   const ad = mention(/accidental\s+death/i)
@@ -725,7 +753,9 @@ export function extract(pages: Page[], fileName: string): Extracted {
     const perpetual = lines.some((l) => /discount\s+is\s+applied[^.]*(?:entire|whole|full)\s+(?:duration|premium\s+term|policy\s+term)|perpetual\s+discount|discount\s+for\s+(?:the\s+)?(?:entire|whole|full)\s+(?:premium|policy)\s+term|lifetime\s+discount/i.test(l.text))
     const onRiders = riders.filter((r) => r.discount).map((r) => (isTpd(r.name) ? 'TPD rider' : isCi(r.name) ? 'CI rider' : r.name))
     const value = `${pct}${perpetual ? ' perpetual' : ''} discount${onRiders.length ? ` with ${onRiders.join(', ')}` : ''}${table.values.promo ? ` (promo code ${table.values.promo})` : ''}`
-    set('campaigns', value, table.page, table.line)
+    // Riders that could not be read may carry the discount too: let ops write the campaign.
+    if (ridersUnread) notes.push(`The PI shows a ${value}, and seems to have riders that could not be read: fill in Campaigns (does the discount apply to the riders too?).`)
+    else set('campaigns', value, table.page, table.line)
     if (table.values.before) notes.unshift(`Premium is after the ${pct} discount (${cm(amount(table.values.before))}${modeName ? ' ' + modeName.toLowerCase() : ''} before it).`)
   } else if (campaignSentence()) {
     const c = campaignSentence()!
@@ -757,7 +787,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   const riderParts = riders.map((r) => (r.annual || r.premium ? num(riderYearly(r)) : NaN))
   const riderSum = riderParts.reduce((a, b) => a + b, 0)
   const ridersKnown = ridersSeen && riderParts.every((x) => Number.isFinite(x) && x > 0)
-  if (!found.annual_premium.value && n('base_premium') !== null && ridersKnown) {
+  if (!found.annual_premium.value && n('base_premium') !== null && ridersKnown && !ridersUnread) {
     const v = fmt2(n('base_premium')! + riderSum)
     found.annual_premium = { value: v, page: null, line: `Calculated: premium ${found.base_premium.value}${riders.map((r) => ` + ${r.name} ${riderYearly(r)}`).join('')}` }
     notes.push(`Annual premium was calculated as the base premium plus the riders (${cm(v)}): the PI has no total line.`)
@@ -785,8 +815,35 @@ export function extract(pages: Page[], fileName: string): Extracted {
     return (termN !== null && last.year >= termN) || (endAge !== null && last.age >= endAge)
   })
 
+  // ----- General rules, for what the layout rules above could not read (e.g. a new insurer's layout) -----
+  const general = extractGeneric(pages)
+  const guessed: string[] = []
+  for (const [k, f] of Object.entries(general.found)) {
+    if (found[k] === undefined || found[k].value) continue
+    let v = f.value
+    if (k === 'policy_name') {
+      const ins = found.insurer.value
+      if (ins) v = v.replace(new RegExp(`^${ins.split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+`, 'i'), '')
+    }
+    found[k] = { ...f, value: v }
+    guessed.push(FIELDS.find((x) => x.key === k)!.label)
+  }
+  if (guessed.length) notes.unshift(`This PI's layout is not one the reader knows, so ${guessed.length === 1 ? 'one value was' : `${guessed.length} values were`} read by general rules (${guessed.join(', ')}): check ${guessed.length === 1 ? 'it' : 'them'} against the PI. They are marked "Check".`)
+  for (const gn of general.notes) {
+    const show = gn.used ? !!found[gn.key]?.guess : !found[gn.key]?.value
+    if (show && !notes.includes(gn.text)) notes.push(gn.text)
+  }
+  // "Amounts show only $" says more than "Policy currency not found", and a currency found by the general rules answers it.
+  if (found.currency.value || notes.some((x) => /^Amounts (?:show only|are written in more)/.test(x))) {
+    const i = notes.findIndex((x) => /^Policy currency not found/.test(x)); if (i >= 0) notes.splice(i, 1)
+  }
+  if (found.currency.guess && found.currency.value !== 'SGD' && !notes.some((x) => /^Policy currency is/.test(x))) notes.push(`Policy currency is ${found.currency.value}, not SGD: amounts are in ${found.currency.value}.`)
+
   return { found, notes, discounted: !!table?.values.discount, totalComplete }
 }
+
+/** The plan itself covers TPD and CI (the cover page says so): riders are then not expected. */
+const baseCoversAll = (lines: Line[]) => /protection\s+against\s+death[^.]*(?:critical\s+illness|permanent\s+disability)/i.test(lines.filter((l) => l.page <= 2).map((l) => l.text).join(' '))
 
 /** "Male", "M", "female" -> "Male" / "Female"; anything else -> null. */
 const gender = (v: string | undefined): string | null => (!v ? null : /^m(?:ale)?$/i.test(v.trim()) ? 'Male' : /^f(?:emale)?$/i.test(v.trim()) ? 'Female' : null)
@@ -814,7 +871,8 @@ const NEEDED_FOR_EARLY_STOP = ['total_premium', 'insured_name', 'gender', 'under
 /** True when the pages read so far hold the main values, so the scanned pages left can be skipped. */
 export function allFound(pages: Page[]): boolean {
   const { found, totalComplete } = extract(pages, '')
-  return !!totalComplete && NEEDED_FOR_EARLY_STOP.every((k) => !!found[k].value)
+  // Values from the general rules don't count: a later page may hold a better reading.
+  return !!totalComplete && NEEDED_FOR_EARLY_STOP.every((k) => !!found[k].value && !found[k].guess)
 }
 
 /** A page with fewer text pieces than this is treated as a scan and read with OCR. */
