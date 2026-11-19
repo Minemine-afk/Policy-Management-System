@@ -34,15 +34,28 @@ do $$ begin
 end $$;
 
 -- 2. Create and edit
-select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}',
+select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}',
                       '{"client_name":"[Sample] Client Golf"}');
-select pg_temp.expect_error($$select create_request('{"gender":"Male"}', '{"client_name":"x"}')$$, 'Fill in');
-select pg_temp.expect_error($$select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', '{"client_name":""}')$$, 'client name');
+select pg_temp.expect_error($$select create_request('{"gender":"Male"}', '{"client_name":"x"}')$$, 'date of birth');
+select pg_temp.expect_error($$select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'date of birth');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"2999-01-01","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'future');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"17/05/1990","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'as a date');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"1900-01-01","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'over 100 years');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"1990-05-17","gender":"Male"}', '{"client_name":"x"}')$$, 'Fill in');
+do $$ begin
+  if (select date_of_birth from request_list where ref = 'PI-00007') <> '1990-05-17'
+     or not (select extract(year from age(current_date, date '1990-05-17'))::int
+               between split_part(age_band, ' ', 1)::int and split_part(age_band, ' ', 3)::int from request_list where ref = 'PI-00007') then
+    raise exception 'date of birth not stored, or age band not worked out from it';
+  end if;
+  raise notice 'ok: date of birth is compulsory and sets the age band';
+end $$;
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', '{"client_name":""}')$$, 'client name');
 do $$ begin
   if (select count(*) from pi_requests) <> 4 then raise exception 'new request not visible'; end if;
   raise notice 'ok: introducer created a request';
 end $$;
-select pg_temp.expect_error($$select update_request('20000000-0000-0000-0000-000000000004', '{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', null)$$, 'Not your request');
+select pg_temp.expect_error($$select update_request('20000000-0000-0000-0000-000000000004', '{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', null)$$, 'Not your request');
 select pg_temp.expect_error($$select resubmit_request('20000000-0000-0000-0000-000000000001')$$, 'sent back');
 
 -- 3. Introducer 2 cannot see introducer 1's data
@@ -223,7 +236,7 @@ end $$;
 -- 8. Priority (urgent flag): ops and bsd only. Introducers can neither see nor set it, nor see due times.
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'urgent')$$, 'Only the assigned ops user or bsd');
-select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","priority":"urgent"}',
+select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","priority":"urgent"}',
                       '{"client_name":"[Sample] Client Hotel"}');
 select pg_temp.expect_error($$select priority from pi_requests$$, 'permission denied');
 select pg_temp.expect_error($$select urgent_auto from pi_requests$$, 'permission denied');

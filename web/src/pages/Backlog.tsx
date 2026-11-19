@@ -6,7 +6,7 @@ import { useRequests } from '../lib/requests'
 import { nameOf, usePeople } from '../lib/people'
 import { usePiMembers } from '../lib/modules'
 import { useSettings } from '../lib/settings'
-import { STATUS_LABEL, byPriorityThenDue, daysSince, dueInfo, fmtDate, introGroup, summary, says } from '../lib/options'
+import { STATUS_LABEL, dobDmy, byPriorityThenDue, daysSince, dueInfo, fmtDate, introGroup, summary, says } from '../lib/options'
 import { downloadCsv } from '../lib/csv'
 import { StatusPill, UrgentPill } from '../components/ui'
 import type { PiRequest, SavedFilter } from '../lib/types'
@@ -126,10 +126,10 @@ export default function Backlog() {
   }
 
   function exportCsv() {
-    const head = ['Ref', 'Status', 'Priority', 'Product', 'Plan category', 'Age band', 'Gender', 'Smoker', 'Coverage term',
+    const head = ['Ref', 'Status', 'Priority', 'Product', 'Plan category', 'Date of birth', 'Age band', 'Gender', 'Smoker', 'Coverage term',
       'Sum assured', 'Premium type', 'CI benefit', 'Introducer', 'Firm', 'Handled by', 'Submitted', 'Due', 'Completed', 'Deadline status']
     const body = list.map((r) => [r.ref, STATUS_LABEL[r.status], r.priority === 'urgent' ? 'Urgent' : 'Normal', r.product, r.plan_category,
-      r.age_band, r.gender, r.smoker ? 'Yes' : 'No', r.coverage_term, r.sum_assured_band, r.premium_type, r.ci_benefit ? 'Yes' : 'No',
+      r.date_of_birth ? dobDmy(r.date_of_birth) : '', r.age_band, r.gender, r.smoker ? 'Yes' : 'No', r.coverage_term, r.sum_assured_band, r.premium_type, r.ci_benefit ? 'Yes' : 'No',
       nameOf(people, r.introducer_id), people[r.introducer_id]?.company ?? '', r.assignee_id ? nameOf(people, r.assignee_id) : '',
       r.submitted_at, r.due_at ?? '', r.completed_at ?? '', due(r)?.label ?? ''])
     downloadCsv(`pi-requests-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...body])
