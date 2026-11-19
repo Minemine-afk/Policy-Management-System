@@ -141,6 +141,8 @@ table.compare input[type=text] { height: 38px; }
 tr.section-row th { background: var(--nav); color: #fff; text-align: left; font-size: 13px; letter-spacing: .02em; padding: 6px 12px; }
 td.empty-cell { background: var(--bad-soft); }
 td.edited-cell { background: var(--warn-soft); }
+/* Read by the general rules (a PI layout the reader doesn't know): ops should check it. */
+td.guess-cell { background: var(--brand-soft); }
 .notices { list-style: none; margin: 0; padding: 0; }
 .notices li { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line-soft); }
 .notices li > a { flex: 1; color: var(--ink); text-decoration: none; }

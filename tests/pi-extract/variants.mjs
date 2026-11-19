@@ -28,6 +28,9 @@ const VARIANTS = [
   ['payment mode: Mode of Payment', [[/^Payment Mode(\s*):/, 'Mode of Payment$1:'], [/^Premium (?:Payment )?(?:Mode|Frequency)(\s*):/, 'Mode of Payment$1:']]],
   ['terms: Premium Payment Term / Coverage Term', [[/^(\s*)Premium Term(\s{2,})/, '$1Premium Payment Term$2'], [/^(\s*)Policy Term(\s{2,})/, '$1Coverage Term$2']]],
   ['sum assured: Sum Insured', [[/\bSum Assured(\s*(?:\([^)]*\))?\s*):/, 'Sum Insured$1:']]],
+  // A rider heading the rules don't know: riders may then go unread, but must never read as "NA" (no rider).
+  ['riders: unknown heading (blank allowed, never wrong)', [[/^Supplementary Benefit(?:s|\(s\))$/, 'Additional Protection']], true],
+  ['riders: no heading at all (blank allowed, never wrong)', [[/^Supplementary Benefit(?:s|\(s\))$/, '']], true],
 ]
 
 const files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.pdf') && expected[f]).sort()
@@ -37,7 +40,7 @@ for (const f of files) {
   loaded.push([f, await readWith(pdfjs, data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength))])
 }
 let pass = 0, fail = 0, applied = 0
-for (const [vname, pairs] of VARIANTS) {
+for (const [vname, pairs, blankOk] of VARIANTS) {
   for (const [f, pages] of loaded) {
     let changed = 0
     const copy = pages.map((p) => ({ ...p, lines: p.lines.map((l) => {
@@ -49,7 +52,7 @@ for (const [vname, pairs] of VARIANTS) {
     if (!changed) continue // this PI doesn't use that label
     applied++
     const r = extract(copy, f)
-    const bad = FIELDS.filter((fd) => expected[f][fd.key] !== undefined && r.found[fd.key].value !== expected[f][fd.key])
+    const bad = FIELDS.filter((fd) => expected[f][fd.key] !== undefined && r.found[fd.key].value !== expected[f][fd.key] && !(blankOk && !r.found[fd.key].value))
     if (bad.length) { fail++; console.log(`✗ ${vname} on ${f}: ${bad.map((fd) => `${fd.label} "${r.found[fd.key].value}" (expected "${expected[f][fd.key]}")`).join('; ')}`) }
     else { pass++; console.log(`✓ ${vname} on ${f} (${changed} lines reworded)`) }
   }
