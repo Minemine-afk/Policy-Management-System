@@ -774,6 +774,7 @@ const SG_LABELS = {
   await check(alex.locator('td', { hasText: 'Switched automatic deletion off' }).count().then((n) => n > 0), 'auto-delete: the switch is audited')
   await check(alex.locator('tbody td').allTextContents().then((t) => !t.some((x) => /\b(request|user|settings)\.[a-z_]+|\{"/.test(x))), 'auto-delete: audit log still shows no codes or raw data')
   await check(q1(`select count(*)::int n from audit_log where details::text ilike '%' || $1 || '%'`, [old1Client]).then((r) => r[0].n === 0), `auto-delete: the deleted client's name (${old1Client}) is nowhere in the audit log`)
+  await check(alex.locator('td', { hasText: /^(Started work on|Submitted a new|Assigned) request .*reason removed/ }).count().then((n) => n === 0), 'auto-delete: entries that had no reason are not marked "reason removed"')
   await alex.screenshot({ path: SHOTS + '/22-auto-delete-audit.png', fullPage: true })
   await db.end()
 

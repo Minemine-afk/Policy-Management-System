@@ -1685,9 +1685,12 @@ begin
       on conflict (bucket, path) do nothing;
     select coalesce(array_agg(d.id::text), '{}') into docs from public.request_documents d where d.request_id = c.id;
     -- Earlier audit entries keep who did what and when, but lose free text that could name the client.
-    update public.audit_log a set details = (a.details - 'file' - 'reason') || jsonb_build_object('request', c.ref, 'details_removed', true)
+    -- (A reason key is kept, emptied, because "returned to the pool" is told apart from "submitted" by it.)
+    update public.audit_log a set details = (a.details - 'file')
+        || case when a.details ? 'reason' then jsonb_build_object('reason', null) else '{}'::jsonb end
+        || jsonb_build_object('request', c.ref, 'details_removed', true)
      where (a.entity = 'request_document' and a.entity_id = any(docs) or a.entity = 'pi_request' and a.entity_id = c.ref)
-       and (a.details ? 'file' or a.details ? 'reason');
+       and (nullif(a.details ->> 'file', '') is not null or nullif(a.details ->> 'reason', '') is not null);
     delete from public.pi_requests r where r.id = c.id;   -- client details, comments, timeline, file records, notifications go with it
     perform public.log_event('request.auto_deleted', 'pi_request', c.ref, jsonb_build_object(
       'status', c.status, 'due_at', c.due_at, 'days_overdue', c.days_overdue, 'files', c.files, 'after_days', s.auto_delete_days));

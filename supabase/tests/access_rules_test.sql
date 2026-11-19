@@ -550,6 +550,7 @@ begin
   insert into notifications (user_id, request_id, kind, message) values (ops, '90000000-0000-0000-0000-000000000001', 'overdue', 'PI-90001 is overdue');
   insert into audit_log (actor_id, action, entity, entity_id, details) values
     (ops, 'request.sent_back', 'pi_request', 'PI-90001', '{"reason":"Zed''s age?"}'),
+    (ops, 'request.in_progress', 'pi_request', 'PI-90001', '{"reason":null}'),
     (intro, 'document.viewed', 'request_document', '91000000-0000-0000-0000-000000000001', '{"file":"Zed form.pdf"}'),
     (ops, 'document.viewed', 'request_document', '91000000-0000-0000-0000-000000000004', '{"file":"PI1.pdf"}');
 end $$;
@@ -604,6 +605,8 @@ do $$ declare got text[]; begin
   if (select count(*) from audit_log where action = 'request.auto_deleted' and actor_id is null) <> 3 then raise exception 'one system audit entry per deletion expected'; end if;
   if exists (select 1 from audit_log where details::text ~ 'Zed|Client PI-900|9123') then raise exception 'client text left in the audit log: %', (select array_agg(action || ' ' || details::text) from audit_log where details::text ~ 'Zed|Client PI-900|9123'); end if;
   if (select details ->> 'request' from audit_log where entity_id = '91000000-0000-0000-0000-000000000001') <> 'PI-90001' then raise exception 'document audit entry not marked'; end if;
+  if (select details from audit_log where action = 'request.sent_back' and entity_id = 'PI-90001') <> '{"reason": null, "request": "PI-90001", "details_removed": true}' then raise exception 'reason not emptied: %', (select details from audit_log where action = 'request.sent_back' and entity_id = 'PI-90001'); end if;
+  if (select details from audit_log where action = 'request.in_progress' and entity_id = 'PI-90001') <> '{"reason": null}' then raise exception 'entry without a reason should be left alone'; end if;
   if (select details ->> 'file' from audit_log where entity_id = '91000000-0000-0000-0000-000000000004') <> 'PI1.pdf' then raise exception 'audit of a kept request was changed'; end if;
   if (select (details ->> 'days_overdue')::int from audit_log where action = 'request.auto_deleted' and entity_id = 'PI-90002') <> 45 then raise exception 'audit days overdue wrong'; end if;
   if exists (select 1 from delete_overdue_requests()) then raise exception 'second run should delete nothing'; end if;
