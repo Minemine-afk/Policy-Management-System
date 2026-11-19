@@ -1,22 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { AGE_BANDS, COVERAGE_TERMS, GENDERS, PLAN_CATEGORIES, PREMIUM_TYPES, PRODUCTS, SUM_ASSURED_BANDS, says } from '../lib/options'
+import { ageOn, isoToday, COVERAGE_TERMS, GENDERS, PLAN_CATEGORIES, PREMIUM_TYPES, PRODUCTS, SUM_ASSURED_BANDS, says } from '../lib/options'
 import type { PiRequest, RequestDocument } from '../lib/types'
 import { Seg, Select } from '../components/ui'
 import Files from '../components/Files'
 import { useAuth } from '../lib/auth'
 
 interface FormState {
-  plan_category: string; product: string; age_band: string; gender: string; smoker: boolean
+  plan_category: string; product: string; date_of_birth: string; gender: string; smoker: boolean
   coverage_term: string; sum_assured_band: string; premium_type: string; ci_benefit: boolean; remarks: string
 }
 const DEFAULTS: FormState = {
-  plan_category: 'All', product: 'Term life', age_band: '25 to 29', gender: 'Male', smoker: false,
+  plan_category: 'All', product: 'Term life', date_of_birth: '', gender: 'Male', smoker: false,
   coverage_term: '6 to 10 years', sum_assured_band: 'S$100,001 to 250,000', premium_type: 'Annual', ci_benefit: true, remarks: '',
 }
 const pick = (r: PiRequest): FormState => ({
-  plan_category: r.plan_category, product: r.product, age_band: r.age_band, gender: r.gender, smoker: r.smoker,
+  plan_category: r.plan_category, product: r.product, date_of_birth: r.date_of_birth ?? '', gender: r.gender, smoker: r.smoker,
   coverage_term: r.coverage_term, sum_assured_band: r.sum_assured_band, premium_type: r.premium_type, ci_benefit: r.ci_benefit,
   remarks: r.remarks ?? '',
 })
@@ -103,7 +103,11 @@ export default function RequestForm() {
   }
 
   async function submit() {
-    setSaving(true); setError('')
+    setError('')
+    if (!f.date_of_birth) { setError("Enter the client's date of birth"); return }
+    const age = ageOn(f.date_of_birth)
+    if (age === null || age < 0 || f.date_of_birth > isoToday()) { setError("The date of birth can't be in the future"); return }
+    setSaving(true)
     const res = id
       ? await supabase.rpc('update_request', { p_request: id, p: f, p_client: client })
       : await supabase.rpc('create_request', { p: f, p_client: client })
@@ -165,9 +169,11 @@ export default function RequestForm() {
       <section className="card" aria-labelledby="profile-head">
         <h2 id="profile-head" className="eyebrow">Client profile</h2>
         <div className="row" style={{ gap: 24, alignItems: 'flex-end' }}>
-          <div style={{ minWidth: 200 }}>
-            <Select label="Client age band" value={f.age_band} options={AGE_BANDS} onChange={(v) => set('age_band', v)} />
-          </div>
+          <label className="field" style={{ minWidth: 200 }}>Client date of birth
+            <input type="date" required aria-required="true" value={f.date_of_birth} max={isoToday()} min="1900-01-01"
+              className={f.date_of_birth ? '' : 'empty-cell'} onChange={(e) => set('date_of_birth', e.target.value)} />
+            <span className="small muted">{ageOn(f.date_of_birth) !== null && ageOn(f.date_of_birth)! >= 0 ? `Age ${ageOn(f.date_of_birth)} today` : 'Required. Used for the PI when the insurer’s PI has no date of birth.'}</span>
+          </label>
           <Seg label="Gender" value={f.gender} onChange={(v) => set('gender', v)} options={GENDERS.map((g) => ({ value: g, label: g }))} />
           <Seg label="Smoker" value={f.smoker} onChange={(v) => set('smoker', v)} options={yesNo} />
         </div>

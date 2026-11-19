@@ -32,7 +32,7 @@ When ops or BSD save a PI pack, the browser looks at each value they typed or co
 they kept) and finds where it sits in that PI: the words just before it on the line (`beside`, with how many columns
 after), or the column heading above it (`under`). A monthly figure that ops turned into a yearly one is kept with its
 factor (x 12, 4 or 2). A place is kept only if, read back on the same PI, it gives exactly that value. The places go to
-the `insurer_label_rules` table (`supabase/cloud/1l-upgrade.sql`), per insurer and plan.
+the `insurer_label_rules` table (`supabase/cloud/1m-upgrade.sql`), per insurer and plan.
 
 What is stored: insurer, plan (policy name), field, label words, position, factor. Never a value. Labels that contain
 the insured name or date of birth, an amount, a long number, a date, an e-mail or web address are dropped in the browser

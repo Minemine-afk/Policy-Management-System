@@ -6,12 +6,12 @@ export interface SavedRule extends LearnedRule { id: string; created_at: string 
 
 const COLUMNS = 'id, insurer, field, how, label, label_offset, factor, cut, plan, created_at'
 const NEEDS_UPGRADE = /insurer_label_rules|teach_insurer|forget_insurer_rules|schema cache|does not exist/i
-export const UPGRADE_NOTE = 'The database needs an update first: run supabase/cloud/1l-upgrade.sql in Supabase.'
+export const UPGRADE_NOTE = 'The database needs an update first: run supabase/cloud/1m-upgrade.sql in Supabase.'
 
 type Row = Omit<SavedRule, 'offset'> & { label_offset: number }
 const fromRow = ({ label_offset, ...r }: Row): SavedRule => ({ ...r, offset: label_offset, factor: Number(r.factor) })
 
-/** Every learned place. `ready` is false when the table is not there yet (1l-upgrade.sql not run). */
+/** Every learned place. `ready` is false when the table is not there yet (1m-upgrade.sql not run). */
 export async function loadRules(): Promise<{ rules: SavedRule[]; ready: boolean; error: string }> {
   const { data, error } = await supabase.from('insurer_label_rules').select(COLUMNS).order('insurer').order('field').limit(5000)
   if (error) return { rules: [], ready: !NEEDS_UPGRADE.test(error.message), error: NEEDS_UPGRADE.test(error.message) ? UPGRADE_NOTE : error.message }

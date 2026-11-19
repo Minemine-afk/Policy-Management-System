@@ -1,6 +1,6 @@
 -- UPGRADE for a project that already ran 1-setup.sql (before 20 Nov 2026). Paste the whole file into SQL Editor and Run once.
 -- Teach a new insurer: a table for the places (label words and positions, never values) that the PI reader learns
--- when ops save a comparison. Deletes nothing. Safe to run again. Run 1b to 1k-upgrade.sql first if you never did.
+-- when ops save a comparison. Deletes nothing. Safe to run again. Run 1b to 1l-upgrade.sql first if you never did.
 
 begin;
 -- Teach a new insurer (20 Nov 2026). When ops or bsd save a PI comparison, the browser works out WHERE in the PI each

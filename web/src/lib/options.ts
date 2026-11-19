@@ -107,3 +107,16 @@ export function byPriorityThenDue(a: Sortable, b: Sortable) {
 export function says(msg: string) {
   return msg.replace(/\bbsd\b/gi, 'BSD')
 }
+
+/** Age last birthday on the given day (YYYY-MM-DD in, whole years out). */
+export function ageOn(dob: string, today = new Date()): number | null {
+  const m = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return null
+  let a = today.getFullYear() - Number(m[1])
+  if (today.getMonth() + 1 < Number(m[2]) || (today.getMonth() + 1 === Number(m[2]) && today.getDate() < Number(m[3]))) a--
+  return a
+}
+export const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+
+/** "1990-05-17" -> "17/05/1990" (day first, as on Singapore PIs). */
+export const dobDmy = (iso: string) => iso.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')

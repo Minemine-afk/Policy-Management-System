@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth'
 import { packState } from '../lib/piPdf'
 import { nameOf, usePeople } from '../lib/people'
 import { usePiMembers } from '../lib/modules'
-import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime, says } from '../lib/options'
+import { EVENT_LABEL, ageOn, dobDmy, dueInfo, fmtDate, fmtDateTime, says } from '../lib/options'
 import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
 import { Fact, ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
@@ -146,7 +146,7 @@ export default function RequestView() {
             <h2 className="eyebrow">Request</h2>
             <dl className="facts">
               <Fact label="Product">{r.product} · {r.plan_category}</Fact>
-              <Fact label="Age band">{r.age_band}</Fact>
+              {r.date_of_birth ? <Fact label="Date of birth">{dobDmy(r.date_of_birth)} (age {ageOn(r.date_of_birth)})</Fact> : <Fact label="Age band">{r.age_band}</Fact>}
               <Fact label="Gender · Smoker">{r.gender} · {r.smoker ? 'Yes' : 'No'}</Fact>
               <Fact label="Coverage term">{r.coverage_term}</Fact>
               <Fact label="Sum assured">{r.sum_assured_band}</Fact>

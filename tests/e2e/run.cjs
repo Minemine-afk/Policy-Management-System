@@ -60,7 +60,11 @@ const SG_LABELS = {
   await sam.getByRole('link', { name: 'New request' }).first().click()
   await sam.getByLabel('Client name').fill('[Sample] Client Golf')
   await check(sam.getByText(/NRIC/i).count().then((n) => n === 0), 'the request form has no NRIC field')
-  await sam.getByLabel('Client age band').selectOption('35 to 39')
+  await check(sam.getByLabel('Client age band').count().then((n) => n === 0), 'the form asks for a date of birth, not an age band')
+  await sam.getByRole('button', { name: 'Submit request' }).click()
+  await check(sam.getByRole('alert').getByText("Enter the client's date of birth").isVisible(), 'date of birth is compulsory')
+  await sam.getByLabel('Client date of birth').fill('1988-03-14')
+  await check(sam.getByText(/^Age \d+ today$/).isVisible(), 'the form shows the age worked out from the date of birth')
   await sam.getByRole('group', { name: 'Gender' }).getByRole('button', { name: 'Female' }).click()
   await sam.getByLabel('Remarks for ops (optional)').fill('Wants quotes from three insurers')
   await sam.getByRole('button', { name: 'Submit request' }).click()
@@ -138,7 +142,7 @@ const SG_LABELS = {
   await check(olivia.getByLabel('Notes for PI 1').getByText(/Payment mode is Monthly: premiums are shown per year/).isVisible(), 'says the premiums were made yearly')
   await check(val('Annual Premium', 2).then((v) => v === '1180.00'), 'keeps an annual premium as it is')
   await check(val('Policy Currency', 2).then((v) => v === 'USD'), 'reads the policy currency (USD)')
-  await check(olivia.getByLabel('Notes for PI 3').getByText(/Policy currency not found|without saying which dollar: fill in the policy currency/).isVisible(), 'asks for the currency when the PI does not say')
+  await check(olivia.getByLabel('Notes for PI 3').getByText(/Policy currency not found|fill in the policy currency/).isVisible(), 'asks for the currency when the PI does not say')
   await check(val('Death', 3).then((v) => v === '600000'), 'reads sum assured when headings are joined together')
   await check(val('Premium', 3).then((v) => v === '816.00'), 'base premium is the premium payable after discount, per year')
   await check(olivia.getByText('After discount').isVisible(), 'flags a discounted premium')
@@ -153,7 +157,9 @@ const SG_LABELS = {
   // Client particulars the PI doesn't show come from the request form (PI2 has no gender / smoker line)
   await check(Promise.all([val('Gender', 2), val('Underwriting Class', 2)]).then((v) => v.join('|') === 'Female|Non-Smoker'), 'gender and smoker status missing from a PI are filled from the request form')
   await check(cmp.locator('td', { has: olivia.getByLabel('Gender for PI 2', { exact: true }) }).getByText('From the request form (not in the PI)').isVisible(), 'values from the request form are marked as such')
-  await check(olivia.getByLabel('Notes for PI 1').getByText('Client age band on the request form: 35 to 39.').isVisible(), 'the age band from the form is noted when the PI has no date of birth')
+  await check(Promise.all([1, 2, 3].map((i) => val('Date of Birth', i))).then((v) => v.every((x) => x === '14/03/1988')), 'date of birth missing from the PIs comes from the request form')
+  await check(cmp.locator('td', { has: olivia.getByLabel('Date of Birth for PI 1', { exact: true }) }).getByText('From the request form (not in the PI)').isVisible(), 'and is marked as from the request form')
+  await check(olivia.getByText('Date of birth').first().isVisible().then(async (v) => v && (await olivia.getByText(/^14\/03\/1988 \(age \d+\)$/).count()) === 1), 'ops see the date of birth on the request (not an age band)')
   // PI issue dates: read from each PI, editable
   await check(Promise.all([1, 2, 3].map((i) => olivia.getByLabel(`PI issue date for PI ${i}`).inputValue())).then((v) => v.join('|') === '05/11/2026||06/11/2026'), 'reads each PI\'s issue date (none in PI2)')
   await check(olivia.getByRole('button', { name: 'Export to Excel' }).isDisabled(), 'export needs the values-checked box')
@@ -284,11 +290,12 @@ const SG_LABELS = {
   await check(dana.getByText('Handled by').count().then((n) => n === 0), 'introducer request page does not show the handler')
   await dana.getByRole('link', { name: 'Edit request' }).first().click()
   await dana.getByLabel('Client name').fill('[Sample] Client Delta (corrected)')
-  await dana.getByLabel('Client age band').selectOption('30 to 34')
+  await check(dana.getByLabel('Client date of birth').inputValue().then((v) => v === ''), 'an older request has no date of birth yet')
+  await dana.getByLabel('Client date of birth').fill('1994-02-10')
   await check(dana.getByLabel('Upload attachments').isVisible(), 'sent-back edit page allows attachments and all fields')
   await dana.getByRole('button', { name: 'Save changes' }).click()
   await dana.getByText('[Sample] Client Delta (corrected)').waitFor()
-  await dana.getByText('30 to 34').first().waitFor()
+  await dana.getByText(/^10\/02\/1994 \(age \d+\)$/).first().waitFor()
   ok('introducer re-edited every field of a sent-back request')
   await dana.getByRole('button', { name: 'Resubmit' }).click()
   await dana.locator('h1 .pill', { hasText: 'In progress' }).waitFor()
@@ -402,7 +409,7 @@ const SG_LABELS = {
   await sam.getByRole('link', { name: 'New request' }).first().click()
   await sam.getByLabel('Previous client (optional)').selectOption({ label: '[Sample] Client Golf (last: PI-00007)' })
   await check(sam.getByLabel('Client name').inputValue().then((v) => v === '[Sample] Client Golf'), 'choosing a previous client fills in their details')
-  await check(sam.getByLabel('Client age band').inputValue().then((v) => v === '35 to 39'), 'and their last profile')
+  await check(sam.getByLabel('Client date of birth').inputValue().then((v) => v === '1988-03-14'), 'and their last profile, with the date of birth')
   await check(sam.getByRole('group', { name: 'Priority' }).count().then((n) => n === 0), 'the request form has no priority for introducers')
   await sam.getByRole('button', { name: 'Submit request' }).click()
   await sam.getByRole('heading', { name: /PI-00008/ }).waitFor()
@@ -632,7 +639,9 @@ const SG_LABELS = {
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
         const got = await olivia.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()
-        await check(Promise.resolve(got === expected[n][k]), `real sample ${n}: ${label} = ${got || '(blank)'}`)
+        // PI-00003's request form has a date of birth (set by the introducer above): it fills a PI that has none
+        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
+        await check(Promise.resolve(got === want), `real sample ${n}: ${label} = ${got || '(blank)'}`)
       }
     }
     await check(olivia.getByLabel(`Notes for PI ${names.indexOf('SG_Singlife_EliteTermII_2024.pdf') + 1}`).getByText(/30% discount \(SGD 66.20 monthly before/).isVisible(), 'real sample: Singlife premium flagged as after the 30% discount')
@@ -659,7 +668,8 @@ const SG_LABELS = {
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
         const got = await cmp.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()
-        await check(Promise.resolve(got === expected[n][k]), `scanned ${n} (OCR): ${label} = ${got || '(blank)'}`)
+        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
+        await check(Promise.resolve(got === want), `scanned ${n} (OCR): ${label} = ${got || '(blank)'}`)
       }
     }
     await check(cmp.getByLabel('Notes for PI 1').getByText(/read with OCR: check every value/).isVisible(), 'values read with OCR carry a note to check them')
