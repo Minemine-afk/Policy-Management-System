@@ -822,9 +822,11 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (n('policy_term') !== null && n('premium_term') !== null && n('premium_term')! > n('policy_term')!) notes.push(`Check the terms: the premium term (${found.premium_term.value}) is longer than the policy term (${found.policy_term.value}).`)
 
   // Every illustration read to its end (last row at the policy term or the cover age), so the total premium is whole.
+  // With riders in the premium summary, their illustration comes after the main plan's (FWD: the TPD rider's, pages
+  // later; HSBC: one table for all riders): until one is read, the total is not whole, so scanned pages are not skipped.
   const termN = /^\d+$/.test(found.policy_term.value) ? +found.policy_term.value : null
   const endAge = found.cover_age.value ? +found.cover_age.value : null
-  const totalComplete = segments.length > 0 && segments.every((s) => {
+  const totalComplete = segments.length > 0 && segments.length >= (riders.length ? 2 : 1) && segments.every((s) => {
     const last = s[s.length - 1]
     return (termN !== null && last.year >= termN) || (endAge !== null && last.age >= endAge)
   })
