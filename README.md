@@ -37,6 +37,15 @@ requests per ops user: assigned, in progress, sent back, urgent, overdue) and ca
 **Email alerts:** off for now; notifications are in-app only (the bell). The email code is parked in `docs/email-alerts/`
 with the steps to switch it on later.
 
+**Automatic deletion of long-overdue requests:** an open request (submitted, assigned, in progress, or sent back with the
+clock running) that has been overdue for more than 30 days is deleted for good once a day, with its client details,
+comments, history, files, PI comparison and PI pack. Completed and removed requests are never deleted, nor are sent-back
+requests while their clock is paused. An admin sets the number of days (or switches it off) under **Admin → Deadline settings**,
+sees a preview of exactly which requests would go, and can run it at once. The audit log keeps one plain-English line per
+deleted request (reference, status, days overdue, number of files; no client details) and takes reasons and file names
+out of that request's earlier entries. Files are removed through the Storage API by the Edge Function
+`cleanup-deleted-files`; setup in `supabase/cloud/README.md` (step 6c).
+
 Board columns: staff see Unassigned, Assigned, In progress, Sent back, Completed (cards have a drag grip); ops can drag a
 request freely between Unassigned, Assigned and In progress. Introducers see only In progress (anything not yet sent back
 or completed), Sent back and Completed, and never see who is handling a request. Sent-back requests are closed to comments;

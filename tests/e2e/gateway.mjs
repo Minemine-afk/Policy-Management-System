@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import pg from 'pg'
 import { handle as adminCreateUser } from '../../supabase/functions/admin-create-user/index.ts'
+import { handle as cleanupDeletedFiles } from '../../supabase/functions/cleanup-deleted-files/index.ts'
 
 const SECRET = 'super-secret-jwt-token-with-at-least-32-characters-long'
 const pool = new pg.Pool({ connectionString: 'postgres://postgres:pw@127.0.0.1:5432/e2e' })
@@ -126,6 +127,7 @@ http.createServer((req, res) => {
   if (req.url.startsWith('/auth/v1')) return proxy(req, res, 9999, '/auth/v1')
   if (req.url.startsWith('/storage/v1')) return storage(req, res)
   if (req.url.startsWith('/functions/v1/admin-create-user')) return edgeFunction(req, res, adminCreateUser)
+  if (req.url.startsWith('/functions/v1/cleanup-deleted-files')) return edgeFunction(req, res, cleanupDeletedFiles)
   json(res, 404, { message: 'unknown route' })
 }).listen(54321, '127.0.0.1', () => console.log('gateway on 54321'))
 console.log('anon key', ANON)

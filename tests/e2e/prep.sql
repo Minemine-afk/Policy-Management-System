@@ -29,3 +29,6 @@ create function storage.foldername(name text) returns text[] language sql immuta
   select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
 grant usage on schema storage to anon, authenticated;
 grant select, insert, delete on storage.objects to authenticated;
+-- Like Supabase: the service_role (server functions only) can use the public and storage schemas.
+grant usage on schema public, storage to service_role;
+grant select, delete on storage.objects to service_role;

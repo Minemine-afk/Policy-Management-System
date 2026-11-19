@@ -10,6 +10,7 @@ import type { AppSettings, AuditRow, Profile, Role } from '../lib/types'
 import { createUser, tempPassword } from '../lib/users'
 import UserCsv from '../components/UserCsv'
 import ModuleAccess from '../components/ModuleAccess'
+import AutoDelete from '../components/AutoDelete'
 
 export default function Admin() {
   const cls = ({ isActive }: { isActive: boolean }) => `btn small ${isActive ? 'primary' : ''}`
@@ -273,6 +274,7 @@ function Settings() {
   }
   const num = (v: string) => Math.max(0, Math.round(Number(v) || 0))
   return (
+    <>
     <div className="card" style={{ maxWidth: 620 }}>
       <p className="small muted" style={{ margin: 0 }}>
         Requests are due a set time after they are submitted. Ops and BSD see them in orange when the "due soon" window starts,
@@ -296,5 +298,7 @@ function Settings() {
       {saved && <div className="small" role="status" style={{ color: 'var(--ok)' }}>{saved}</div>}
       <div><button className="btn primary" onClick={save}>Save settings</button></div>
     </div>
+    <AutoDelete />
+    </>
   )
 }

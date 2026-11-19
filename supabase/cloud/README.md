@@ -27,6 +27,8 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      Nobody's access changes when you run it.
    - `1j-upgrade.sql` (15 Nov: PI pack). Introducers get one restricted PDF (the comparison, then the PIs) and never the
      Excel; "Mark completed" needs an up-to-date PI pack. Requests completed earlier keep their PI PDFs (Excel hidden).
+   - `1k-upgrade.sql` (19 Nov: automatic deletion of requests overdue for more than 30 days). Running it deletes nothing;
+     see step 6c to switch the daily run on.
    - `1h-undo-new-form.sql`: **only if you ran the (withdrawn) `1h-upgrade.sql`** for the new request form. It puts the
      original form's fields back and keeps every request's details. Harmless if you never ran 1h.
 
@@ -85,6 +87,30 @@ Remove them before any real client data goes in.
 ## 6b. (Optional) Deadline checks on a schedule
 Run `5-schedule-deadline-checks.sql` once. It checks deadlines every 15 minutes, so "due soon" and "overdue" notices
 arrive even when nobody has the app open.
+
+## 6c. Automatic deletion of long-overdue requests (about 10 minutes, once)
+An open request (submitted, assigned, in progress, or sent back with the clock running) whose due time passed more than
+30 days ago is **deleted for good** once a day at 3 AM Singapore time: the request, its client details, comments, history,
+files, PI comparison and PI pack. Completed and removed requests are never deleted, nor are sent-back requests while
+their clock is paused. The audit log keeps one line per deleted request (its reference, status and how late it was;
+no client details), shown as done by "System". An admin changes the number of days, or switches it off, under
+**Admin → Deadline settings**, which also lists exactly which requests would be deleted now.
+
+1. Run `1k-upgrade.sql` (step 2) if you haven't. Nothing is deleted yet.
+2. Deploy the file clean-up function (Supabase does not let SQL delete stored files, so this function removes them with
+   the Storage API): **Edge Functions** → **Deploy a new function** → **Via Editor**, name it exactly `cleanup-deleted-files`,
+   paste the whole of `supabase/functions/cleanup-deleted-files/index.ts`, **Deploy**. Then open its **Details** and turn
+   **off** "Verify JWT" (the schedule calls it without a key; it takes no input and can only remove files of requests
+   that are already deleted).
+3. Sign in as an admin → **Admin → Deadline settings** and check the **Preview** list. These are the requests the first
+   run will delete. Untick "Delete long-overdue requests automatically" and **Save** if you are not ready.
+4. Open `5b-schedule-auto-delete.sql`, replace `YOUR-PROJECT-REF` everywhere (Find and replace, "Replace all") with your
+   project reference (the part before `.supabase.co` in the Project URL), paste it into SQL Editor and **Run**. The result
+   lists two jobs. If "create extension" fails: **Database → Extensions**, switch on `pg_cron` and `pg_net`, run it again.
+
+Admins can also press **Delete these now** on that page instead of waiting for the night. A note there shows if files
+of deleted requests are still waiting to be removed (nobody can open them; **Remove now** retries).
+Command-line alternative for step 2: `npx supabase functions deploy cleanup-deleted-files --no-verify-jwt --project-ref <ref>`.
 
 ## 7. Connect the web app
 **Project Settings** → **API** (or the **Connect** button): copy the **Project URL** and the **anon / publishable** key.
