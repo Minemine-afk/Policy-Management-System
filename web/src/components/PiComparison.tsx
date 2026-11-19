@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { says } from '../lib/options'
-import { FIELDS, SECTIONS, extract, labelWith, readPdf, type Found } from '../lib/piExtract'
+import { FIELDS, SECTIONS, extract, labelWith, readPdf, type Found, type Page } from '../lib/piExtract'
+import { applyLearned, learn } from '../lib/piTeach'
+import { loadRules, saveRules, type SavedRule } from '../lib/teach'
 import { TEMPLATE_URL, buildWorkbook, preloadExcel, commonCurrency, isComparisonFile, type ExportColumn } from '../lib/piExcel'
 import { buildPack, packFileName, packState, preloadPdf, sha256 } from '../lib/piPdf'
 import { findIssueDate, showDate, toDmy } from '../lib/piIssueDate'
@@ -17,6 +19,8 @@ interface Column {
   /** The PI's issue date, DD/MM/YYYY ("" when not found), and where it was found. */
   issueDate: string
   issueFound: { value: string; page: number; line: string } | null
+  /** The PI as read, kept in memory only, to learn from when the comparison is saved. */
+  pages?: Page[]
   error?: string
 }
 
@@ -66,12 +70,21 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   const [error, setError] = useState('')
   const [saved, setSaved] = useState('')
   const [saving, setSaving] = useState(false)
+  // Places the reader learned from earlier saved comparisons (null while loading).
+  const [rules, setRules] = useState<SavedRule[] | null>(null)
+  const [teachReady, setTeachReady] = useState(true)
+  useEffect(() => {
+    let gone = false
+    loadRules().then((r) => { if (!gone) { setRules(r.rules); setTeachReady(r.ready && !r.error) } })
+    return () => { gone = true }
+  }, [])
 
   // Read the request's PIs whenever the set of PI PDFs changes (or "Read again").
   // Fetch the Excel tool now, while it matches this page (see preloadExcel).
   useEffect(() => { preloadExcel().catch(() => {}); preloadPdf().catch(() => {}) }, [])
   useEffect(() => {
     if (!key) { setCols([]); return }
+    if (!rules) return
     let cancelled = false
     const list = docs.filter((d) => key.split(',').includes(d.id)).sort((a, b) => key.indexOf(a.id) - key.indexOf(b.id))
     ;(async () => {
@@ -93,7 +106,12 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
             out.push(failed(doc.file_name, 'No text could be read, even with OCR. Type the values in by hand.'))
             continue
           }
-          const { found, notes, discounted } = extract(pages, doc.file_name)
+          const read = extract(pages, doc.file_name)
+          const { notes, discounted } = read
+          // Blanks (and general-rule guesses) filled from places ops taught for this insurer.
+          const taught = applyLearned(read.found, pages, rules)
+          const found = taught.found
+          notes.push(...taught.notes)
           if (ocrPages.size) {
             const list = [...ocrPages].join(', ')
             notes.unshift(`Scanned ${ocrPages.size === 1 ? 'page' : 'pages'} ${list} read with OCR: check every value from ${ocrPages.size === 1 ? 'it' : 'them'} against the PDF.`)
@@ -107,7 +125,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
             { gender: req.gender, smoker: req.smoker, age_band: req.age_band, date_of_birth: req.date_of_birth })
           const issueFound = findIssueDate(pages)
           out.push({ fileName: doc.file_name, found: filled.found, notes: [...notes, ...filled.notes], discounted, values: filled.values,
-            issueDate: issueFound?.value ?? '', issueFound })
+            issueDate: issueFound?.value ?? '', issueFound, pages })
         } catch (e) {
           out.push(failed(doc.file_name, 'Could not read this PDF: ' + (e as Error).message))
         }
@@ -117,7 +135,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
     return () => { cancelled = true }
     // docs changes on every reload of the request; only a different set of PI PDFs needs a new read
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, run])
+  }, [key, run, rules !== null])
 
   const setValue = (i: number, k: string, v: string) => {
     setChecked(false); setSaved('')
@@ -194,10 +212,25 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         const rm = await supabase.rpc('remove_document', { p_document: d.id })
         if (!rm.error) await supabase.storage.from('request-docs').remove([d.storage_path])
       }
-      setSaved(`Saved ${packName} (${(blob.size / 1024 / 1024).toFixed(1)} MB, fingerprint ${hash.slice(0, 12)}…). The introducer gets this one PDF when you mark the request completed.`)
+      setSaved(`Saved ${packName} (${(blob.size / 1024 / 1024).toFixed(1)} MB, fingerprint ${hash.slice(0, 12)}…). The introducer gets this one PDF when you mark the request completed.${await teach()}`)
       onSaved()
     } catch (e) { setError((e as Error).message) }
     setSaving(false)
+  }
+
+  // Teach the reader: where each value ops filled in or corrected sits in its PI, so the next PI of that insurer is
+  // read with it. Only label words and positions are saved, never the values. A failure here never stops the save.
+  async function teach(): Promise<string> {
+    if (!teachReady) return ''
+    try {
+      const learned = cols.filter((c) => !c.error && c.pages).flatMap((c) => learn(c.pages!, c.values, c.found, c.values.insurer ?? ''))
+      if (!learned.length) return ''
+      const { added, error } = await saveRules(learned)
+      if (error) return ` The reader could not learn from it: ${says(error)}`
+      if (!added) return ''
+      const who = [...new Set(learned.map((r) => r.insurer))].join(', ')
+      return ` The reader learned ${added} new ${added === 1 ? 'place' : 'places'} for ${who}, used on the next PI from ${learned.length > 1 && who.includes(',') ? 'these insurers' : 'this insurer'}.`
+    } catch { return '' }
   }
 
   async function exportPdf() {
@@ -221,6 +254,8 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         They are read in your browser by fixed rules (no AI), scanned pages with OCR, and nothing is sent anywhere. Fields that can't be read are left
         blank for you to fill; client details the PI doesn't show come from the request form. Check each value against the PDF,
         then save the PI pack: one PDF with the comparison and every PI, which is all the introducer receives. It can be printed but not edited.
+        Saving also teaches the reader where the values you typed sit in a PI layout it doesn't know (only the words beside
+        them, never the values), so the next PI from that insurer fills in more (tagged “Learned”).
         {pdfs.length > MAX && ` Only the first ${MAX} of the ${pdfs.length} PDFs are compared.`}
       </p>
       {!key && <div className="small muted">Upload the PI PDFs above and they are read here straight away.</div>}
@@ -290,11 +325,12 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                             const edited = (fd?.value ?? '') !== (c.values[f.key] ?? '')
                             const cur = (c.values.currency ?? '').toUpperCase()
                             return (
-                              <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : fd?.guess ? 'guess-cell' : ''}>
+                              <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : fd?.guess || fd?.learned ? 'guess-cell' : ''}>
                                 <input type="text" aria-label={`${label} for PI ${i + 1}`} value={c.values[f.key] ?? ''}
                                   onChange={(e) => setValue(i, f.key, e.target.value)} />
                                 {(f.kind === 'money' || f.kind === 'sum') && !currency && cur && c.values[f.key] && c.values[f.key] !== 'NA' && <div className="small">in {cur}</div>}
                                 {fd?.guess && !edited && c.values[f.key] && <div className="pill info" style={{ margin: '4px 0 2px', fontSize: 12 }} title="This PI's layout is new to the reader: this value was read by general rules. Check it against the PI.">Check</div>}
+                                {fd?.learned && !edited && c.values[f.key] && <div className="pill info" style={{ margin: '4px 0 2px', fontSize: 12 }} title="Read from a place ops taught for this insurer when they saved an earlier comparison. Check it against the PI.">Learned</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
                                   {edited ? 'Changed by hand' : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}

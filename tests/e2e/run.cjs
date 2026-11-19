@@ -677,6 +677,63 @@ const SG_LABELS = {
   }
 
 
+  // 8c. Optional (PI_SAMPLES): teach a new insurer. Ops fill in what the reader left blank on a layout it has no rules
+  // for (Empire Life, Canada) and save; the next read of that insurer's PI fills those cells, tagged "Learned".
+  // BSD sees what was learned (label words only) and deletes it.
+  if (process.env.PI_SAMPLES) {
+    const EMPIRE = 'CA_EmpireLife_Solution20_2024.pdf'
+    const sg = Object.keys(JSON.parse(fs.readFileSync(__dirname + '/../pi-extract/expected-sg-samples.json', 'utf8'))).slice(0, 3)
+    const req3 = BASE + '/requests/20000000-0000-0000-0000-000000000003'
+    await olivia.goto(req3)
+    await olivia.getByRole('heading', { name: /PI-00003/ }).waitFor()
+    for (const n of [...sg, ...sg.map((x) => 'SCAN_' + x)]) {
+      const li = olivia.getByRole('listitem').filter({ hasText: n })
+      if (await li.count()) { await li.getByRole('button', { name: 'Remove' }).click(); await olivia.getByRole('button', { name: n }).waitFor({ state: 'detached' }) }
+    }
+    await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles([process.env.PI_SAMPLES + '/' + EMPIRE])
+    const cmp = olivia.getByRole('region', { name: 'PI comparison' })
+    const cell = (f) => cmp.getByLabel(new RegExp(`^${f}( \\(\\w+\\))? for PI 1$`))
+    await cell('Insurer').waitFor({ timeout: 60000 })
+    await check(cell('Annual Premium').inputValue().then((v) => v === ''), 'teach: the reader leaves the annual premium blank on a layout it has no rules for (Empire Life)')
+    await check(cell('Gender').inputValue().then((v) => v === 'Female'), 'teach: gender the PI does not show clearly comes from the request form (Female)')
+    await cell('Annual Premium').fill('191.16')
+    await cell('Gender').fill('Male')
+    await cell('Policy Name').fill('Solution 20')
+    await olivia.getByText('I have checked these values against the PDFs').click()
+    await olivia.getByRole('button', { name: /^Save PI pack to PI-\d+ for the introducer$/ }).click()
+    await check(olivia.getByRole('status').getByText(/The reader learned \d+ new places? for Empire Life/).waitFor({ timeout: 30000 }).then(() => true, () => false), 'teach: saving the comparison teaches the reader where the typed values sit')
+    await olivia.reload()
+    await cell('Insurer').waitFor({ timeout: 60000 })
+    await check(cell('Annual Premium').inputValue().then((v) => v === '191.16'), 'teach: the next read of an Empire Life PI fills the annual premium (monthly x 12)')
+    await check(cell('Gender').inputValue().then((v) => v === 'Male'), 'teach: and the gender, from the PI rather than the form')
+    await check(cmp.locator('td', { has: olivia.getByLabel(/^Annual Premium( \(\w+\))? for PI 1$/) }).getByText('Learned', { exact: true }).isVisible(), 'teach: learned values are tagged "Learned" for ops to check')
+    await check(cmp.getByLabel('Notes for PI 1').getByText(/read from places ops taught for Empire Life/).isVisible(), 'teach: a note says which values came from taught places')
+    await olivia.screenshot({ path: SHOTS + '/23-teach-learned-values.png', fullPage: true })
+    const tdb = new (require('pg').Client)({ connectionString: 'postgres://postgres:pw@127.0.0.1:5432/e2e' })
+    await tdb.connect()
+    const kept = (await tdb.query(`select label, cut, plan from insurer_label_rules`)).rows
+    await tdb.end()
+    await check(Promise.resolve(kept.length > 0 && !kept.some((r) => /191|15\.93|Client Quote/.test(JSON.stringify(r)))), `teach: the ${kept.length} learned places hold label words only, no amounts or names`)
+    await sam.goto(BASE + '/reader')
+    await picker(sam)
+    ok('teach: introducers cannot open what the reader learned')
+    await check(olivia.getByRole('link', { name: 'PI reader' }).count().then((n) => n === 0), 'teach: ops have no PI reader page (they teach by saving)')
+    await pat.goto(BASE + '/reader')
+    await pat.getByText('Empire Life', { exact: true }).waitFor()
+    await pat.getByRole('button', { name: 'Show places' }).click()
+    await check(pat.getByRole('table', { name: 'Places learned for Empire Life' }).getByText(/Annual Premium/).first().isVisible(), 'teach: BSD sees the learned places per insurer')
+    await pat.screenshot({ path: SHOTS + '/24-teach-bsd-list.png', fullPage: true })
+    await pat.getByRole('button', { name: 'Delete all' }).click()
+    await pat.getByRole('alertdialog', { name: 'Confirm delete' }).getByRole('button', { name: 'Delete', exact: true }).click()
+    await check(pat.getByRole('status').getByText(/Deleted \d+ learned places? \(everything learned for Empire Life\)/).waitFor().then(() => true, () => false), 'teach: BSD deletes what was learned for an insurer')
+    await olivia.reload()
+    await cell('Insurer').waitFor({ timeout: 60000 })
+    await check(cell('Annual Premium').inputValue().then((v) => v === ''), 'teach: after deleting, the reader no longer fills it in')
+    await alex.goto(BASE + '/admin/audit')
+    await check(alex.locator('td', { hasText: /^Taught the PI reader \d+ new places? for Empire Life \(label words only\)$/ }).first().waitFor().then(() => true, () => false), 'teach: teaching is in the audit log in plain English')
+    await check(alex.locator('td', { hasText: /^Deleted \d+ learned places? for Empire Life$/ }).first().waitFor().then(() => true, () => false), 'teach: and so is deleting')
+  }
+
   // 8. Module access: admin switches modules per person and per role; switched-off modules disappear and are blocked.
   await alex.goto(BASE + '/admin/access')
   await alex.getByRole('heading', { name: 'Role defaults' }).waitFor()
