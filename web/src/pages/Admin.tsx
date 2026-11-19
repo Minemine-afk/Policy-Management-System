@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import LearnedPlaces from '../components/LearnedPlaces'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import { ROLE_LABEL, fmtDateTime, fmtHours, says } from '../lib/options'
@@ -22,12 +23,14 @@ export default function Admin() {
         <NavLink to="/admin/access" className={cls}>Module access</NavLink>
         <NavLink to="/admin/settings" className={cls}>Deadline settings</NavLink>
         <NavLink to="/admin/audit" className={cls}>Audit log</NavLink>
+        <NavLink to="/admin/reader" className={cls}>PI reader</NavLink>
       </nav>
       <Routes>
         <Route path="users" element={<Users />} />
         <Route path="access" element={<ModuleAccess />} />
         <Route path="audit" element={<Audit />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="reader" element={<LearnedPlaces />} />
         <Route path="*" element={<Navigate to="users" replace />} />
       </Routes>
     </main>

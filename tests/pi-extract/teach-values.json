@@ -1,0 +1,22 @@
+{
+  "_about": "Words ops would type that expected-unknown-formats.json does not give in full (~ fields), or does not score (a policy name). As written in the PI.",
+  "CA_iA_TermQuote_2024.pdf": {
+    "insurer": "iA Financial Group",
+    "policy_name": "Term 20"
+  },
+  "CA_RBC_YourTerm20_2024.pdf": {
+    "policy_name": "RBC Your Term"
+  },
+  "CA_SunLife_EvolveTerm20_2024.pdf": {
+    "policy_name": "Sun Life Evolve Term Insurance"
+  },
+  "MY_Manulife_EasyProtect_PDS_2021.pdf": {
+    "policy_name": "Manulife Easy Protect"
+  },
+  "CA_EmpireLife_Solution20_2024.pdf": {
+    "policy_name": "Solution 20"
+  },
+  "CA_Equitable_Term20_2024.pdf": {
+    "policy_name": "20 YRCT"
+  }
+}

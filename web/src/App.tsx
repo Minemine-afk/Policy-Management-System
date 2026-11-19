@@ -11,6 +11,7 @@ import Admin from './pages/Admin'
 import Notifications from './pages/Notifications'
 import Account from './pages/Account'
 import Home from './pages/Home'
+import LearnedPlaces from './components/LearnedPlaces'
 import { useUnreadCount } from './lib/notifications'
 
 export default function App() {
@@ -54,6 +55,7 @@ export default function App() {
           {pi && has('introducer') && <NavLink to="/requests/new" className={cls}>New request</NavLink>}
           {pi && <NavLink to="/board" className={cls}>Board</NavLink>}
           {pi && <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>}
+          {pi && has('bsd') && <NavLink to="/reader" className={cls}>PI reader</NavLink>}
           {admin && <NavLink to="/admin" className={cls}>Admin</NavLink>}
         </nav>
         <div className="who">
@@ -74,6 +76,7 @@ export default function App() {
         <Route path="/requests/:id/edit" element={pi && has('introducer') ? <RequestForm /> : <Navigate to={home} replace />} />
         <Route path="/requests/:id" element={pi ? <RequestView /> : <Navigate to={home} replace />} />
         <Route path="/compare" element={<CompareMoved />} />
+        <Route path="/reader" element={pi && has('bsd') ? <main className="page"><LearnedPlaces /></main> : <Navigate to={home} replace />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/account" element={<Account />} />
         <Route path="/admin/*" element={admin ? <Admin /> : <Navigate to={home} replace />} />

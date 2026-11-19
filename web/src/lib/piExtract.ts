@@ -131,6 +131,8 @@ export interface Found {
   value: string; page: number | null; line: string | null
   /** Read by the general rules (piGeneric.ts), not by rules for this layout: ops should check it. */
   guess?: boolean
+  /** Read with places ops taught for this insurer (piTeach.ts): ops should check it. */
+  learned?: boolean
 }
 export interface Extracted {
   found: Record<string, Found>
@@ -884,7 +886,7 @@ const NEEDED_FOR_EARLY_STOP = ['total_premium', 'insured_name', 'gender', 'under
 export function allFound(pages: Page[]): boolean {
   const { found, totalComplete } = extract(pages, '')
   // Values from the general rules don't count: a later page may hold a better reading.
-  return !!totalComplete && NEEDED_FOR_EARLY_STOP.every((k) => !!found[k].value && !found[k].guess)
+  return !!totalComplete && NEEDED_FOR_EARLY_STOP.every((k) => !!found[k].value && !found[k].guess && !found[k].learned)
 }
 
 /** A page with fewer text pieces than this is treated as a scan and read with OCR. */

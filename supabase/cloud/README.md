@@ -29,6 +29,9 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      Excel; "Mark completed" needs an up-to-date PI pack. Requests completed earlier keep their PI PDFs (Excel hidden).
    - `1k-upgrade.sql` (19 Nov: automatic deletion of requests overdue for more than 30 days). Running it deletes nothing;
      see step 6c to switch the daily run on.
+   - `1l-upgrade.sql` (20 Nov: teach a new insurer). Keeps the places the PI reader learns from saved comparisons
+     (label words and positions only, never client values). Until you run it, comparisons save as before but nothing
+     is learned.
    - `1h-undo-new-form.sql`: **only if you ran the (withdrawn) `1h-upgrade.sql`** for the new request form. It puts the
      original form's fields back and keeps every request's details. Harmless if you never ran 1h.
 

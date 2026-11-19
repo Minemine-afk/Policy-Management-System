@@ -16,6 +16,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'request.priority': 'Priority changed',
   'document.viewed': 'Document opened',
   'document.pack_saved': 'PI pack saved',
+  'insurer.taught': 'PI reader learned places',
+  'insurer.forgotten': 'Learned places deleted',
   'settings.updated': 'Deadline settings changed',
   'settings.auto_delete': 'Automatic deletion setting changed',
   'request.auto_deleted': 'Overdue request deleted',
@@ -61,6 +63,8 @@ function describe(r: AuditRow, people: Record<string, Profile>): string {
     case 'document.viewed':
       return d.request ? `Opened a document of request ${d.request} (file name removed when the request was deleted)` : `Opened the document “${d.file ?? 'a file'}”`
     case 'document.pack_saved': return `Saved the PI pack ${d.request ? `of request ${d.request}` : `“${d.file ?? 'a file'}”`} (${d.pis ?? '?'} PIs, fingerprint ${String(d.sha256 ?? '').slice(0, 12)}…)`
+    case 'insurer.taught': return `Taught the PI reader ${d.places ?? '?'} new ${Number(d.places) === 1 ? 'place' : 'places'} for ${r.entity_id ?? 'an insurer'} (label words only)`
+    case 'insurer.forgotten': return `Deleted ${d.places ?? '?'} learned ${Number(d.places) === 1 ? 'place' : 'places'} for ${r.entity_id ?? 'an insurer'}`
     case 'settings.updated':
       return `Changed the deadline settings: due ${fmtHours(Number(d.deadline_hours))} after submission, ` +
         `“due soon” ${fmtHours(Number(d.due_soon_hours))} before, pause the clock while sent back: ${yesNo(d.pause_when_sent_back)}`
