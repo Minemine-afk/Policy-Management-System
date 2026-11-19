@@ -20,5 +20,8 @@ On a normal machine, use `supabase start` instead and you don't need any of this
 6. OCR only: `node tests/pi-extract/check-ocr.mjs <scans> ../pi-extract/expected-sg-samples.json` (Node, same models and
    rules; needs `npm i onnxruntime-node pngjs` in `tests/pi-extract` and pdftoppm), or `node tests/pi-extract/check-browser.cjs
    <folder> <expected.json>` (real Chromium through the Vite dev server, with timings and download size).
-7. Excel only: `node tests/pi-extract/check-excel.mjs <folder with up to 3 PIs> out.xlsx` fills the comparison template
+7. PI pack and issue dates: `node tests/pi-extract/check-issue-date.mjs <pi-samples>` (issue date rules),
+   `node tests/pi-extract/check-form-fill.mjs` (particulars from the request form), and
+   `node tests/pi-extract/check-pdf.mjs out.pdf PI1.pdf [PI2.pdf] [PI3.pdf]` (builds the pack; check it with `pdfinfo`).
+8. Excel only: `node tests/pi-extract/check-excel.mjs <folder with up to 3 PIs> out.xlsx` fills the comparison template
    (built by `node web/scripts/make-template.mjs`) and prints the sheet.

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import { isComparisonFile } from '../lib/piExcel'
+import { packState } from '../lib/piPdf'
 import { nameOf, usePeople } from '../lib/people'
 import { usePiMembers } from '../lib/modules'
 import { EVENT_LABEL, dueInfo, fmtDate, fmtDateTime, says } from '../lib/options'
@@ -65,10 +65,12 @@ export default function RequestView() {
   const ops = Object.values(people).filter((p) => p.role === 'ops' && p.active && (!piMembers || piMembers.has(p.id)))
   const move = (to: RequestStatus) => call('change_status', { p_request: r.id, p_to: to })
   const piCount = docs.filter((d) => d.kind === 'pi_output').length
-  const piPdfCount = docs.filter((d) => d.kind === 'pi_output' && d.file_name.toLowerCase().endsWith('.pdf')).length
-  const hasComparison = docs.some((d) => d.kind === 'pi_output' && isComparisonFile(d.file_name))
-  // With two or more PIs, the introducer gets the comparison Excel too, so it must be saved first.
-  const completeBlock = !piCount ? 'Upload a PI first' : piPdfCount >= 2 && !hasComparison ? 'Save the PI comparison to this request first (PI comparison section)' : ''
+  const pack = packState(docs)
+  const piPdfCount = pack.pdfs.length
+  // The introducer gets only the PI pack (the comparison and the PIs in one PDF), so an up-to-date one must be saved.
+  const completeBlock = !piCount ? 'Upload a PI first' : !piPdfCount ? 'Upload the PIs as PDF files: only PDFs go into the PI pack'
+    : !pack.pack ? 'Save the PI pack to this request first (PI comparison section)'
+    : !pack.current ? 'The PIs changed after the PI pack was saved: save the PI pack again' : ''
   const canUploadAttachment = has('introducer') && r.introducer_id === profile.id && ['submitted', 'assigned', 'in_progress', 'sent_back'].includes(r.status)
   const canUploadPi = (mineAssigned || has('bsd')) && ['assigned', 'in_progress'].includes(r.status)
   const introducerSeesPi = !has('introducer') || r.status === 'completed'
@@ -171,12 +173,12 @@ export default function RequestView() {
           <Files title="Attachments" hint="Files the introducer adds to the request." requestId={r.id} kind="attachment" docs={docs}
             canUpload={canUploadAttachment} userId={profile.id} onChange={load} />
           {introducerSeesPi && (
-            <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal. They are compared below; save the comparison to this request. The introducer sees the PIs and the comparison once the request is completed.'}
+            <Files title="Policy illustrations (PIs)" hint={has('introducer') ? undefined : 'Upload the PIs made outside the portal, as PDFs. They are compared below; then save the PI pack. When the request is completed, the introducer gets only the PI pack (the comparison and all the PIs in one PDF), never the separate files or the Excel.'}
               requestId={r.id} kind="pi_output" docs={docs} canUpload={canUploadPi} userId={profile.id} onChange={load} />
           )}
           {(has('ops') || has('bsd')) && piPdfCount > 0 && (
             <>
-              {staffActs && r.status === 'in_progress' && completeBlock && piCount > 0 && <div className="small muted">Save the PI comparison to this request before marking it completed.</div>}
+              {staffActs && r.status === 'in_progress' && completeBlock && piCount > 0 && <div className="small muted">{completeBlock}, before marking it completed.</div>}
               <PiComparison req={r} docs={docs} userId={profile.id} isBsd={has('bsd')} onSaved={load} />
             </>
           )}

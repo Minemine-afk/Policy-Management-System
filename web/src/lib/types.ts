@@ -75,6 +75,10 @@ export interface RequestDocument {
   file_name: string
   uploaded_by: string
   uploaded_at: string
+  // PI pack (1j-upgrade.sql): the one PDF the introducer gets, with the comparison and the PIs it was made from.
+  is_pack?: boolean
+  sha256?: string | null
+  pack_of?: string[] | null
 }
 
 export interface AuditRow {

@@ -15,6 +15,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'request.reopened': 'Request reopened',
   'request.priority': 'Priority changed',
   'document.viewed': 'Document opened',
+  'document.pack_saved': 'PI pack saved',
   'settings.updated': 'Deadline settings changed',
   'user.updated': 'User added or changed',
   'access.user_module': 'Module access changed for a person',
@@ -49,6 +50,7 @@ export function describeAudit(r: AuditRow, people: Record<string, Profile>): str
     case 'request.reopened': return withReason(`Reopened ${req}`, d.reason)
     case 'request.priority': return d.priority === 'urgent' ? `Marked ${req} as urgent` : `Removed the urgent flag from ${req}`
     case 'document.viewed': return `Opened the document “${d.file ?? 'a file'}”`
+    case 'document.pack_saved': return `Saved the PI pack “${d.file ?? 'a file'}” (${d.pis ?? '?'} PIs, fingerprint ${String(d.sha256 ?? '').slice(0, 12)}…)`
     case 'settings.updated':
       return `Changed the deadline settings: due ${fmtHours(Number(d.deadline_hours))} after submission, ` +
         `“due soon” ${fmtHours(Number(d.due_soon_hours))} before, pause the clock while sent back: ${yesNo(d.pause_when_sent_back)}`

@@ -6,8 +6,9 @@
 //    names; the other rows are matched on their label in column A.
 // Amounts follow each policy's own currency: money row labels say "(SGD)" when every PI is in SGD, and each
 // amount carries its currency in its number format, so a USD policy never shows as SGD.
-// ExcelJS is loaded only when someone exports.
+// ExcelJS is loaded in the background when the comparison first shows (preloadExcel), not with the app.
 import { FIELDS, labelWith, type FieldDef } from './piExtract.ts'
+import { issueDateHeading } from './piIssueDate.ts'
 
 export interface ExportColumn {
   fileName: string
@@ -15,6 +16,22 @@ export interface ExportColumn {
   notes: string[]
   edited: Record<string, boolean>
   pages: Record<string, number | null>
+  /** Values the PI doesn't show, filled from the request form. */
+  fromForm?: Record<string, boolean>
+  /** The PI's issue date, DD/MM/YYYY, or "". */
+  issueDate?: string
+}
+
+/** A header value (the insured person, the banner): the first PI that shows it, else a value from the request form.
+ *  differs: the other PIs that show something else. */
+export function headerValue(cols: ExportColumn[], k: string) {
+  const has = (c: ExportColumn) => (c.values[k] ?? '').trim()
+  const pick = cols.find((c) => has(c) && !c.fromForm?.[k]) ?? cols.find(has)
+  const value = pick ? has(pick) : ''
+  const fromForm = !!pick?.fromForm?.[k]
+  const differs = cols.map((c, i) => [i, has(c)] as const)
+    .filter(([i, x]) => x && !cols[i].fromForm?.[k] && x.toLowerCase() !== value.toLowerCase())
+  return { value, fromForm, differs }
 }
 
 /** The comparison file ops save onto a request; the introducer gets it with the PIs. */
@@ -51,8 +68,18 @@ function numFmt(f: FieldDef, cur: string, inLabel: boolean, n: number): string {
   return prefix ? `"${prefix}"${dp}` : dp
 }
 
+let excelLoad: Promise<{ default: typeof import('exceljs') }> | null = null
+/** Loads ExcelJS. Called when the comparison first shows, so the file is fetched while it still matches the page:
+ *  after a site update the old file is gone, and loading it only at export time would fail. */
+export function preloadExcel() {
+  excelLoad ??= import('exceljs').catch((e) => { excelLoad = null; throw e })
+  return excelLoad
+}
+
 export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer): Promise<Blob> {
-  const ExcelJS = (await import('exceljs')).default
+  let ExcelJS: typeof import('exceljs')
+  try { ExcelJS = (await preloadExcel()).default }
+  catch { throw new Error('The site was updated after this page was opened, so the Excel tool could not load. Note any values you changed, refresh the page, then export again.') }
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(template)
   const ws = wb.worksheets[0]
@@ -86,14 +113,21 @@ export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer)
   // Header block and banner: the insured person and the plan asked for are the same in every PI, so PI1's
   // values are used (the first PI that has one). A PI that says something else gets a note.
   const extraNotes: string[] = []
-  const first = (k: string) => cols.find((c) => (c.values[k] ?? '').trim())?.values[k]?.trim() ?? ''
+  const first = (k: string) => headerValue(cols, k).value
   for (const k of HEADER_KEYS) {
     const f = FIELDS.find((x) => x.key === k)!
-    const v = first(k)
-    ws.getCell(rowOf[k], 1).value = `${f.label}: ${v}`.trim()
-    const differ = cols.map((c, i) => [i, (c.values[k] ?? '').trim()] as const).filter(([, x]) => x && x.toLowerCase() !== v.toLowerCase())
-    for (const [i, x] of differ) extraNotes.push(`PI${i + 1}: ${f.label} is "${x}" in this PI (the header shows "${v}").`)
+    const h = headerValue(cols, k)
+    ws.getCell(rowOf[k], 1).value = `${f.label}: ${h.value}${h.fromForm ? ' (from request form)' : ''}`.trim()
+    for (const [i, x] of h.differs) extraNotes.push(`PI${i + 1}: ${f.label} is "${x}" in this PI (the header shows "${h.value}").`)
   }
+  // The PI issue date, top right.
+  const heading = issueDateHeading(cols.map((c) => c.issueDate ?? ''))
+  const right = Math.max(...colOf.slice(0, Math.max(cols.length, 1)).filter(Boolean), 2)
+  const dateCell = ws.getCell(1, right)
+  dateCell.value = heading.text
+  dateCell.font = { bold: true }
+  dateCell.alignment = { horizontal: 'right' }
+  if (heading.note) extraNotes.push(heading.note)
   const sa = first('death_sa'), saCur = cols.find((c) => (c.values.death_sa ?? '').trim())?.values.currency ?? common
   const saN = toNumber(sa)
   if (bannerSa) ws.getCell(bannerSa, 1).value = `Sum Assured: ${saN !== null ? `${saCur ? saCur + ' ' : ''}${withCommas(saN)}` : sa}`.trim()
@@ -137,10 +171,10 @@ export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer)
 
   // Audit trail: where each value came from and what ops changed.
   const src = wb.addWorksheet('Sources')
-  src.addRow(['Column', 'File', 'Field', 'Value', 'Page found on', 'Changed by hand'])
+  src.addRow(['Column', 'File', 'Field', 'Value', 'Page found on', 'Changed by hand', 'From request form'])
   src.getRow(1).font = { bold: true }
   cols.forEach((c, i) => FIELDS.forEach((f) => src.addRow([
-    `PI${i + 1}`, c.fileName, labelWith(f, (c.values.currency ?? '').trim().toUpperCase()), c.values[f.key] ?? '', c.pages[f.key] ?? '', c.edited[f.key] ? 'Yes' : '',
+    `PI${i + 1}`, c.fileName, labelWith(f, (c.values.currency ?? '').trim().toUpperCase()), c.values[f.key] ?? '', c.pages[f.key] ?? '', c.edited[f.key] ? 'Yes' : '', c.fromForm?.[f.key] ? 'Yes' : '',
   ])))
   src.columns.forEach((col) => { col.width = 24 })
 
