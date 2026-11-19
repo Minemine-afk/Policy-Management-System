@@ -17,6 +17,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'document.viewed': 'Document opened',
   'document.pack_saved': 'PI pack saved',
   'settings.updated': 'Deadline settings changed',
+  'settings.auto_delete': 'Automatic deletion setting changed',
+  'request.auto_deleted': 'Overdue request deleted',
   'user.updated': 'User added or changed',
   'access.user_module': 'Module access changed for a person',
   'access.role_module': 'Module default changed for a role',
@@ -29,6 +31,13 @@ const withReason = (s: string, reason: unknown) => (reason ? `${s}. Reason: “$
 
 /** One audit entry as a plain-English sentence, e.g. "Assigned request PI-00001 to Omar Ops". */
 export function describeAudit(r: AuditRow, people: Record<string, Profile>): string {
+  const s = describe(r, people)
+  // When a long-overdue request is deleted, free text (reasons, file names) is taken out of its earlier entries.
+  return r.entity === 'pi_request' && (r.details as Record<string, unknown> | null)?.details_removed
+    ? `${s} (reason removed when the request was deleted)` : s
+}
+
+function describe(r: AuditRow, people: Record<string, Profile>): string {
   const d = (r.details ?? {}) as Record<string, unknown>
   const req = r.entity_id ? `request ${r.entity_id}` : 'a request'
   const person = (id: unknown) => {
@@ -49,11 +58,23 @@ export function describeAudit(r: AuditRow, people: Record<string, Profile>): str
     case 'request.removed': return withReason(`Removed ${req}`, d.reason)
     case 'request.reopened': return withReason(`Reopened ${req}`, d.reason)
     case 'request.priority': return d.priority === 'urgent' ? `Marked ${req} as urgent` : `Removed the urgent flag from ${req}`
-    case 'document.viewed': return `Opened the document “${d.file ?? 'a file'}”`
-    case 'document.pack_saved': return `Saved the PI pack “${d.file ?? 'a file'}” (${d.pis ?? '?'} PIs, fingerprint ${String(d.sha256 ?? '').slice(0, 12)}…)`
+    case 'document.viewed':
+      return d.request ? `Opened a document of request ${d.request} (file name removed when the request was deleted)` : `Opened the document “${d.file ?? 'a file'}”`
+    case 'document.pack_saved': return `Saved the PI pack ${d.request ? `of request ${d.request}` : `“${d.file ?? 'a file'}”`} (${d.pis ?? '?'} PIs, fingerprint ${String(d.sha256 ?? '').slice(0, 12)}…)`
     case 'settings.updated':
       return `Changed the deadline settings: due ${fmtHours(Number(d.deadline_hours))} after submission, ` +
         `“due soon” ${fmtHours(Number(d.due_soon_hours))} before, pause the clock while sent back: ${yesNo(d.pause_when_sent_back)}`
+    case 'settings.auto_delete':
+      return d.auto_delete_on
+        ? `Switched automatic deletion on: open requests overdue for more than ${d.auto_delete_days} days are deleted`
+        : `Switched automatic deletion off (setting kept: ${d.auto_delete_days} days)`
+    case 'request.auto_deleted': {
+      const status = STATUS_LABEL[String(d.status)] ?? String(d.status ?? '')
+      const files = Number(d.files ?? 0)
+      return `Deleted ${req} for good${r.actor_id ? ' (Delete now)' : ' automatically'}: open (“${status}”) and ` +
+        `${d.days_overdue} days overdue, more than the ${d.after_days} days allowed. Its client details, comments, history and ` +
+        `${files === 1 ? '1 file' : `${files} files`} were deleted`
+    }
     case 'user.updated': {
       const role = d.role ? ROLE_LABEL[String(d.role)] ?? String(d.role) : 'no role'
       return `Saved the account of ${person(r.entity_id)}: role ${role}, ${d.active === false ? 'deactivated' : 'active'}`

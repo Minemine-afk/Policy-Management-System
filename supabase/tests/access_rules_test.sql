@@ -526,4 +526,106 @@ do $$ begin
   raise notice 'ok: module access';
 end $$;
 
+-- Automatic deletion of long-overdue requests (19 Nov 2026)
+reset role;
+do $$
+declare intro uuid := '00000000-0000-0000-0000-000000000001'; ops uuid := '00000000-0000-0000-0000-000000000003';
+begin
+  insert into pi_requests (id, ref, introducer_id, status, assignee_id, age_band, gender, smoker, coverage_term, sum_assured_band, due_at, paused_at, completed_at) values
+    ('90000000-0000-0000-0000-000000000001', 'PI-90001', intro, 'in_progress', ops, '30 to 34', 'Male', false, 'x', 'y', now() - interval '31 days', null, null),
+    ('90000000-0000-0000-0000-000000000002', 'PI-90002', intro, 'submitted',  null, '30 to 34', 'Male', false, 'x', 'y', now() - interval '45 days', null, null),
+    ('90000000-0000-0000-0000-000000000003', 'PI-90003', intro, 'in_progress', ops, '30 to 34', 'Male', false, 'x', 'y', now() - interval '29 days', null, null),
+    ('90000000-0000-0000-0000-000000000004', 'PI-90004', intro, 'completed',  ops,  '30 to 34', 'Male', false, 'x', 'y', now() - interval '90 days', null, now() - interval '80 days'),
+    ('90000000-0000-0000-0000-000000000005', 'PI-90005', intro, 'removed',    null, '30 to 34', 'Male', false, 'x', 'y', now() - interval '90 days', null, null),
+    ('90000000-0000-0000-0000-000000000006', 'PI-90006', intro, 'sent_back',  ops,  '30 to 34', 'Male', false, 'x', 'y', now() - interval '60 days', now() - interval '59 days', null),
+    ('90000000-0000-0000-0000-000000000007', 'PI-90007', intro, 'sent_back',  ops,  '30 to 34', 'Male', false, 'x', 'y', now() - interval '40 days', null, null);
+  insert into request_clients (request_id, owner_id, client_name, contact)
+    select id, intro, '[Sample] Client ' || ref, '9123 4567' from pi_requests where ref like 'PI-900%';
+  insert into request_comments (request_id, author_id, body) values ('90000000-0000-0000-0000-000000000001', intro, 'Client [Sample] Zed prefers 25 years');
+  insert into request_documents (id, request_id, kind, storage_path, file_name, uploaded_by) values
+    ('91000000-0000-0000-0000-000000000001', '90000000-0000-0000-0000-000000000001', 'attachment', '90000000-0000-0000-0000-000000000001/zed-form.pdf', 'Zed form.pdf', intro),
+    ('91000000-0000-0000-0000-000000000002', '90000000-0000-0000-0000-000000000001', 'pi_output',  '90000000-0000-0000-0000-000000000001/PI1.pdf', 'PI1.pdf', ops),
+    ('91000000-0000-0000-0000-000000000004', '90000000-0000-0000-0000-000000000004', 'pi_output',  '90000000-0000-0000-0000-000000000004/PI1.pdf', 'PI1.pdf', ops);
+  insert into storage.objects (bucket_id, name) select 'request-docs', storage_path from request_documents where id::text like '91000000%';
+  insert into notifications (user_id, request_id, kind, message) values (ops, '90000000-0000-0000-0000-000000000001', 'overdue', 'PI-90001 is overdue');
+  insert into audit_log (actor_id, action, entity, entity_id, details) values
+    (ops, 'request.sent_back', 'pi_request', 'PI-90001', '{"reason":"Zed''s age?"}'),
+    (intro, 'document.viewed', 'request_document', '91000000-0000-0000-0000-000000000001', '{"file":"Zed form.pdf"}'),
+    (ops, 'document.viewed', 'request_document', '91000000-0000-0000-0000-000000000004', '{"file":"PI1.pdf"}');
+end $$;
+set role authenticated;
+
+-- Only an admin sees the preview, changes the setting or runs it; nobody can call the internal functions.
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select * from preview_overdue_deletion()$$, 'Only an admin');
+select pg_temp.expect_error($$select * from run_overdue_deletion()$$, 'Only an admin');
+select pg_temp.expect_error($$select update_auto_delete(true, 1)$$, 'Only an admin');
+select pg_temp.expect_error($$select * from delete_overdue_requests()$$, 'permission denied');
+select pg_temp.expect_error($$select * from overdue_requests_to_delete()$$, 'permission denied');
+select pg_temp.expect_error($$select * from files_to_clean(10)$$, 'permission denied');
+select pg_temp.expect_error($$select files_cleaned('request-docs', '{x}')$$, 'permission denied');
+select pg_temp.expect_error($$select * from storage_cleanup_queue$$, 'permission denied');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select pg_temp.expect_error($$select update_auto_delete(true, 0)$$, 'between 1 and 365');
+do $$ begin
+  if (select array_agg(ref order by ref) from preview_overdue_deletion()) <> '{PI-90001,PI-90002,PI-90007}' then
+    raise exception 'preview should list exactly the open requests overdue > 30 days, got %', (select array_agg(ref order by ref) from preview_overdue_deletion());
+  end if;
+  if (select files from preview_overdue_deletion() where ref = 'PI-90001') <> 2 then raise exception 'preview file count wrong'; end if;
+  if (select days_overdue from preview_overdue_deletion() where ref = 'PI-90002') <> 45 then raise exception 'preview days overdue wrong'; end if;
+  raise notice 'ok: preview lists open requests overdue > 30 days (not completed, removed, paused or 29 days)';
+end $$;
+-- Switched off: nothing is deleted, and run now refuses.
+select update_auto_delete(false, 30);
+select pg_temp.expect_error($$select * from run_overdue_deletion()$$, 'switched off');
+reset role;
+do $$ begin
+  if exists (select 1 from delete_overdue_requests()) then raise exception 'deleted while switched off'; end if;
+  if (select count(*) from pi_requests where ref like 'PI-900%') <> 7 then raise exception 'switched off still deleted'; end if;
+end $$;
+set role authenticated;
+select update_auto_delete(true, 30);
+-- The daily schedule runs it as the database (no signed-in user).
+reset role;
+select pg_temp.as_user(null);
+do $$ declare got text[]; begin
+  select array_agg(ref order by ref) into got from delete_overdue_requests();
+  if got <> '{PI-90001,PI-90002,PI-90007}' then raise exception 'deleted the wrong requests: %', got; end if;
+  if (select array_agg(ref order by ref) from pi_requests where ref like 'PI-900%') <> '{PI-90003,PI-90004,PI-90005,PI-90006}' then raise exception 'kept the wrong requests'; end if;
+  if exists (select 1 from request_clients where request_id in ('90000000-0000-0000-0000-000000000001', '90000000-0000-0000-0000-000000000002', '90000000-0000-0000-0000-000000000007')) then raise exception 'client details kept'; end if;
+  if exists (select 1 from request_comments where request_id = '90000000-0000-0000-0000-000000000001') then raise exception 'comments kept'; end if;
+  if exists (select 1 from request_documents where request_id = '90000000-0000-0000-0000-000000000001') then raise exception 'file records kept'; end if;
+  if exists (select 1 from notifications where request_id = '90000000-0000-0000-0000-000000000001') then raise exception 'notifications kept'; end if;
+  if exists (select 1 from request_events where request_id = '90000000-0000-0000-0000-000000000001') then raise exception 'timeline kept'; end if;
+  if (select count(*) from storage.objects where name like '90000000-0000-0000-0000-000000000001/%') <> 2 then raise exception 'files must stay for the Storage API (no SQL delete)'; end if;
+  if (select array_agg(path order by path) from storage_cleanup_queue) <> '{90000000-0000-0000-0000-000000000001/PI1.pdf,90000000-0000-0000-0000-000000000001/zed-form.pdf}' then
+    raise exception 'files not queued for removal: %', (select array_agg(path) from storage_cleanup_queue);
+  end if;
+  if (select count(*) from audit_log where action = 'request.auto_deleted' and actor_id is null) <> 3 then raise exception 'one system audit entry per deletion expected'; end if;
+  if exists (select 1 from audit_log where details::text ~ 'Zed|Client PI-900|9123') then raise exception 'client text left in the audit log: %', (select array_agg(action || ' ' || details::text) from audit_log where details::text ~ 'Zed|Client PI-900|9123'); end if;
+  if (select details ->> 'request' from audit_log where entity_id = '91000000-0000-0000-0000-000000000001') <> 'PI-90001' then raise exception 'document audit entry not marked'; end if;
+  if (select details ->> 'file' from audit_log where entity_id = '91000000-0000-0000-0000-000000000004') <> 'PI1.pdf' then raise exception 'audit of a kept request was changed'; end if;
+  if (select (details ->> 'days_overdue')::int from audit_log where action = 'request.auto_deleted' and entity_id = 'PI-90002') <> 45 then raise exception 'audit days overdue wrong'; end if;
+  if exists (select 1 from delete_overdue_requests()) then raise exception 'second run should delete nothing'; end if;
+  raise notice 'ok: overdue requests deleted with client details, comments, files queued; audit has no client text';
+end $$;
+-- The Edge Function (service role) takes the queue and reports back.
+set role service_role;
+do $$ begin
+  if (select count(*) from files_to_clean(10)) <> 2 then raise exception 'service role should see 2 queued files'; end if;
+  perform files_cleaned('request-docs', '{90000000-0000-0000-0000-000000000001/PI1.pdf}', 'Storage API 500: try later');
+  if (select attempts from storage_cleanup_queue where path like '%PI1.pdf') <> 1 then raise exception 'failure not counted'; end if;
+  perform files_cleaned('request-docs', array(select path from files_to_clean(10)));
+  if exists (select 1 from storage_cleanup_queue) then raise exception 'queue not emptied'; end if;
+  raise notice 'ok: clean-up queue for the Edge Function';
+end $$;
+reset role;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+do $$ begin
+  if files_waiting_for_cleanup() <> 0 then raise exception 'admin count wrong'; end if;
+  if (select count(*) from audit_log where action = 'settings.auto_delete') <> 2 then raise exception 'setting changes not audited'; end if;
+  raise notice 'ok: automatic deletion of long-overdue requests';
+end $$;
+
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

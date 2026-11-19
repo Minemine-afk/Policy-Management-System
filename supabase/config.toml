@@ -435,3 +435,8 @@ skip_nonce_check = false
 # Lets bsd create users from the Admin page (supabase/functions/admin-create-user).
 [functions.admin-create-user]
 verify_jwt = true
+
+# Removes the files of requests deleted as long overdue (supabase/functions/cleanup-deleted-files).
+# Takes no input and only removes files already queued by the database, so the schedule can call it without a key.
+[functions.cleanup-deleted-files]
+verify_jwt = false
