@@ -27,6 +27,16 @@ check('mismatch notes', r.notes, ['The PI says Female, but the request form says
 r = fillFromForm(...Object.values(pi({ insured_name: '', gender: 'Female', underwriting_class: '', date_of_birth: '' })), { gender: 'Male', smoker: false, age_band: '' })
 check('name follows PI gender', r.values.insured_name, 'Mrs VIP')
 
+// Date of birth from the form (requests from 19 Nov 2026) when the PI has none; a different PI date gets a note
+r = fillFromForm(...Object.values(pi({ insured_name: '', gender: '', underwriting_class: '', date_of_birth: '' })), { gender: 'Male', smoker: false, age_band: '35 to 39', date_of_birth: '1990-05-17' })
+check('DOB from form', [r.values.date_of_birth, isFromForm(r.found.date_of_birth)], ['17/05/1990', true])
+check('no age band note when the DOB is known', r.notes, [])
+r = fillFromForm(...Object.values(pi({ insured_name: 'VIP', gender: 'Male', underwriting_class: 'Non-Smoker', date_of_birth: '24/08/1980' })), { gender: 'Male', smoker: false, age_band: '45 to 49', date_of_birth: '1980-08-25' })
+check('PI DOB kept', [r.values.date_of_birth, isFromForm(r.found.date_of_birth)], ['24/08/1980', false])
+check('DOB mismatch note', r.notes, ["The PI's date of birth is 24/08/1980, but the request form says 25/08/1980."])
+r = fillFromForm(...Object.values(pi({ insured_name: 'VIP', gender: 'Male', underwriting_class: 'Non-Smoker', date_of_birth: '24/08/1980' })), { gender: 'Male', smoker: false, age_band: '45 to 49', date_of_birth: '1980-08-24' })
+check('same DOB, no note', r.notes, [])
+
 // The header prefers a PI's own value over a form value
 const cols = [
   { values: { gender: 'Male' }, fromForm: { gender: true } },

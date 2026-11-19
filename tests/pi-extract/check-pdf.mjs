@@ -14,7 +14,7 @@ const { buildPack, sha256 } = await import(path.join(here, '../../web/src/lib/pi
 
 const [out, ...files] = process.argv.slice(2)
 if (!out || !files.length) { console.error('Usage: node tests/pi-extract/check-pdf.mjs out.pdf PI1.pdf [PI2.pdf] [PI3.pdf]'); process.exit(2) }
-const form = { gender: process.env.FORM_GENDER ?? 'Male', smoker: process.env.FORM_SMOKER === 'yes', age_band: '45 to 49' }
+const form = { gender: process.env.FORM_GENDER ?? 'Male', smoker: process.env.FORM_SMOKER === 'yes', age_band: '45 to 49', date_of_birth: process.env.FORM_DOB ?? '1980-08-24' }
 const cols = [], pis = []
 for (const f of files) {
   const data = fs.readFileSync(f)

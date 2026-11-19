@@ -1,15 +1,19 @@
 // Client particulars the PI does not show are filled from the introducer's request form (Kumar, 12 Nov 2026).
-// Only the profile fields ops and bsd can already see on the request are used: gender, smoker and age band.
+// Only the profile fields ops and bsd can already see on the request are used: gender, smoker and date of birth
+// (or the age band, on requests made before the form asked for the date of birth).
 // The client's real name is never used (only the introducer can see it); like the PIs themselves, the name
-// becomes "Mr VIP" or "Mrs VIP" from the gender. The form has no date of birth or residency.
+// becomes "Mr VIP" or "Mrs VIP" from the gender. The form has no residency.
 import type { Found } from './piExtract.ts'
 
-export interface FormProfile { gender: string; smoker: boolean; age_band: string }
+/** date_of_birth: YYYY-MM-DD, or empty on older requests. */
+export interface FormProfile { gender: string; smoker: boolean; age_band: string; date_of_birth?: string | null }
 
 /** Marks a value that came from the request form, not the PI (the "line" of a Found). */
 export const FROM_FORM = 'From the request form'
 export const isFromForm = (f: Found | undefined) => f?.line === FROM_FORM
 
+/** A PI's date of birth as DD/MM/YYYY when it is written with numbers ("24/08/1980", "24-8-1980"), else "". */
+const dmy = (s: string) => { const m = (s ?? '').trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/); return m ? `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3]}` : '' }
 const norm = (s: string) => s.trim().toLowerCase().replace(/[\s-]+/g, '')
 
 export function fillFromForm(found: Record<string, Found>, values: Record<string, string>, form: FormProfile) {
@@ -26,6 +30,9 @@ export function fillFromForm(found: Record<string, Found>, values: Record<string
     const g = (v.gender ?? '').trim().toLowerCase()
     if (g === 'male' || g === 'female') put('insured_name', g === 'male' ? 'Mr VIP' : 'Mrs VIP')
   }
-  if (blank('date_of_birth') && form.age_band) notes.push(`Client age band on the request form: ${form.age_band}.`)
+  const formDob = (form.date_of_birth ?? '').replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
+  if (blank('date_of_birth') && /^\d{2}\/\d{2}\/\d{4}$/.test(formDob)) put('date_of_birth', formDob)
+  else if (blank('date_of_birth') && form.age_band) notes.push(`Client age band on the request form: ${form.age_band}.`)
+  else if (formDob && dmy(v.date_of_birth) && dmy(v.date_of_birth) !== formDob) notes.push(`The PI's date of birth is ${v.date_of_birth}, but the request form says ${formDob}.`)
   return { found: f, values: v, notes }
 }

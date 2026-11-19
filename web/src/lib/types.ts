@@ -22,6 +22,7 @@ export interface PiRequest {
   plan_category: string
   product: string
   age_band: string
+  date_of_birth?: string | null   // YYYY-MM-DD; requests before 19 Nov 2026 have only the age band
   gender: string
   smoker: boolean
   coverage_term: string
