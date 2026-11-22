@@ -9,13 +9,14 @@ import { FIELDS, type Found, type Line, type Page, type TextItem } from './piExt
 
 /** One remembered place. `how`: 'beside' = the value is `offset` pieces after the label on the same line (0 = in the
  *  label's own piece, after it); 'under' = the value is the first value under the column heading `label`;
- *  'row' = the value is in a year-by-year table under the column heading `label`, on the row given by `row`.
+ *  'row' = the value is in a year-by-year table under the column heading `label`, on the row given by `row`;
+ *  'na' = ops set this field to NA for this plan (no such rider, no cash value, no campaign); `label` is "na".
  *  `factor`: the PI shows the value divided by this (12 = a monthly premium that ops turned into a yearly one).
  *  `cut`: for words, the character the value ends at in its piece ("," in "Client Quote, Male, 40"), or "". */
 export interface LearnedRule {
   insurer: string
   field: string
-  how: 'beside' | 'under' | 'row'
+  how: 'beside' | 'under' | 'row' | 'na'
   label: string
   offset: number
   factor: number
@@ -74,6 +75,10 @@ const stripLead = (s: string) => s.replace(/^\s*[:–-]\s*/, '')
 const isPunct = (s: string) => /^[\s:–\-.]*$/.test(s)
 const normWords = (s: string) => s.replace(/\s+/g, ' ').replace(/\s+([,.])/g, '$1').trim()
 export const insurerKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+/** insurerKey, OCR-tolerant: "Term (Il)" and "Term (II)" give the same key. */
+const fuzzyKey = (s: string) => insurerKey(s).replace(/[il1]/g, 'i').replace(/0/g, 'o')
+/** Fields ops may set to NA for a plan, and that are remembered as such. */
+export const NA_FIELDS = ['accidental_death', 'tpd_sa', 'tpd_premium', 'ci_sa', 'ci_premium', 'cash_value', 'campaigns']
 
 const NUM_IN = /(?:^|[\s($:])(?:S\$|US\$|C\$|A\$|HK\$|RM|SGD|USD|MYR|CAD|\$)?\s?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)(?![\d,]|\.\d)/gi
 /** Every number in a piece of text. */
@@ -139,6 +144,8 @@ function rowYear(items: TextItem[], cell: TextItem): number | null {
 function readRule(pages: Page[], r: LearnedRule, ctx: ReadContext = {}): Hit[] {
   const kind = KINDS[r.field]
   const out: Hit[] = []
+  // NA needs no place in the PI; it holds only on the same plan (readLearned checks the plan is named in the PI).
+  if (r.how === 'na') return [{ value: 'NA', page: 0, line: `Ops set this to NA for ${r.plan || 'this plan'} before` }]
   if (r.how === 'beside') {
     for (const p of pages) for (const l of p.lines) {
       const ps = parts(l)
@@ -225,7 +232,8 @@ export function readLearned(pages: Page[], rules: LearnedRule[], insurerFound: s
   if (!key) return { found, insurer: '', conflicts }
   const mine = rules.filter((r) => insurerKey(r.insurer) === key)
   const text = ' ' + insurerKey(pages.flatMap((p) => p.lines.map((l) => l.text)).join(' ')) + ' '
-  const planNamed = (plan: string) => insurerKey(plan).length >= 3 && text.includes(` ${insurerKey(plan)} `)
+  const fuzzyText = ' ' + fuzzyKey(text) + ' '
+  const planNamed = (plan: string) => fuzzyKey(plan).length >= 3 && fuzzyText.includes(` ${fuzzyKey(plan)} `)
   // The policy term first: 'row' places of other fields find their row with it.
   const fields = [...new Set(mine.map((r) => r.field))].sort((a, b) => +(b === 'policy_term') - +(a === 'policy_term'))
   const here = { ...ctx }
@@ -234,7 +242,8 @@ export function readLearned(pages: Page[], rules: LearnedRule[], insurerFound: s
   for (const field of fields) {
     const all = mine.filter((r) => r.field === field)
     const places = all.filter((r, i) => all.findIndex((x) => placeKey(x) === placeKey(r) && insurerKey(x.plan) === insurerKey(r.plan)) === i)
-    const read = places.map((r) => ({ r, hits: readRule(pages, r, here) })).filter((x) => x.hits.length)
+    // An NA counts only on a PI of the plan ops set it for.
+    const read = places.filter((r) => r.how !== 'na' || (!!r.plan && planNamed(r.plan))).map((r) => ({ r, hits: readRule(pages, r, here) })).filter((x) => x.hits.length)
     const hits = read.flatMap((x) => x.hits)
     const values = [...new Set(hits.map((h) => h.value))]
     // One place alone may be a heading that means something else in this PI (another plan from the same insurer),
@@ -245,7 +254,7 @@ export function readLearned(pages: Page[], rules: LearnedRule[], insurerFound: s
       if (!samePlan || places.filter((p) => p.plan === r.plan).length > 1) continue
     }
     if (values.length === 1) {
-      found[field] = { value: values[0], page: hits[0].page, line: hits[0].line, learned: true, corrects: read.some((x) => x.r.corrects) }
+      found[field] = { value: values[0], page: hits[0].page || null, line: hits[0].line, learned: true, corrects: read.some((x) => x.r.corrects) }
       if (field === 'policy_term' && !here.policyTerm) here.policyTerm = values[0]
     }
     else if (values.length > 1) conflicts.push(FIELDS.find((f) => f.key === field)?.label ?? field)
@@ -383,6 +392,15 @@ export function learn(pages: Page[], values: Record<string, string>, found: Reco
   if (!insurer.trim()) return []
   const personal = [values.insured_name, values.date_of_birth].filter(Boolean)
   const out: LearnedRule[] = []
+  const plan = (values.policy_name ?? '').trim()
+  // NA (no such rider, no cash value, no campaign): remembered for this plan, unless the reader gave NA itself.
+  for (const field of NA_FIELDS) {
+    if (!plan || !/^(?:NA|N\/A|-)$/i.test((values[field] ?? '').trim())) continue
+    const f = found[field]
+    if (f?.value === 'NA' && !f.guess && !(f as { learned?: boolean }).learned) continue
+    const corrects = !!f?.value && f.value !== 'NA' && !f.guess && !(f as { learned?: boolean }).learned
+    out.push({ insurer: insurer.trim(), plan, field, how: 'na', label: 'na', offset: 0, factor: 1, cut: '', ...(corrects ? { corrects: true } : {}) })
+  }
   for (const field of Object.keys(KINDS)) {
     const value = (values[field] ?? '').trim()
     if (!value || /^(?:NA|N\/A|-)$/i.test(value)) continue
@@ -417,13 +435,25 @@ export function applyLearned(found: Record<string, Found>, pages: Page[], rules:
     const now = out[k]
     if (now?.value === f.value) continue
     // The reader's own value stays, unless ops corrected that field for this insurer before.
-    if (now?.value && !now.guess && !f.corrects) continue
-    if (now?.value && !now.guess) replaced.push(`${FIELDS.find((x) => x.key === k)?.label ?? k} (the reader gave ${now.value})`)
+    if (now?.value && !now.guess && !now.check && !f.corrects) continue
+    if (now?.value && !now.guess && !now.check) replaced.push(`${FIELDS.find((x) => x.key === k)?.label ?? k} (the reader gave ${now.value})`)
     const { corrects: _c, ...keep } = f
     out[k] = keep
     used++
   }
+  // Names as ops wrote them before: an OCR spelling ("Term (Il)") of a plan name ops saved for this insurer
+  // ("Term (II)") is put back to theirs.
+  const mineRules = rules.filter((r) => insurerKey(r.insurer) === insurerKey(insurer))
+  const fixed: string[] = []
+  const pn = out.policy_name
+  if (pn?.value) {
+    const known = [...new Set(mineRules.map((r) => r.plan).filter(Boolean))].find((p) => p !== pn.value && fuzzyKey(p) === fuzzyKey(pn.value))
+    if (known) { fixed.push(`Policy Name (read as ${pn.value})`); out.policy_name = { ...pn, value: known, line: `${pn.line ?? ''} (spelled as ops saved it for ${insurer})` } }
+  }
+  const ins = out.insurer
+  if (ins?.value && insurer && ins.value !== insurer && fuzzyKey(ins.value) === fuzzyKey(insurer)) { fixed.push(`Insurer (read as ${ins.value})`); out.insurer = { ...ins, value: insurer } }
   const notes: string[] = []
+  if (fixed.length) notes.push(`Spelled as ops saved before for ${insurer}: ${fixed.join(', ')}.`)
   if (used) notes.push(`${used} value${used === 1 ? '' : 's'} read from places ops taught for ${insurer} (tagged "Learned"). Please check them.`)
   if (replaced.length) notes.push(`Ops corrected these for ${insurer} before, so the taught place was used instead of the reader's rules: ${replaced.join(', ')}.`)
   if (conflicts.length) notes.push(`Places taught for ${insurer} gave different values for ${conflicts.join(', ')}, so ${conflicts.length === 1 ? 'it was' : 'they were'} left blank.`)

@@ -15,6 +15,11 @@ export interface OcrModels {
   rec: Runner
   /** The recognition model's characters, in order (index 0 of the model output is "no character"). */
   chars: string[]
+  /** A second recognition model (loaded only when needed) that reads again the lines the first was unsure of;
+   *  the surer reading wins. */
+  second?: () => Promise<{ rec: Runner; chars: string[] }>
+  /** Lines read with less confidence than this are read again by `second` (0 to 1). */
+  rereadBelow?: number
 }
 
 export interface OcrOptions {
@@ -210,6 +215,8 @@ export async function recognize(img: Gray, boxes: Box[], run: Runner, chars: str
         } else if (best && best === prev && got.length) got[got.length - 1].x1 = toX((t + 1) * step)
         prev = best
       }
+      // PIs are in English: an accented letter (the Latin model's "Índonesia") is read as its plain letter.
+      for (const c of got) if (c.ch > '~') c.ch = c.ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '') || c.ch
       const text = got.map((c) => c.ch).join('')
       if (text.trim()) out.push({ box: b, text, conf: confSum / got.length, chars: got })
     })
@@ -229,7 +236,17 @@ export async function ocrImage(page: Gray, models: OcrModels, opt: OcrOptions): 
   opt.onStep?.(0.1)
   const boxes = await detect(img, models.det, opt.detMaxSide)
   opt.onStep?.(0.3)
-  const reads = await recognize(img, boxes, models.rec, models.chars, (f) => opt.onStep?.(0.3 + 0.7 * f))
+  const reads = await recognize(img, boxes, models.rec, models.chars, (f) => opt.onStep?.(0.3 + 0.6 * f))
+  // A second opinion on the lines the first model was unsure of (a blurred digit, "II" read as "Il").
+  const unsure = models.second ? reads.filter((r) => r.conf < (models.rereadBelow ?? 0.9)) : []
+  if (unsure.length) {
+    const two = await models.second!()
+    const again = await recognize(img, unsure.map((r) => r.box), two.rec, two.chars, (f) => opt.onStep?.(0.9 + 0.1 * f))
+    for (const a of again) {
+      const i = reads.findIndex((r) => r.box === a.box)
+      if (i >= 0 && a.conf > reads[i].conf) reads[i] = a
+    }
+  }
   const S = opt.scale
   const words: TextItem[] = []
   for (const r of reads) {
@@ -265,10 +282,22 @@ export function phrases(r: Read): { str: string; x0: number; x1: number }[] {
   }
   if (cur) out.push(cur)
   return out.map((p, i) => ({
-    str: p.str.trim(),
+    str: fixDigits(p.str.trim()),
     x0: i === 0 ? Math.max(r.box.x0, p.first - pitch) : p.first - pitch / 2,
     x1: i === out.length - 1 ? Math.min(r.box.x1, p.last + pitch) : p.last + pitch / 2,
   }))
+}
+
+/** OCR reads a digit as the letter that looks like it inside a number ("S$5,oo0", "1O0,000", "2,5l3"). In a word that
+ *  is a number apart from such letters (at least two real digits, and a letter only between or next to digits), the
+ *  letters are put back as digits. Words with other letters ("Plan 5", "Total") are left alone. */
+export function fixDigits(s: string): string {
+  return s.replace(/(^|[\s(:])((?:S\$|\$)?)([0-9oOlI|,.]+)(?=$|[\s)%])/g, (m, pre: string, cur: string, body: string) => {
+    if ((body.match(/\d/g) ?? []).length < 2 || !/[oOlI|]/.test(body) || !/^[\doOlI|]+(?:[,.][\doOlI|]+)*$/.test(body)) return m
+    // Only a number's shape: groups of three after a comma, or two decimals.
+    const fixed = body.replace(/[oO]/g, '0').replace(/[lI|]/g, '1')
+    return /^\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?$|^\d+(?:\.\d{1,2})?$/.test(fixed) ? pre + cur + fixed : m
+  })
 }
 
 /** pdf.js gives phrases ("Sum Assured (S$)", "1 Year"); OCR gives single words. Words on one row that are

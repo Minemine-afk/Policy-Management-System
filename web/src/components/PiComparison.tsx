@@ -21,7 +21,22 @@ interface Column {
   issueFound: { value: string; page: number; line: string } | null
   /** The PI as read, kept in memory only, to learn from when the comparison is saved. */
   pages?: Page[]
+  /** Pages read with OCR (scanned): values from them are tagged "Check". */
+  ocrPages?: number[]
   error?: string
+}
+
+/** How sure the reader is of a cell, so ops check only the uncertain ones. Sure = the reader's rules for this layout,
+ *  from the PDF's own text, passing its cross-checks; Learned = a place ops taught; Check = anything else (general
+ *  rules, OCR, a failed cross-check, a calculation). Nothing for a value typed by hand or taken from the request form. */
+function confidence(fd: Found | undefined, ocrPages: number[] | undefined): { level: 'Sure' | 'Learned' | 'Check'; why: string } | null {
+  if (!fd?.value) return null
+  if (fd.learned) return { level: 'Learned', why: 'Read from a place ops taught for this insurer when they saved an earlier comparison. Check it against the PI.' }
+  if (fd.guess) return { level: 'Check', why: "This PI's layout is new to the reader: this value was read by general rules. Check it against the PI." }
+  if (fd.check) return { level: 'Check', why: 'This value fails a cross-check (see the notes). Check it against the PI.' }
+  if (/^Calculated:/.test(fd.line ?? '')) return { level: 'Check', why: 'Calculated from other values, as the PI does not show it. Check it.' }
+  if (fd.page && ocrPages?.includes(fd.page)) return { level: 'Check', why: `Read with OCR from scanned page ${fd.page}. Check it against the PI.` }
+  return { level: 'Sure', why: "Read by the reader's rules for this layout from the PDF's own text." }
 }
 
 interface Progress { file: number; files: number; name: string; page: number; pages: number; ocr: boolean }
@@ -125,7 +140,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
             { gender: req.gender, smoker: req.smoker, age_band: req.age_band, date_of_birth: req.date_of_birth })
           const issueFound = findIssueDate(pages)
           out.push({ fileName: doc.file_name, found: filled.found, notes: [...notes, ...filled.notes], discounted, values: filled.values,
-            issueDate: issueFound?.value ?? '', issueFound, pages })
+            issueDate: issueFound?.value ?? '', issueFound, pages, ocrPages: [...ocrPages] })
         } catch (e) {
           out.push(failed(doc.file_name, 'Could not read this PDF: ' + (e as Error).message))
         }
@@ -255,7 +270,9 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         blank for you to fill; client details the PI doesn't show come from the request form. Check each value against the PDF,
         then save the PI pack: one PDF with the comparison and every PI, which is all the introducer receives. It can be printed but not edited.
         Saving also teaches the reader where the values you typed sit in a PI layout it doesn't know (only the words beside
-        them, never the values), so the next PI from that insurer fills in more (tagged “Learned”).
+        them, never the values), and your corrections and NAs, so the next PI from that insurer fills in more (tagged “Learned”).
+        Each value is tagged: “Sure” (the reader's rules, from the PDF's own text), “Learned”, or “Check” (new layout,
+        scanned page, calculated, or failing a cross-check). Check those first.
         {pdfs.length > MAX && ` Only the first ${MAX} of the ${pdfs.length} PDFs are compared.`}
       </p>
       {!key && <div className="small muted">Upload the PI PDFs above and they are read here straight away.</div>}
@@ -269,7 +286,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
             <strong>{pct}%</strong>
           </div>
           <progress max={100} value={pct} aria-label={`${pct}% read`} />
-          <span className="small muted">A PI is stopped if nothing happens for {READ_LIMIT_MS / 1000} seconds. Scanned pages are read with OCR, which takes several seconds each (the first one also downloads the OCR engine, about 28 MB).</span>
+          <span className="small muted">A PI is stopped if nothing happens for {READ_LIMIT_MS / 1000} seconds. Scanned pages are read with OCR, which takes several seconds each (the first one also downloads the OCR engine, about 28 MB, or 36 MB on hard-to-read scans).</span>
         </div>
       )}
 
@@ -324,13 +341,13 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                             const fd = c.found[f.key]
                             const edited = (fd?.value ?? '') !== (c.values[f.key] ?? '')
                             const cur = (c.values.currency ?? '').toUpperCase()
+                            const conf = !edited && !isFromForm(fd) && c.values[f.key] ? confidence(fd, c.ocrPages) : null
                             return (
-                              <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : fd?.guess || fd?.learned ? 'guess-cell' : ''}>
+                              <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : conf && conf.level !== 'Sure' ? 'guess-cell' : ''}>
                                 <input type="text" aria-label={`${label} for PI ${i + 1}`} value={c.values[f.key] ?? ''}
                                   onChange={(e) => setValue(i, f.key, e.target.value)} />
                                 {(f.kind === 'money' || f.kind === 'sum') && !currency && cur && c.values[f.key] && c.values[f.key] !== 'NA' && <div className="small">in {cur}</div>}
-                                {fd?.guess && !edited && c.values[f.key] && <div className="pill info" style={{ margin: '4px 0 2px', fontSize: 12 }} title="This PI's layout is new to the reader: this value was read by general rules. Check it against the PI.">Check</div>}
-                                {fd?.learned && !edited && c.values[f.key] && <div className="pill info" style={{ margin: '4px 0 2px', fontSize: 12 }} title="Read from a place ops taught for this insurer when they saved an earlier comparison. Check it against the PI.">Learned</div>}
+                                {conf && <div className={`pill ${conf.level === 'Sure' ? 'ok' : 'info'}`} style={{ margin: '4px 0 2px', fontSize: 12 }} title={conf.why}>{conf.level}</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
                                   {edited ? 'Changed by hand' : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}

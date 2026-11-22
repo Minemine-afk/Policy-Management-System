@@ -1,6 +1,6 @@
 // Runs PaddleOCR off the main thread, so the page (and its progress bar) stays responsive while a scan is read.
 // Started by ocr.ts. Loads ONNX Runtime Web and the models from this site only.
-import { DET_MAX_SIDE, MODEL_FILES, SCALE, charsFrom } from './ocrConfig'
+import { DET_MAX_SIDE, MODEL_FILES, REREAD_BELOW, SCALE, SECOND_REC, charsFrom } from './ocrConfig'
 import { ocrImage, type OcrModels, type Runner } from './paddleOcr'
 
 const BASE = `${import.meta.env.BASE_URL}ocr/`
@@ -24,7 +24,10 @@ async function load(): Promise<OcrModels> {
     }
   }
   const [det, rec, chars] = await Promise.all([session(MODEL_FILES.det), session(MODEL_FILES.rec), get(MODEL_FILES.chars).then((r) => r.text())])
-  return { det, rec, chars: charsFrom(chars) }
+  // The second opinion is loaded the first time a page has a line the first model is unsure of.
+  let second: Promise<{ rec: Runner; chars: string[] }> | null = null
+  const loadSecond = () => (second ??= Promise.all([session(SECOND_REC!.rec), get(SECOND_REC!.chars).then((r) => r.text())]).then(([r, c]) => ({ rec: r, chars: charsFrom(c) })))
+  return { det, rec, chars: charsFrom(chars), ...(SECOND_REC ? { second: loadSecond, rereadBelow: REREAD_BELOW } : {}) }
 }
 
 self.onmessage = async (e: MessageEvent<{ id: number; data: Uint8Array; width: number; height: number }>) => {
