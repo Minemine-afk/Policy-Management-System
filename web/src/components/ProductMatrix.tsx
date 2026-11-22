@@ -2,7 +2,7 @@
 // Step 1 (wireframe 4): filters filled in from the form, and the checked Knowledge Bank term products that match.
 // Step 2 (wireframe 5): the chosen 2 or 3 side by side, by category, with the source of each value.
 // Factual only: the list is sorted by premium or insurer, never by a "best match" (no advice, MAS).
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CLIENT_TYPES, CURRENCIES, RESIDENCIES } from '../lib/formOptions'
 import {
   DISCLAIMER, NOT_AVAILABLE, comparisonRows, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
@@ -14,13 +14,17 @@ export const MAX_COMPARE = 3
 const fmt = (cur: string, x: number) => `${cur} ${Math.round(x).toLocaleString('en-SG')}`
 const COL_HEAD = ['Product (9)', '1st Product (12)', '2nd Product (13)']
 
-export default function ProductMatrix({ kb, initial, mainId, selected, onUse, onClose }: {
+export default function ProductMatrix({ kb, initial, mainId, selected, onUse, onClose, standalone, footer }: {
   kb: Kb
   initial: Needs
   mainId: string | null          // the product on the form (field 9), if it is from the Knowledge Bank
   selected: string[]             // products already on the form (9, 12, 13)
-  onUse: (ids: string[]) => void
-  onClose: () => void
+  onUse?: (ids: string[]) => void
+  onClose?: () => void
+  /** The Product Comparison Matrix page: shown in the page (not a pop-up), with gender, smoker and CI filters too. */
+  standalone?: boolean
+  /** What to offer under the side-by-side table instead of "Use these products" (the page's "Add to PI request"). */
+  footer?: (products: KbProduct[], needs: Needs) => ReactNode
 }) {
   const [n, setN] = useState<Needs>(initial)
   const [sel, setSel] = useState<string[]>(() => selected.filter((id) => kb.products.some((p) => p.id === id)).slice(0, MAX_COMPARE))
@@ -29,15 +33,16 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
   const [diffOnly, setDiffOnly] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const box = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLElement>(null)
   const set = <K extends keyof Needs>(k: K, v: Needs[K]) => setN((s) => ({ ...s, [k]: v }))
 
   useEffect(() => {
+    if (standalone) return
     box.current?.querySelector<HTMLElement>('select, input, button')?.focus()
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose?.() }
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
-  }, [onClose, step])
+  }, [onClose, step, standalone])
 
   const insurers = useMemo(() => [...new Set(kb.products.map((p) => p.insurer))], [kb])
   const { ok, out } = useMemo(() => {
@@ -74,36 +79,38 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
 
   const badge = (i: number | string) => <span className="wf-badge" aria-hidden="true">{i}</span>
 
-  return (
-    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div ref={box} className="card dialog matrix" role="dialog" aria-modal="true"
-        aria-label={step === 'results' ? 'Find term products to compare' : 'Side-by-side comparison'}>
+  const hint = (t: string) => (standalone ? null : <span className="small muted">{t}</span>)
+  const title = step === 'results' ? 'Find term products to compare' : 'Side-by-side comparison'
+  const body = (
+      <>
         <div className="row between">
           <div>
-            <p className="muted small" style={{ margin: 0 }}>PI request › {step === 'results' ? 'Product Matrix' : 'Compare'}</p>
-            <h2 style={{ margin: 0 }}>{step === 'results' ? 'Find term products to compare' : 'Side-by-side comparison'}</h2>
+            <p className="muted small" style={{ margin: 0 }}>{standalone ? 'Product Comparison Matrix' : 'PI request'} › {step === 'results' ? 'Product Matrix' : 'Compare'}</p>
+            <h2 style={{ margin: 0 }}>{title}</h2>
           </div>
-          <button type="button" className="btn" onClick={onClose} aria-label="Close">×</button>
+          {!standalone && <button type="button" className="btn" onClick={onClose} aria-label="Close">×</button>}
         </div>
 
         {step === 'results' ? <>
-          <p className="small muted" style={{ margin: 0 }}>Filled in from the request form. Change any filter to see other products. Changes here don't change the form.</p>
+          <p className="small muted" style={{ margin: 0 }}>{standalone
+            ? "Fill in the client's needs to see the checked Knowledge Bank term products that fit. Pick 2 or 3 to compare side by side."
+            : "Filled in from the request form. Change any filter to see other products. Changes here don't change the form."}</p>
           <div className="matrix-filters">
             <div className="field wf"><span className="wf-head">{badge(1)}<label htmlFor="m-f1">Client profile</label></span>
               <select id="m-f1" value={n.profile} onChange={(e) => set('profile', e.target.value)}>
                 {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
-              </select><span className="small muted">From client type (4)</span></div>
+              </select>{hint('From client type (4)')}</div>
             <div className="field wf"><span className="wf-head">{badge(2)}<label htmlFor="m-f2">Age next birthday</label></span>
               <input id="m-f2" type="number" min={1} max={100} value={n.age ?? ''} onChange={(e) => set('age', e.target.value ? Number(e.target.value) : null)} />
-              <span className="small muted">From date of birth (7)</span></div>
+              {hint('From date of birth (7)')}</div>
             <div className="field wf"><span className="wf-head">{badge(3)}<label htmlFor="m-f3">Residency</label></span>
               <select id="m-f3" value={n.residency} onChange={(e) => set('residency', e.target.value)}>
                 {RESIDENCIES.map((x) => <option key={x}>{x}</option>)}
-              </select><span className="small muted">From residency (5)</span></div>
+              </select>{hint('From residency (5)')}</div>
             <div className="field wf"><span className="wf-head">{badge(4)}<label htmlFor="m-f4">Currency</label></span>
               <select id="m-f4" value={n.currency} onChange={(e) => set('currency', e.target.value)}>
                 {CURRENCIES.map((x) => <option key={x}>{x}</option>)}
-              </select><span className="small muted">From currency (10)</span></div>
+              </select>{hint('From currency (10)')}</div>
             <div className="field wf"><span className="wf-head">{badge(5)}<label htmlFor="m-f5">Objective</label></span>
               <select id="m-f5" value="Protection" onChange={() => undefined}>
                 <option>Protection</option><option disabled>Estate (later)</option><option disabled>Wealth (later)</option>
@@ -116,7 +123,7 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
                 </select>
                 <input aria-label={n.mode === 'coverage' ? 'Sum assured' : 'Budget a year'} type="number" min={0} style={{ minWidth: 0, flex: 1 }} value={n.amount || ''}
                   onChange={(e) => set('amount', Number(e.target.value) || 0)} />
-              </div><span className="small muted">From sum assured / premium (11)</span></div>
+              </div>{hint('From sum assured / premium (11)')}</div>
             <div className="field wf"><span className="wf-head">{badge(7)}<label htmlFor="m-f7">Insurer</label></span>
               <select id="m-f7" value={n.insurer} onChange={(e) => set('insurer', e.target.value)}>
                 {['All', ...insurers].map((x) => <option key={x}>{x}</option>)}
@@ -129,6 +136,14 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
               <select id="m-fj" value={n.jurisdiction} onChange={(e) => set('jurisdiction', e.target.value)}>
                 {['All', 'Onshore', 'Offshore'].map((x) => <option key={x}>{x}</option>)}
               </select></div>
+            {standalone && <>
+              <div className="field wf"><span className="wf-head"><span className="wf-badge blank" aria-hidden="true" /><label htmlFor="m-fg">Gender</label></span>
+                <select id="m-fg" value={n.gender} onChange={(e) => set('gender', e.target.value)}><option>Male</option><option>Female</option></select></div>
+              <div className="field wf"><span className="wf-head"><span className="wf-badge blank" aria-hidden="true" /><label htmlFor="m-fs">Smoker</label></span>
+                <select id="m-fs" value={n.smoker ? 'yes' : 'no'} onChange={(e) => set('smoker', e.target.value === 'yes')}><option value="no">Non-smoker</option><option value="yes">Smoker</option></select></div>
+              <div className="field wf"><span className="wf-head"><span className="wf-badge blank" aria-hidden="true" /><label htmlFor="m-fc">Critical illness cover</label></span>
+                <select id="m-fc" value={n.ci ? 'yes' : 'no'} onChange={(e) => set('ci', e.target.value === 'yes')}><option value="no">Not needed</option><option value="yes">Needed</option></select></div>
+            </>}
           </div>
 
           <div className="row between">
@@ -195,10 +210,18 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
           {error && <div className="error" role="alert">{error}</div>}
           <div className="matrix-foot row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" onClick={download} disabled={busy}>{busy ? 'Making the PDF…' : 'Download summary (PDF)'}</button>
-            <button type="button" className="btn primary" onClick={() => onUse(ordered.map((p) => p.id))}>
-              Use these {ordered.length} products in the PI request</button>
+            {!footer && <button type="button" className="btn primary" onClick={() => onUse?.(ordered.map((p) => p.id))}>
+              Use these {ordered.length} products in the PI request</button>}
           </div>
+          {footer?.(ordered, n)}
         </>}
+      </>
+  )
+  if (standalone) return <section ref={box} className="card matrix" aria-label={title}>{body}</section>
+  return (
+    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
+      <div ref={box as React.RefObject<HTMLDivElement>} className="card dialog matrix" role="dialog" aria-modal="true" aria-label={title}>
+        {body}
       </div>
     </div>
   )

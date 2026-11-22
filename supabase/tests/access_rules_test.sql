@@ -482,7 +482,7 @@ select set_config('storage.allow_delete_query', '', false);
 -- Module access: admin switches modules per user and per role; switched off = blocked in the database too.
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if my_modules() <> '{pi_requests,knowledge_hub}' then raise exception 'ops should start with PI Requests and Knowledge Hub, got %', my_modules(); end if;
+  if my_modules() <> '{pi_requests,product_matrix,knowledge_hub}' then raise exception 'ops should start with PI Requests and Knowledge Hub, got %', my_modules(); end if;
 end $$;
 select pg_temp.expect_error($$select admin_set_user_module('00000000-0000-0000-0000-000000000003', 'pi_requests', true)$$, 'Only an admin');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
@@ -494,7 +494,7 @@ select pg_temp.expect_error($$select admin_set_role_module('introducer', 'conten
 select pg_temp.expect_error($$select admin_set_user_module('00000000-0000-0000-0000-000000000006', 'pi_requests', true)$$, 'can''t be given to the admin role');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if my_modules() <> '{knowledge_hub}' then raise exception 'switched-off ops still has PI Requests'; end if;
+  if my_modules() <> '{product_matrix,knowledge_hub}' then raise exception 'switched-off ops still has PI Requests'; end if;
   if exists (select 1 from pi_requests) then raise exception 'switched-off ops still sees requests'; end if;
   raise notice 'ok: switched-off user sees no requests';
 end $$;
@@ -514,7 +514,7 @@ select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'knowledge_
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 do $$ begin
   if exists (select 1 from pi_requests) or exists (select 1 from request_clients) then raise exception 'introducer sees requests with PI off by role'; end if;
-  if my_modules() <> '{knowledge_hub}' then raise exception 'introducer 1 modules wrong: %', my_modules(); end if;
+  if my_modules() <> '{product_matrix,knowledge_hub}' then raise exception 'introducer 1 modules wrong: %', my_modules(); end if;
 end $$;
 select pg_temp.expect_error($$select create_request('{}'::jsonb, '{}'::jsonb)$$, '*');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
@@ -535,7 +535,7 @@ do $$ begin
 end $$;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if my_modules() <> '{pi_requests,knowledge_hub}' then raise exception 'ops1 not restored'; end if;
+  if my_modules() <> '{pi_requests,product_matrix,knowledge_hub}' then raise exception 'ops1 not restored'; end if;
   raise notice 'ok: module access';
 end $$;
 
@@ -869,6 +869,74 @@ begin
   end;
   if not exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc2')) then raise exception 'document lost'; end if;
   raise notice 'ok: discarding a never-checked draft deletes it';
+end $$;
+
+-- 22. Product Comparison Matrix: "Add to PI request" by PI number
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+create temp table pmt (k text primary key, v text);
+grant all on pmt to public;
+do $$
+declare base jsonb := '{"date_of_birth":"1988-02-01","gender":"Male","smoker":false,"coverage_term":"21 to 30 years","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","currency":"SGD","amount":"500000","amount_basis":"sum_assured","ci_benefit":false,"insurer":"AIA","plan_name":"Some plan"}';
+        rid uuid;
+begin
+  rid := create_request(base, '{"client_name":"[Sample] Client Matrix"}');
+  insert into pmt values ('ref', (select ref from pi_requests where id = rid)), ('id', rid::text),
+    ('sa', (select id from kb_checked_products order by name limit 1 offset 0)::text),
+    ('km', (select id from kb_checked_products order by name limit 1 offset 1)::text),
+    ('hl', (select id from kb_checked_products order by name limit 1 offset 2)::text);
+  if (select count(*) from pmt where v is null) > 0 then raise exception 'need 3 checked products'; end if;
+  if not exists (select 1 from requests_for_products() where id = rid) then raise exception 'own submitted request not offered'; end if;
+  perform add_products_to_request(lower((select v from pmt where k = 'ref')), array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[]);
+  if not exists (select 1 from request_list r where id = rid and plan_kb_id = (select v from pmt where k = 'sa')::uuid
+                 and plan_name = (select name from kb_checked_products where id = r.plan_kb_id)
+                 and compare_term and compare_kb_1 = (select v from pmt where k = 'km')::uuid and compare_product_1 like '% · %' and compare_kb_2 is null) then
+    raise exception 'products not added to the request';
+  end if;
+  if not exists (select 1 from request_events where request_id = rid and kind = 'products_added') then raise exception 'no history entry'; end if;
+  raise notice 'ok: an introducer adds compared products to their own request by PI number';
+end $$;
+select pg_temp.expect_error($$select add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'sa')]::uuid[])$$, 'Choose 2 or 3');
+select pg_temp.expect_error($$select add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'sa')]::uuid[])$$, 'different');
+select pg_temp.expect_error($$select add_products_to_request('PI-99999', array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[])$$, 'No PI request');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+select pg_temp.expect_error($$select add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[])$$, 'No PI request');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select pg_temp.expect_error($$select add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[])$$, 'not yours to work on');
+reset role; update pi_requests set status = 'assigned', assignee_id = '00000000-0000-0000-0000-000000000003' where id = (select v from pmt where k = 'id')::uuid; set role authenticated;
+do $$ begin
+  perform add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'hl'), (select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[]);
+  if not exists (select 1 from pi_requests where id = (select v from pmt where k = 'id')::uuid and plan_kb_id = (select v from pmt where k = 'hl')::uuid and compare_kb_2 = (select v from pmt where k = 'km')::uuid) then
+    raise exception 'assigned ops could not add 3 products';
+  end if;
+  raise notice 'ok: ops add products to a request assigned to them';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+select pg_temp.expect_error($$select add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[])$$, 'cannot change');
+reset role; update pi_requests set status = 'completed' where id = (select v from pmt where k = 'id')::uuid; set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[])$$, 'cannot change');
+reset role; update pi_requests set status = 'in_progress' where id = (select v from pmt where k = 'id')::uuid; set role authenticated;
+do $$ begin
+  perform add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'km'), (select v from pmt where k = 'sa')]::uuid[]);
+  raise notice 'ok: BSD add products to any open request, not to finished ones';
+end $$;
+-- Switched off: no adding; with only the matrix (PI Requests off) the products can still be compared
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select admin_set_user_module('00000000-0000-0000-0000-000000000005', 'product_matrix', false);
+select admin_set_user_module('00000000-0000-0000-0000-000000000002', 'pi_requests', false);
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select add_products_to_request((select v from pmt where k = 'ref'), array[(select v from pmt where k = 'sa'), (select v from pmt where k = 'km')]::uuid[])$$, 'do not have');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
+do $$ begin
+  if (select count(*) from kb_checked_products) = 0 then raise exception 'matrix-only introducer cannot compare'; end if;
+  if exists (select 1 from requests_for_products()) then raise exception 'matrix-only introducer offered requests'; end if;
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select admin_set_user_module('00000000-0000-0000-0000-000000000005', 'product_matrix', null);
+select admin_set_user_module('00000000-0000-0000-0000-000000000002', 'pi_requests', null);
+do $$ begin
+  if (select count(*) from audit_log where action = 'request.products_added') <> 3 then raise exception 'adding products not audited'; end if;
+  raise notice 'ok: Product Comparison Matrix access and audit';
 end $$;
 
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

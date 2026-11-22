@@ -16,7 +16,7 @@ export interface AppModule {
 }
 
 /** Where each live module opens. */
-export const MODULE_HOME: Partial<Record<ModuleKey, string>> = { pi_requests: '/board', knowledge_hub: '/kb' }
+export const MODULE_HOME: Partial<Record<ModuleKey, string>> = { pi_requests: '/board', product_matrix: '/matrix', knowledge_hub: '/kb' }
 
 export async function loadModules(): Promise<AppModule[]> {
   const { data } = await supabase.from('app_modules').select('*').order('sort')
