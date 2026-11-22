@@ -233,7 +233,9 @@ export default function RequestForm() {
       compare_kb_1: rest[0] ?? '', compare_kb_2: rest[1] ?? '' }))
     setErrors((e) => { const n = { ...e }; for (const k of ['insurer', 'product', 'compare_kb_1', 'compare_kb_2']) delete n[k]; return n })
     setMatrix(false)
-    setNotice(`Fields 8, 9, 12 and 13 are filled in with the ${ids.length} products. Check the form, then review and submit.`)
+    setNotice(ids.length >= 3
+      ? 'Fields 8, 9, 12 and 13 are filled in with the 3 products. Check the form, then review and submit.'
+      : 'Fields 8, 9 and 12 are filled in with the 2 products. Field 13 stays empty because you compared 2 products (pick 3 to fill it, or choose one there). Check the form, then review and submit.')
   }
 
   function review() {
