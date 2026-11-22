@@ -2,6 +2,7 @@
 -- comparison on the PI request form can be tried before real products are added. Run after 1p-upgrade.sql.
 -- Remove later with 4c-remove-sample-products.sql. Safe to run again (it replaces the samples).
 begin;
+delete from public.kb_documents where is_sample;
 delete from public.kb_products where is_sample;
 do $$
 declare

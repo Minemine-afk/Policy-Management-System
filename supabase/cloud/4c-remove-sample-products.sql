@@ -2,4 +2,5 @@
 -- Requests that named one keep the product's name; only the link to the Knowledge Bank goes.
 begin;
 delete from public.kb_products where is_sample;
+delete from public.kb_documents where is_sample;
 commit;

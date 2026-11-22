@@ -482,7 +482,7 @@ select set_config('storage.allow_delete_query', '', false);
 -- Module access: admin switches modules per user and per role; switched off = blocked in the database too.
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if my_modules() <> '{pi_requests}' then raise exception 'ops should start with PI Requests only, got %', my_modules(); end if;
+  if my_modules() <> '{pi_requests,knowledge_hub}' then raise exception 'ops should start with PI Requests and Knowledge Hub, got %', my_modules(); end if;
 end $$;
 select pg_temp.expect_error($$select admin_set_user_module('00000000-0000-0000-0000-000000000003', 'pi_requests', true)$$, 'Only an admin');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
@@ -494,7 +494,7 @@ select pg_temp.expect_error($$select admin_set_role_module('introducer', 'conten
 select pg_temp.expect_error($$select admin_set_user_module('00000000-0000-0000-0000-000000000006', 'pi_requests', true)$$, 'can''t be given to the admin role');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if my_modules() <> '{}' then raise exception 'switched-off ops still has modules'; end if;
+  if my_modules() <> '{knowledge_hub}' then raise exception 'switched-off ops still has PI Requests'; end if;
   if exists (select 1 from pi_requests) then raise exception 'switched-off ops still sees requests'; end if;
   raise notice 'ok: switched-off user sees no requests';
 end $$;
@@ -535,7 +535,7 @@ do $$ begin
 end $$;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
 do $$ begin
-  if my_modules() <> '{pi_requests}' then raise exception 'ops1 not restored'; end if;
+  if my_modules() <> '{pi_requests,knowledge_hub}' then raise exception 'ops1 not restored'; end if;
   raise notice 'ok: module access';
 end $$;
 
@@ -758,6 +758,117 @@ select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
 do $$ begin
   if exists (select 1 from kb_checked_products) or exists (select 1 from kb_products) then raise exception 'admin should not see products'; end if;
   raise notice 'ok: admin does not see the product comparison';
+end $$;
+
+-- 21. Knowledge Hub: documents, product records and maker-checker
+reset role;
+create temp table kbt (k text primary key, v uuid);
+grant all on kbt to authenticated;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+insert into storage.objects (bucket_id, name) values ('kb-docs', 'f1/maple-ps.pdf');
+do $$
+declare d uuid; p uuid;
+begin
+  if not kb_member() or kb_checker() then raise exception 'ops should keep but not check the Knowledge Bank'; end if;
+  d := kb_add_document('{"insurer":"Maple Life","title":"Maple Term Product Summary","doc_type":"Product Summary","version":"v1","effective_from":"2026-01-01","valid_until":"2030-12-31","storage_path":"f1/maple-ps.pdf","file_name":"maple-ps.pdf"}');
+  insert into kbt values ('doc1', d);
+  p := kb_save_product(null, jsonb_build_object('insurer', 'Maple Life', 'name', 'Maple Term', 'category', 'Insurance', 'jurisdiction', 'Onshore',
+        'currencies', '["SGD"]'::jsonb, 'entry_age_min', 18, 'entry_age_max', 60, 'residency', '["Singapore citizen","Singapore PR"]'::jsonb,
+        'sa_min', 50000, 'sa_max', 2000000, 'has_ci', true,
+        'facts', jsonb_build_object('_ps', jsonb_build_object('doc', d), 'death', jsonb_build_object('v', 'Yes', 'doc', d, 'page', 3), 'ad', jsonb_build_object('v', '', 'doc', d)),
+        'rates', '[{"age":40,"gender":"Male","smoker":false,"rate":1.2},{"age":40,"gender":"Female","smoker":false,"rate":1.0,"ci_rate":0.9}]'::jsonb));
+  insert into kbt values ('maple', p);
+  if not exists (select 1 from kb_products where id = p and status = 'draft' and pending_state = 'draft' and not (pending -> 'facts') ? 'ad') then raise exception 'new product should be a draft without empty facts'; end if;
+  if exists (select 1 from kb_checked_products where id = p) then raise exception 'a draft is offered for comparison'; end if;
+  perform kb_send_for_check(p);
+  raise notice 'ok: ops upload a document and send a new product record for check';
+end $$;
+select pg_temp.expect_error($$select kb_check_document((select v from kbt where k = 'doc1'))$$, 'Only BSD');
+select pg_temp.expect_error($$select kb_check_product((select v from kbt where k = 'maple'))$$, 'Only BSD');
+select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Maple Life","name":"maple term","category":"Insurance","jurisdiction":"Onshore","currencies":["SGD"],"entry_age_min":18,"entry_age_max":60,"residency":["Singapore PR"]}')$$, 'already a product record');
+select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Maple Life","name":"Other","category":"Insurance","jurisdiction":"Onshore","currencies":["SGD"],"entry_age_min":60,"entry_age_max":18,"residency":["Singapore PR"]}')$$, 'entry ages');
+select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Maple Life","name":"Other","category":"Insurance","jurisdiction":"Onshore","currencies":["SGD"],"entry_age_min":18,"entry_age_max":60,"residency":["Singapore PR"],"facts":{"death":{"v":"Yes"}}}')$$, 'source document');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select kb_check_product((select v from kbt where k = 'maple'))$$, 'not checked');
+do $$
+declare p uuid := (select v from kbt where k = 'maple');
+begin
+  perform kb_check_document((select v from kbt where k = 'doc1'));
+  perform kb_check_product(p);
+  if not exists (select 1 from kb_products where id = p and status = 'verified' and version = 1 and pending is null and verified_by = '00000000-0000-0000-0000-000000000005') then raise exception 'check did not apply the record'; end if;
+  if (select count(*) from kb_rates where product_id = p) <> 2 or (select count(*) from kb_product_history where product_id = p) <> 1 then raise exception 'rates or history missing'; end if;
+  if not exists (select 1 from kb_checked_products where id = p) then raise exception 'checked product not offered'; end if;
+  -- BSD change their own record: someone else must check it
+  perform kb_save_product(p, kb_record(p) || '{"sa_max": 3000000}');
+  perform kb_send_for_check(p);
+  if (select sa_max from kb_products where id = p) <> 2000000 then raise exception 'the checked version should stay until the change is checked'; end if;
+  raise notice 'ok: bsd check a record made by ops; it can then be compared';
+end $$;
+select pg_temp.expect_error($$select kb_check_product((select v from kbt where k = 'maple'))$$, 'someone else must check');
+select pg_temp.expect_error($$select kb_send_back_product((select v from kbt where k = 'maple'), '')$$, 'Say what needs changing');
+select kb_send_back_product((select v from kbt where k = 'maple'), 'Check the maximum on page 2');
+-- A new version of the Product Summary: once checked, the product gets a draft naming it
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+insert into storage.objects (bucket_id, name) values ('kb-docs', 'f2/maple-ps-v2.pdf');
+do $$
+declare d uuid := kb_add_document(jsonb_build_object('insurer', 'Maple Life', 'title', 'Maple Term Product Summary', 'doc_type', 'Product Summary', 'version', 'v2',
+                   'effective_from', '2026-06-01', 'storage_path', 'f2/maple-ps-v2.pdf', 'replaces', (select v from kbt where k = 'doc1')));
+begin
+  insert into kbt values ('doc2', d);
+  if not exists (select 1 from kb_products where id = (select v from kbt where k = 'maple') and pending_note = 'Check the maximum on page 2' and pending_state = 'draft') then raise exception 'send-back note missing'; end if;
+end $$;
+select pg_temp.expect_error($$select kb_remove_document((select v from kbt where k = 'doc1'))$$, 'Only BSD can remove a checked');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+select pg_temp.expect_error($$select kb_remove_document((select v from kbt where k = 'doc1'))$$, 'names this document');
+do $$
+declare p uuid := (select v from kbt where k = 'maple'); d1 uuid := (select v from kbt where k = 'doc1'); d2 uuid := (select v from kbt where k = 'doc2');
+begin
+  perform kb_check_document(d2);
+  if (select replaced_by from kb_documents where id = d1) <> d2 then raise exception 'old version not replaced'; end if;
+  if not ((select pending from kb_products where id = p) -> 'facts' -> 'death' ->> 'doc' = d2::text) or (select pending_note from kb_products where id = p) not like 'New version%' then
+    raise exception 'product draft should name the new version';
+  end if;
+  if not exists (select 1 from kb_checked_products where id = p) then raise exception 'the checked version should stay offered'; end if;
+  perform kb_withdraw_product(p, 'Insurer stopped selling it');
+  if exists (select 1 from kb_checked_products where id = p) then raise exception 'withdrawn product still offered'; end if;
+  raise notice 'ok: new document versions, send back and withdraw';
+end $$;
+-- Introducers with the module read checked, current documents only
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'knowledge_hub', true);
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+do $$ begin
+  if exists (select 1 from kb_products) or exists (select 1 from kb_product_history) then raise exception 'introducer reads product records'; end if;
+  if not exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc2'))
+     or exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc1') or status <> 'checked') then raise exception 'introducer should see only checked current documents'; end if;
+  if not exists (select 1 from storage.objects where name = 'f2/maple-ps-v2.pdf') or exists (select 1 from storage.objects where name = 'f1/maple-ps.pdf') then
+    raise exception 'introducer file access wrong';
+  end if;
+  raise notice 'ok: introducers with the Knowledge Hub read checked current documents';
+end $$;
+select pg_temp.expect_error($$select kb_add_document('{}')$$, 'Only ops and BSD');
+select pg_temp.expect_error($$insert into storage.objects (bucket_id, name) values ('kb-docs', 'x/y.pdf')$$, 'row-level security');
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'knowledge_hub', null);
+do $$ begin
+  if exists (select 1 from kb_documents) then raise exception 'admin reads the Knowledge Bank'; end if;
+  if (select count(*) from audit_log where action like 'kb.%') < 10 then raise exception 'Knowledge Bank changes not audited'; end if;
+  raise notice 'ok: Knowledge Bank changes are in the audit log';
+end $$;
+-- A draft that was never checked is deleted when discarded; its documents stay
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$
+declare p uuid := kb_save_product(null, jsonb_build_object('insurer', 'Maple Life', 'name', 'Maple Draft', 'category', 'Insurance', 'jurisdiction', 'Onshore',
+          'currencies', '["SGD"]'::jsonb, 'entry_age_min', 18, 'entry_age_max', 60, 'residency', '["Singapore PR"]'::jsonb,
+          'facts', jsonb_build_object('death', jsonb_build_object('v', 'Yes', 'doc', (select v from kbt where k = 'doc2')))));
+begin
+  declare r boolean; begin
+    r := kb_discard_draft(p);   -- a separate statement, so the check below sees the delete
+    if not r or exists (select 1 from kb_products where id = p) then raise exception 'draft not deleted'; end if;
+  end;
+  if not exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc2')) then raise exception 'document lost'; end if;
+  raise notice 'ok: discarding a never-checked draft deletes it';
 end $$;
 
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

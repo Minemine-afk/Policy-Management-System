@@ -54,6 +54,31 @@ function usePiBadges(on: boolean, introducer: boolean, soonHours: number): Badge
   return badges
 }
 
+/** Counts on the Knowledge Hub tile for ops and bsd: what waits for a check, and documents running out of date. */
+function useKbBadges(on: boolean): Badge[] {
+  const [badges, setBadges] = useState<Badge[]>([])
+  useEffect(() => {
+    if (!on) return
+    let live = true
+    Promise.all([
+      supabase.from('kb_documents').select('status, valid_until, replaced_by'),
+      supabase.from('kb_products').select('pending_state'),
+    ]).then(([d, p]) => {
+      if (!live) return
+      const soon = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10)
+      const docs = (d.data ?? []) as { status: string; valid_until: string | null; replaced_by: string | null }[]
+      const check = docs.filter((x) => x.status === 'new').length + ((p.data ?? []) as { pending_state: string | null }[]).filter((x) => x.pending_state === 'check').length
+      const expiring = docs.filter((x) => !x.replaced_by && x.valid_until && x.valid_until <= soon).length
+      const out: Badge[] = []
+      if (check) out.push({ text: `${check} to check`, tone: 'info' })
+      if (expiring) out.push({ text: `${expiring} document${expiring === 1 ? '' : 's'} expiring`, tone: 'warn' })
+      setBadges(out)
+    })
+    return () => { live = false }
+  }, [on])
+  return badges
+}
+
 function Tile({ to, icon, name, description, badges = [], soon }: {
   to?: string; icon: string; name: string; description: string; badges?: Badge[]; soon?: boolean
 }) {
@@ -84,6 +109,7 @@ export default function Home() {
   const intro = has('introducer')
   const mine = all.filter((m) => modules.includes(m.key))
   const badges = usePiBadges(!admin && modules.includes('pi_requests'), intro, settings.due_soon_hours)
+  const kbBadges = useKbBadges(!admin && !intro && modules.includes('knowledge_hub'))
   const first = (profile?.full_name || '').trim().split(/\s+/)[0]
   const hour = new Date().getHours()
   const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
@@ -114,7 +140,7 @@ export default function Home() {
           {mine.map((m) => {
             const to = m.live ? MODULE_HOME[m.key as ModuleKey] : undefined
             return <Tile key={m.key} to={to} icon={m.key} name={m.name} description={m.description}
-              badges={m.key === 'pi_requests' ? badges : []} soon={!to} />
+              badges={m.key === 'pi_requests' ? badges : m.key === 'knowledge_hub' ? kbBadges : []} soon={!to} />
           })}
         </nav>
       )}
