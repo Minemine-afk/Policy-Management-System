@@ -34,6 +34,9 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
    - `1m-upgrade.sql` (20 Nov: teach a new insurer). Keeps the places the PI reader learns from saved comparisons
      (label words and positions only, never client values). Until you run it, comparisons save as before but nothing
      is learned.
+   - `1n-upgrade.sql` (22 Nov: the PI reader learns more). It also learns values in year-by-year tables (e.g. the total
+     premium on the policy term's row) and remembers when ops CORRECT one of its values, so the next PI of that insurer
+     uses the taught place instead. Until you run it, the rest of the learning works as before.
    - `1h-undo-new-form.sql`: **only if you ran the (withdrawn) `1h-upgrade.sql`** for the new request form. It puts the
      original form's fields back and keeps every request's details. Harmless if you never ran 1h.
 

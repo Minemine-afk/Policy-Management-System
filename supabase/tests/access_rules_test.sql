@@ -656,7 +656,16 @@ do $$ begin
     then raise exception 'the same place should not be saved twice'; end if;
   if (select count(*) from insurer_label_rules) <> 2 then raise exception 'ops should read the places'; end if;
   raise notice 'ok: ops teach the reader';
+  -- A place in a year-by-year table, then the same place again as a correction: kept once, marked as a correction.
+  if teach_insurer('[{"insurer":"Maple Life","field":"total_premium","how":"row","label":"paid to-date","offset":0,"factor":1,"cut":"","plan":"Maple Term 20","row":"term"}]') <> 1
+    then raise exception 'ops should save a table row place'; end if;
+  if teach_insurer('[{"insurer":"Maple Life","field":"total_premium","how":"row","label":"paid to-date","offset":0,"factor":1,"cut":"","plan":"Maple Term 20","row":"term","corrects":true}]') <> 0
+    then raise exception 'a known place taught again is not new'; end if;
+  if not (select corrects from insurer_label_rules where how = 'row') then raise exception 'the place should now be marked as a correction'; end if;
+  if (select count(*) from insurer_label_rules) <> 3 then raise exception 'the row place should be kept once'; end if;
+  raise notice 'ok: table rows and corrections are remembered';
 end $$;
+select pg_temp.expect_error($$select teach_insurer('[{"insurer":"Maple Life","field":"total_premium","how":"row","label":"paid to-date","offset":0,"factor":1,"row":"first"}]')$$, 'insurer_label_rules_row_at_check');
 select pg_temp.expect_error($$select teach_insurer('[{"insurer":"Maple Life","field":"death_sa","how":"beside","label":"monthly payment: $31.00","offset":0,"factor":1}]')$$, 'insurer_label_rules_label_check');
 select pg_temp.expect_error($$select teach_insurer('[{"insurer":"Maple Life","field":"death_sa","how":"beside","label":"sum 250000","offset":0,"factor":1}]')$$, 'insurer_label_rules_label_check');
 select pg_temp.expect_error($$select teach_insurer('[{"insurer":"Maple Life","field":"nric","how":"beside","label":"nric","offset":1,"factor":1}]')$$, 'insurer_label_rules_field_check');
@@ -670,13 +679,13 @@ end $$;
 select pg_temp.expect_error($$select teach_insurer('[{"insurer":"Maple Life","field":"death_sa","how":"beside","label":"amount","offset":1,"factor":1}]')$$, 'Only ops or bsd');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
 do $$ begin
-  if (select count(*) from insurer_label_rules) <> 2 then raise exception 'admin should see the places'; end if;
+  if (select count(*) from insurer_label_rules) <> 3 then raise exception 'admin should see the places'; end if;
   if forget_insurer_rules(array(select id from insurer_label_rules where field = 'death_sa')) <> 1 then raise exception 'admin should delete 1'; end if;
   raise notice 'ok: admin deletes learned places';
 end $$;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
 do $$ begin
-  if forget_insurer_rules(array(select id from insurer_label_rules)) <> 1 then raise exception 'bsd should delete 1'; end if;
+  if forget_insurer_rules(array(select id from insurer_label_rules)) <> 2 then raise exception 'bsd should delete 2'; end if;
   raise notice 'ok: bsd deletes learned places';
 end $$;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000006');

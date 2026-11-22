@@ -21,6 +21,7 @@ On a normal machine, use `supabase start` instead and you don't need any of this
    rules; needs `npm i onnxruntime-node pngjs` in `tests/pi-extract` and pdftoppm), or `node tests/pi-extract/check-browser.cjs
    <folder> <expected.json>` (real Chromium through the Vite dev server, with timings and download size).
 7. Teach a new insurer: `node tests/pi-extract/check-teach.mjs <pi-samples> --max-wrong 0`. The walkthrough also teaches Empire Life when `PI_SAMPLES` is set.
+   On a scanned PI: `node tests/pi-extract/check-teach-scan.mjs <pi-samples>/SG_Manulife_ManuProtectTermII_500k.pdf tests/pi-extract/teach-scan-manulife.json`.
 8. PI pack and issue dates: `node tests/pi-extract/check-issue-date.mjs <pi-samples>` (issue date rules),
    `node tests/pi-extract/check-form-fill.mjs` (particulars from the request form), and
    `node tests/pi-extract/check-pdf.mjs out.pdf PI1.pdf [PI2.pdf] [PI3.pdf]` (builds the pack; check it with `pdfinfo`).
