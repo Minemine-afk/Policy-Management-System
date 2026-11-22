@@ -7,9 +7,10 @@ const fieldLabel = (k: string) => FIELDS.find((f) => f.key === k)?.label ?? k
 function describe(r: SavedRule): string {
   const where = r.how === 'beside'
     ? r.offset === 0 ? `right after “${r.label}”` : `${r.offset === 1 ? 'next to' : `${r.offset} columns after`} “${r.label}”`
+    : r.how === 'row' ? `in the column “${r.label}”, ${r.row === 'term' ? 'on the row of the last policy year' : 'on the last row'}`
     : `under the heading “${r.label}”`
   const factor = r.factor === 12 ? ', monthly figure × 12' : r.factor === 4 ? ', quarterly figure × 4' : r.factor === 2 ? ', half-yearly figure × 2' : ''
-  return `${where}${factor}`
+  return `${where}${factor}${r.corrects ? ' (ops corrected the reader here, so this place is used instead of its rules)' : ''}`
 }
 
 /** BSD and admin: what the PI reader has learned from saved comparisons, per insurer, with delete. Only label words

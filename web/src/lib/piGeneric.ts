@@ -157,7 +157,9 @@ export function extractGeneric(pages: Page[]): GenericResult {
     if (!g) continue
     // A description, not prose: an age next to it, or a list of short items.
     const window = [l.text, lines[i + 1]?.page === l.page ? lines[i + 1].text : ''].join('  ').replace(/-\s+/g, '-')
+    // Or one short piece that is only gender and smoker status: "Plan :  Term (II)  Male, Non-Smoker".
     const isDesc = /\b(?:age\s*\d{1,2}|\d{1,2}\s*(?:years?\s*old|-?year[\s-]old)|,\s*\d{1,2}\b)/i.test(window) || (l.text.length < 60 && /,/.test(l.text))
+      || l.text.split(/\s{2,}/).some((p) => /^(?:male|female)\s*[,/]\s*(?:non[\s-]?)?smoker$/i.test(p.trim()))
     if (!isDesc) continue
     if (!found.gender) set('gender', /^(?:male|man)$/i.test(g[1]) ? 'Male' : 'Female', l.page, l.text)
     const sm = window.replace(/\b(?:smok(?:ing|er)|tobacco)\s+(?:status|habit|class|use)\b/gi, ' ').match(/\b(non[\s-]?smoker|nonsmoker|no\s+nicotine(?:\s+use)?|non[\s-]?tobacco|smoker|tobacco\s+user)\b/i)
@@ -173,7 +175,10 @@ export function extractGeneric(pages: Page[]): GenericResult {
   // Smoker status written on its own line ("Tobacco use ... Non-smoker", "Life Classification: Non Smoker").
   if (!found.underwriting_class) {
     const noLabel = (t: string) => t.replace(/\b(?:smok(?:ing|er)|tobacco)\s+(?:status|habit|class|use)\b/gi, ' ')
-    const l = lines.find((x) => /\b(?:tobacco\s+use|smok(?:ing|er)\s+status|life\s+classification|risk\s+class)\b/i.test(x.text) && /\b(?:non[\s-]?smoker|smoker)\b/i.test(noLabel(x.text)))
+    // Not a sentence about changing status ("To change from a smoker to non-smoker status under the QSI feature ..."):
+    // a label line is short and does not talk about going from one status to the other.
+    const prose = (t: string) => t.length > 80 || /\bfrom\s+(?:a\s+)?(?:non[\s-]?)?smoker\s+to\b/i.test(t)
+    const l = lines.find((x) => !prose(x.text) && /\b(?:tobacco\s+use|smok(?:ing|er)\s+status|life\s+classification|risk\s+class)\b/i.test(x.text) && /\b(?:non[\s-]?smoker|smoker)\b/i.test(noLabel(x.text)))
     const sm = l ? noLabel(l.text).match(/\b(non[\s-]?smoker|smoker)\b/i) : null
     if (l && sm) set('underwriting_class', /^non/i.test(sm[1]) ? 'Non-Smoker' : 'Smoker', l.page, l.text)
   }

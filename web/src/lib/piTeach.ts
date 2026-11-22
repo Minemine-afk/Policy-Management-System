@@ -8,13 +8,14 @@
 import { FIELDS, type Found, type Line, type Page, type TextItem } from './piExtract.ts'
 
 /** One remembered place. `how`: 'beside' = the value is `offset` pieces after the label on the same line (0 = in the
- *  label's own piece, after it); 'under' = the value is the first value under the column heading `label`.
+ *  label's own piece, after it); 'under' = the value is the first value under the column heading `label`;
+ *  'row' = the value is in a year-by-year table under the column heading `label`, on the row given by `row`.
  *  `factor`: the PI shows the value divided by this (12 = a monthly premium that ops turned into a yearly one).
  *  `cut`: for words, the character the value ends at in its piece ("," in "Client Quote, Male, 40"), or "". */
 export interface LearnedRule {
   insurer: string
   field: string
-  how: 'beside' | 'under'
+  how: 'beside' | 'under' | 'row'
   label: string
   offset: number
   factor: number
@@ -22,7 +23,15 @@ export interface LearnedRule {
   /** The plan (policy name) of the PI it was learned from. A place found only once is trusted only on PIs of that
    *  plan; for another plan of the same insurer, two places must agree. */
   plan: string
+  /** For 'row': 'term' = the row of the last policy year (the policy term), 'last' = the table's last row. */
+  row?: '' | 'term' | 'last'
+  /** Ops corrected the reader's own value here (not just filled a blank): on the next PI of this insurer the learned
+   *  value replaces the reader's, as the reader's rules got this field wrong for this insurer before. */
+  corrects?: boolean
 }
+
+/** What a 'row' place needs to find its row: the policy term of the PI being read. */
+export interface ReadContext { policyTerm?: string }
 
 /** Fields that can be learned: values copied (or worked out by a fixed factor) from one place in the PI. Benefits
  *  ("Included"), campaigns and the currency code are not, as ops write those in their own words. */
@@ -46,6 +55,23 @@ const CANON: Record<string, (s: string) => string> = {
 }
 
 export const normLabel = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').replace(/\s*:\s*$/, '').trim()
+/** A label without a bracketed currency sign ("Paid To-Date ($)" -> "paid to-date"): labels never keep "$". */
+export const cleanLabel = (s: string) => normLabel(s).replace(/\(\s*(?:[a-z]{0,2}\$|sgd|usd|myr|rm|cad)\s*\)/g, ' ').replace(/\s+/g, ' ').replace(/\s*:\s*$/, '').trim()
+/** A label as compared when reading: OCR often reads "II" as "Il" or "l1", "O" as "0", and drops or adds brackets
+ *  and dots, so those are made the same on both sides. */
+export const labelKey = (s: string) => cleanLabel(s).replace(/[()[\]{}.,:;'"`’]/g, '').replace(/[il1|!]/g, 'i').replace(/0/g, 'o').replace(/\s+/g, ' ').trim()
+/** The part of `piece` after a label written as `label` (OCR-tolerant), or null when the piece does not start with it. */
+function afterLabel(piece: string, label: string): string | null {
+  const lower = piece.toLowerCase().replace(/\s+/g, ' ')
+  if (lower.startsWith(label)) return piece.slice(lower.indexOf(label) + label.length)
+  const want = labelKey(label)
+  if (!want || !labelKey(piece).startsWith(want)) return null
+  for (let k = 1; k <= piece.length; k++) if (labelKey(piece.slice(0, k)) === want && !/[a-z0-9]/i.test(piece[k] ?? '')) return piece.slice(k)
+  return null
+}
+/** Leading ":" or "-" that some layouts put in a piece of their own or before the value (": Mr VIP"). */
+const stripLead = (s: string) => s.replace(/^\s*[:–-]\s*/, '')
+const isPunct = (s: string) => /^[\s:–\-.]*$/.test(s)
 const normWords = (s: string) => s.replace(/\s+/g, ' ').replace(/\s+([,.])/g, '$1').trim()
 export const insurerKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
@@ -71,7 +97,7 @@ const overlapX = (a: TextItem, b: TextItem) => a.x <= b.x + b.w + 6 && b.x <= a.
 
 /** A label is not kept when it carries anything about the client (their name, date of birth) or looks like a contact
  *  detail, so nothing personal is ever stored. */
-function safeLabel(label: string, personal: string[]): boolean {
+function safeLabel(label: string, personal: string[], colon = false): boolean {
   const l = label.toLowerCase()
   if (!hasLetters(label) || label.length > 60) return false
   if (/@|www\.|https?:|\+?\d[\d\s-]{7,}\d|\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b/.test(label)) return false
@@ -80,7 +106,8 @@ function safeLabel(label: string, personal: string[]): boolean {
   // A label looks like a label: a few words, not a piece of a sentence ("as an illustration, for").
   const w = l.replace(/[^a-z0-9 ]+/g, ' ').trim().split(/\s+/)
   if (w.length > 6 || label.length > 45 || /[;•]|\($/.test(label)) return false
-  if (/^(?:for|of|the|to|in|within|is|are|at|by|and|or|a|an|with|from|on|we|you|your|shall|pay|will|be)$/.test(w[w.length - 1])) return false
+  // "Specially prepared for  :  Mr VIP": a label may end in "for" when the PI puts a ":" after it.
+  if (!colon && /^(?:for|of|the|to|in|within|is|are|at|by|and|or|a|an|with|from|on|we|you|your|shall|pay|will|be)$/.test(w[w.length - 1])) return false
   return !personal.some((p) => p.trim().length >= 2 && l.includes(p.toLowerCase().trim()))
 }
 
@@ -88,20 +115,41 @@ function safeLabel(label: string, personal: string[]): boolean {
 
 interface Hit { value: string; page: number; line: string }
 
-function readRule(pages: Page[], r: LearnedRule): Hit[] {
+/** The numbers in the column under heading `h`, top to bottom: the rows of a year-by-year table. Pieces with no
+ *  letters ("($)") are passed over; the column ends at words or at a wide gap (another table or page part). */
+function columnBelow(items: TextItem[], h: TextItem): TextItem[] {
+  const below = items.filter((i) => i !== h && i.y < h.y - 2 && overlapX(i, h)).sort((a, b) => b.y - a.y)
+  const out: TextItem[] = []
+  let lastY = h.y
+  for (const b of below) {
+    if (lastY - b.y > 80) break
+    if (hasLetters(b.str) && !/^\s*age\s+\d/i.test(b.str)) { if (out.length) break; else continue }
+    lastY = b.y
+    if (numbersIn(b.str).length === 1 && isNumberish(b.str)) out.push(b)
+  }
+  return out
+}
+/** The policy year that starts the row of `cell` ("5/49", or "5" in a column of its own); null when none. */
+function rowYear(items: TextItem[], cell: TextItem): number | null {
+  const first = items.filter((i) => Math.abs(i.y - cell.y) < 3).sort((a, b) => a.x - b.x)[0]
+  const m = first?.str.trim().match(/^(\d{1,3})(?:\s*\/\s*\d{1,3})?(?:\s|$)/)
+  return m && first !== cell ? +m[1] : null
+}
+
+function readRule(pages: Page[], r: LearnedRule, ctx: ReadContext = {}): Hit[] {
   const kind = KINDS[r.field]
   const out: Hit[] = []
   if (r.how === 'beside') {
     for (const p of pages) for (const l of p.lines) {
       const ps = parts(l)
       for (let i = 0; i < ps.length; i++) {
-        const own = normLabel(ps[i])
         let piece: string | undefined
         if (r.offset === 0) {
-          if (!own.startsWith(r.label) || own === r.label) continue
-          piece = ps[i].slice(ps[i].toLowerCase().replace(/\s+/g, ' ').indexOf(r.label) + r.label.length).replace(/^\s*:?\s*/, '')
+          const rest = afterLabel(ps[i], r.label)
+          if (rest === null || !rest.trim()) continue
+          piece = rest.replace(/^\s*:?\s*/, '')
         } else {
-          if (own !== r.label) continue
+          if (labelKey(ps[i]) !== labelKey(r.label)) continue
           piece = ps[i + r.offset]
         }
         if (!piece) continue
@@ -109,10 +157,23 @@ function readRule(pages: Page[], r: LearnedRule): Hit[] {
         if (v) out.push({ value: v, page: l.page, line: l.text })
       }
     }
+  } else if (r.how === 'row') {
+    for (const p of pages) {
+      const items = p.items.filter((i) => i.str.trim())
+      for (const h of items.filter((i) => labelKey(i.str) === labelKey(r.label))) {
+        const cells = columnBelow(items, h)
+        let cell: TextItem | undefined
+        if (r.row === 'last') cell = cells[cells.length - 1]
+        else if (r.row === 'term' && ctx.policyTerm && /^\d+$/.test(ctx.policyTerm)) cell = cells.find((c) => rowYear(items, c) === +ctx.policyTerm!)
+        if (!cell) continue
+        const v = valueFrom(cell.str, kind, r)
+        if (v) out.push({ value: v, page: p.page, line: `${h.str.trim()} … ${r.row === 'last' ? 'last row' : `policy year ${ctx.policyTerm}`}: ${cell.str.trim()}` })
+      }
+    }
   } else {
     for (const p of pages) {
       const items = p.items.filter((i) => i.str.trim())
-      for (const h of items.filter((i) => normLabel(i.str) === r.label)) {
+      for (const h of items.filter((i) => labelKey(i.str) === labelKey(r.label))) {
         const below = items.filter((i) => i !== h && i.y < h.y - 2 && i.y > h.y - 60 && overlapX(i, h)).sort((a, b) => b.y - a.y)
         for (const b of below.slice(0, 2)) {
           const v = valueFrom(b.str, kind, r)
@@ -130,7 +191,7 @@ function valueFrom(piece: string, kind: 'number' | 'words', r: LearnedRule): str
     const n = numbersIn(piece)[0]
     return n === undefined ? '' : format(r.field, n * r.factor)
   }
-  let v = piece.trim()
+  let v = stripLead(piece).trim()
   if (CANON[r.field]) {
     // `cut` "," + n: the n-th comma part ("Male, 40, Non-Smoker"); "" = the whole piece.
     if (r.cut) { const n = Number(r.cut.slice(1)) || 0; v = v.split(/[,/]/)[n] ?? '' }
@@ -157,17 +218,23 @@ export function pickInsurer(pages: Page[], rules: LearnedRule[], insurerFound: s
 }
 
 /** Values read with the remembered places of this PI's insurer. A field whose places disagree is left out. */
-export function readLearned(pages: Page[], rules: LearnedRule[], insurerFound: string): { found: Record<string, Found & { learned: true }>; insurer: string; conflicts: string[] } {
+export function readLearned(pages: Page[], rules: LearnedRule[], insurerFound: string, ctx: ReadContext = {}): { found: Record<string, Found & { learned: true; corrects?: boolean }>; insurer: string; conflicts: string[] } {
   const key = pickInsurer(pages, rules, insurerFound)
-  const found: Record<string, Found & { learned: true }> = {}
+  const found: Record<string, Found & { learned: true; corrects?: boolean }> = {}
   const conflicts: string[] = []
   if (!key) return { found, insurer: '', conflicts }
   const mine = rules.filter((r) => insurerKey(r.insurer) === key)
   const text = ' ' + insurerKey(pages.flatMap((p) => p.lines.map((l) => l.text)).join(' ')) + ' '
   const planNamed = (plan: string) => insurerKey(plan).length >= 3 && text.includes(` ${insurerKey(plan)} `)
-  for (const field of new Set(mine.map((r) => r.field))) {
-    const places = mine.filter((r) => r.field === field)
-    const read = places.map((r) => ({ r, hits: readRule(pages, r) })).filter((x) => x.hits.length)
+  // The policy term first: 'row' places of other fields find their row with it.
+  const fields = [...new Set(mine.map((r) => r.field))].sort((a, b) => +(b === 'policy_term') - +(a === 'policy_term'))
+  const here = { ...ctx }
+  // The same place saved twice in OCR spellings ("term (ii)", "term (il)") counts once.
+  const placeKey = (r: LearnedRule) => [r.how, labelKey(r.label), r.offset, r.factor, r.cut, r.row ?? ''].join('|')
+  for (const field of fields) {
+    const all = mine.filter((r) => r.field === field)
+    const places = all.filter((r, i) => all.findIndex((x) => placeKey(x) === placeKey(r) && insurerKey(x.plan) === insurerKey(r.plan)) === i)
+    const read = places.map((r) => ({ r, hits: readRule(pages, r, here) })).filter((x) => x.hits.length)
     const hits = read.flatMap((x) => x.hits)
     const values = [...new Set(hits.map((h) => h.value))]
     // One place alone may be a heading that means something else in this PI (another plan from the same insurer),
@@ -177,7 +244,10 @@ export function readLearned(pages: Page[], rules: LearnedRule[], insurerFound: s
       const samePlan = !!r.plan && planNamed(r.plan)
       if (!samePlan || places.filter((p) => p.plan === r.plan).length > 1) continue
     }
-    if (values.length === 1) found[field] = { value: values[0], page: hits[0].page, line: hits[0].line, learned: true }
+    if (values.length === 1) {
+      found[field] = { value: values[0], page: hits[0].page, line: hits[0].line, learned: true, corrects: read.some((x) => x.r.corrects) }
+      if (field === 'policy_term' && !here.policyTerm) here.policyTerm = values[0]
+    }
     else if (values.length > 1) conflicts.push(FIELDS.find((f) => f.key === field)?.label ?? field)
   }
   return { found, insurer: mine[0].insurer, conflicts }
@@ -186,13 +256,16 @@ export function readLearned(pages: Page[], rules: LearnedRule[], insurerFound: s
 // ---------- Learning ----------
 
 /** The places in this PI that hold `value` for `field`, as rules. */
-function placesFor(pages: Page[], field: string, value: string, personal: string[]): Omit<LearnedRule, 'insurer' | 'plan'>[] {
+function placesFor(pages: Page[], field: string, value: string, personal: string[], ctx: ReadContext = {}): Omit<LearnedRule, 'insurer' | 'plan'>[] {
   const kind = KINDS[field]
   const fkind = FIELDS.find((f) => f.key === field)?.kind ?? ''
   const out: Omit<LearnedRule, 'insurer' | 'plan'>[] = []
-  const add = (r: Omit<LearnedRule, 'insurer' | 'plan' | 'field'>) => {
-    if (!safeLabel(r.label, personal)) return
-    if (!out.some((o) => o.how === r.how && o.label === r.label && o.offset === r.offset)) out.push({ field, ...r })
+  const add = (r: Omit<LearnedRule, 'insurer' | 'plan' | 'field'>, colon = false) => {
+    // A label kept as ops' PI shows it, without a bracketed currency sign; an offset-0 label stays as written, as the
+    // value follows it in the same piece.
+    if (r.offset !== 0 || r.how !== 'beside') r = { ...r, label: cleanLabel(r.label) }
+    if (!safeLabel(r.label, personal, colon)) return
+    if (!out.some((o) => o.how === r.how && labelKey(o.label) === labelKey(r.label) && o.offset === r.offset && (o.row ?? '') === (r.row ?? ''))) out.push({ field, ...r })
   }
   if (kind === 'number') {
     const v = Number(value.replace(/[^\d.]/g, ''))
@@ -226,6 +299,17 @@ function placesFor(pages: Page[], field: string, value: string, personal: string
           if (!first) continue
           const head = !/\d/.test(first.str) || hasLetters(first.str) ? (hasLetters(first.str) ? first : above[1] && hasLetters(above[1].str) && !/\d{2}/.test(first.str) ? above[1] : null) : null
           if (head && head.str.trim().length <= 45 && !isNumberish(head.str)) add({ how: 'under', label: normLabel(head.str), offset: 0, factor, cut: '' })
+          // Row: deeper in a year-by-year table, under its column heading, on the policy term's row or the last row.
+          // Only sums and premiums (totals to date, values at the end): terms and ages are not read from tables.
+          if (!['money', 'sum'].includes(fkind)) continue
+          const col = items.filter((i) => i !== it && i.y > it.y + 2 && overlapX(i, it)).sort((a, b) => a.y - b.y)
+          const heading = col.find((i) => hasLetters(i.str) && !isNumberish(i.str) && !/^\s*age\s+\d/i.test(i.str))
+          if (!heading || heading.str.trim().length > 45 || !columnBelow(items, heading).includes(it)) continue
+          if (columnBelow(items, heading)[0] === it) continue // the first value under the heading: that is 'under'
+          const label = normLabel(heading.str)
+          if (ctx.policyTerm && rowYear(items, it) === +ctx.policyTerm) add({ how: 'row', label, offset: 0, factor, cut: '', row: 'term' })
+          const cells = columnBelow(items, heading)
+          if (cells[cells.length - 1] === it) add({ how: 'row', label, offset: 0, factor, cut: '', row: 'last' })
         }
       }
       if (out.length) break // the plainest factor that finds the value wins (monthly x 12 only when the yearly is nowhere)
@@ -241,9 +325,12 @@ function placesFor(pages: Page[], field: string, value: string, personal: string
           // "Gender: Male" in one piece.
           const m = piece.match(/^([^:]{3,40}):\s*(.+)$/)
           if (m && CANON[field](m[2]) === want && hasLetters(m[1])) add({ how: 'beside', label: normLabel(m[1]), offset: 0, factor: 1, cut: '' })
+          // The label is the piece before, passing over a ":" written as a piece of its own.
+          let j = i - 1
+          while (j > 0 && isPunct(ps[j])) j--
           bits.forEach((bit, n) => {
-            if (CANON[field](bit) !== want || i === 0 || isNumberish(ps[i - 1])) return
-            add({ how: 'beside', label: normLabel(ps[i - 1]), offset: 1, factor: 1, cut: bits.length > 1 ? `,${n}` : '' })
+            if (CANON[field](stripLead(bit)) !== want || j < 0 || i === 0 || isNumberish(ps[j])) return
+            add({ how: 'beside', label: normLabel(ps[j]), offset: i - j, factor: 1, cut: bits.length > 1 ? `,${n}` : '' })
           })
         })
       }
@@ -261,15 +348,18 @@ function placesFor(pages: Page[], field: string, value: string, personal: string
       for (const l of p.lines) {
         const ps = parts(l)
         ps.forEach((piece, i) => {
-          const np = normWords(piece)
+          const np = normWords(stripLead(piece))
           const at = np.indexOf(want)
           if (at < 0) return
           const after = np.slice(at + want.length)
           const cut = after.trim() ? after.trim()[0] : ''
           // "Plan: Term 20" in one piece.
           const before = np.slice(0, at).trim()
-          if (before && hasLetters(before) && /:$/.test(before) && !cut) add({ how: 'beside', label: normLabel(before), offset: 0, factor: 1, cut: '' })
-          else if (at === 0 && i > 0 && !isNumberish(ps[i - 1])) add({ how: 'beside', label: normLabel(ps[i - 1]), offset: 1, factor: 1, cut: /[,;(/]/.test(cut) ? cut : '' })
+          // The label is the piece before, passing over a ":" written as a piece of its own ("Plan  :  Term 20").
+          let j = i - 1
+          while (j > 0 && isPunct(ps[j])) j--
+          if (before && hasLetters(before) && /:$/.test(before) && !cut) add({ how: 'beside', label: normLabel(before), offset: 0, factor: 1, cut: '' }, true)
+          else if (at === 0 && j >= 0 && i > 0 && !isNumberish(ps[j])) add({ how: 'beside', label: normLabel(ps[j]), offset: i - j, factor: 1, cut: /[,;(/]/.test(cut) ? cut : '' }, /:\s*$/.test(ps[j]) || ps.slice(j + 1, i).some((x) => x.includes(':')) || /^\s*:/.test(piece))
         })
       }
       const items = p.items.filter((i) => i.str.trim())
@@ -299,9 +389,12 @@ export function learn(pages: Page[], values: Record<string, string>, found: Reco
     const f = found[field]
     const fromLayout = f && f.value === value && !f.guess && !(f as { learned?: boolean }).learned && !/^Calculated:/.test(f.line ?? '') && f.page !== null
     if (fromLayout) continue
-    for (const r of placesFor(pages, field, value, field === 'insured_name' || field === 'date_of_birth' ? [] : personal)) {
-      const rule: LearnedRule = { insurer: insurer.trim(), plan: (values.policy_name ?? '').trim(), ...r }
-      const back = [...new Set(readRule(pages, rule).map((h) => h.value))]
+    const ctx = { policyTerm: (values.policy_term ?? '').trim() }
+    // Ops changed what the reader's own rules gave (not a blank, not a general-rules guess): remember that too.
+    const corrects = !!f?.value && !f.guess && !(f as { learned?: boolean }).learned && f.value !== value
+    for (const r of placesFor(pages, field, value, field === 'insured_name' || field === 'date_of_birth' ? [] : personal, ctx)) {
+      const rule: LearnedRule = { insurer: insurer.trim(), plan: (values.policy_name ?? '').trim(), ...r, ...(corrects ? { corrects: true } : {}) }
+      const back = [...new Set(readRule(pages, rule, ctx).map((h) => h.value))]
       const same = (a: string) => CANON[field] ? a === CANON[field](value) : (KINDS[field] === 'number' ? close(Number(a), Number(value)) || Math.abs(Number(a) - Number(value)) < 0.011 : normWords(a) === normWords(value))
       if (back.length === 1 && same(back[0])) out.push(rule)
     }
@@ -316,17 +409,23 @@ export function learn(pages: Page[], values: Record<string, string>, found: Reco
  */
 export function applyLearned(found: Record<string, Found>, pages: Page[], rules: LearnedRule[]): { found: Record<string, Found>; notes: string[]; insurer: string } {
   if (!rules.length) return { found, notes: [], insurer: '' }
-  const { found: learned, insurer, conflicts } = readLearned(pages, rules, found.insurer?.value ?? '')
+  const { found: learned, insurer, conflicts } = readLearned(pages, rules, found.insurer?.value ?? '', { policyTerm: found.policy_term?.value })
   const out = { ...found }
   let used = 0
+  const replaced: string[] = []
   for (const [k, f] of Object.entries(learned)) {
     const now = out[k]
-    if (now?.value && !now.guess) continue
-    out[k] = f
+    if (now?.value === f.value) continue
+    // The reader's own value stays, unless ops corrected that field for this insurer before.
+    if (now?.value && !now.guess && !f.corrects) continue
+    if (now?.value && !now.guess) replaced.push(`${FIELDS.find((x) => x.key === k)?.label ?? k} (the reader gave ${now.value})`)
+    const { corrects: _c, ...keep } = f
+    out[k] = keep
     used++
   }
   const notes: string[] = []
   if (used) notes.push(`${used} value${used === 1 ? '' : 's'} read from places ops taught for ${insurer} (tagged "Learned"). Please check them.`)
+  if (replaced.length) notes.push(`Ops corrected these for ${insurer} before, so the taught place was used instead of the reader's rules: ${replaced.join(', ')}.`)
   if (conflicts.length) notes.push(`Places taught for ${insurer} gave different values for ${conflicts.join(', ')}, so ${conflicts.length === 1 ? 'it was' : 'they were'} left blank.`)
   return { found: out, notes, insurer }
 }
