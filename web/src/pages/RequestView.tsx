@@ -8,6 +8,7 @@ import { usePiMembers } from '../lib/modules'
 import { EVENT_LABEL, ageOn, dobDmy, dueInfo, fmtDate, fmtDateTime, says } from '../lib/options'
 import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestClient, RequestComment, RequestDocument, RequestEvent, RequestStatus } from '../lib/types'
+import { fmtMoney, vipName } from '../lib/formOptions'
 import { Fact, ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
 import Files from '../components/Files'
 import PiComparison from '../components/PiComparison'
@@ -145,18 +146,35 @@ export default function RequestView() {
           <section className="card">
             <h2 className="eyebrow">Request</h2>
             <dl className="facts">
-              <Fact label="Product">{r.product} · {r.plan_category}</Fact>
+              {!intro && <Fact label="Client">{vipName(r.gender)}</Fact>}
+              {r.insurer || r.plan_name
+                ? <Fact label="Insurer · Product">{[r.insurer, r.plan_name].filter(Boolean).join(' · ')}{r.plan_name && !r.plan_kb_id ? ' (not in the Knowledge Bank)' : ''}</Fact>
+                : <Fact label="Product">{r.product} · {r.plan_category}</Fact>}
+              {r.client_type && <Fact label="Client type">{r.client_type}</Fact>}
+              {r.residency && <Fact label="Residency · Nationality">{r.residency} · {r.nationality ?? '—'}</Fact>}
               {r.date_of_birth ? <Fact label="Date of birth">{dobDmy(r.date_of_birth)} (age {ageOn(r.date_of_birth)})</Fact> : <Fact label="Age band">{r.age_band}</Fact>}
               <Fact label="Gender · Smoker">{r.gender} · {r.smoker ? 'Yes' : 'No'}</Fact>
               <Fact label="Coverage term">{r.coverage_term}</Fact>
-              <Fact label="Sum assured">{r.sum_assured_band}</Fact>
-              <Fact label="Premium · CI benefit">{r.premium_type} · {r.ci_benefit ? 'Yes' : 'No'}</Fact>
+              {r.amount != null && r.currency
+                ? <Fact label={r.amount_basis === 'premium' ? 'Premium (a year)' : 'Sum assured'}>{fmtMoney(r.amount, r.currency)}</Fact>
+                : <Fact label="Sum assured">{r.sum_assured_band}</Fact>}
+              <Fact label={r.amount != null ? 'CI benefit' : 'Premium · CI benefit'}>{r.amount != null ? '' : `${r.premium_type} · `}{r.ci_benefit ? 'Yes' : 'No'}</Fact>
               {!intro && <Fact label="Introducer">{nameOf(people, r.introducer_id)}{people[r.introducer_id]?.company ? ` · ${people[r.introducer_id].company}` : ''}</Fact>}
               {!intro && <Fact label="Handled by">{nameOf(people, r.assignee_id)}</Fact>}
               <Fact label="Submitted">{fmtDate(r.submitted_at)}</Fact>
               {!intro && <Fact label="Due">{open && r.due_at ? fmtDateTime(r.due_at) : '—'}</Fact>}
               {!intro && <Fact label="Priority">{urgent ? (r.urgent_auto ? 'Urgent (overdue)' : 'Urgent') : 'Normal'}</Fact>}
             </dl>
+            {r.compare_term && (
+              <div>
+                <span className="muted small">Term product comparison (Knowledge Bank products to illustrate)</span>
+                <ol style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                  {r.plan_kb_id && <li>{r.insurer} · {r.plan_name} <span className="small muted">(product, field 9)</span></li>}
+                  {r.compare_product_1 && <li>{r.compare_product_1} <span className="small muted">(1st product, field 12)</span></li>}
+                  {r.compare_product_2 && <li>{r.compare_product_2} <span className="small muted">(2nd product, field 13)</span></li>}
+                </ol>
+              </div>
+            )}
             {r.remarks && <p style={{ margin: 0 }}><span className="muted small">Remarks</span><br />{r.remarks}</p>}
           </section>
 

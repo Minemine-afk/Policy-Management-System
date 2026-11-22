@@ -127,9 +127,13 @@ export default function Backlog() {
 
   function exportCsv() {
     const head = ['Ref', 'Status', 'Priority', 'Product', 'Plan category', 'Date of birth', 'Age band', 'Gender', 'Smoker', 'Coverage term',
-      'Sum assured', 'Premium type', 'CI benefit', 'Introducer', 'Firm', 'Handled by', 'Submitted', 'Due', 'Completed', 'Deadline status']
+      'Sum assured', 'Premium type', 'CI benefit', 'Client type', 'Residency', 'Nationality', 'Insurer', 'Plan', 'Currency',
+      'Sum assured / premium', 'Amount', 'Compare: 1st product', 'Compare: 2nd product', 'Introducer', 'Firm', 'Handled by', 'Submitted', 'Due', 'Completed', 'Deadline status']
     const body = list.map((r) => [r.ref, STATUS_LABEL[r.status], r.priority === 'urgent' ? 'Urgent' : 'Normal', r.product, r.plan_category,
       r.date_of_birth ? dobDmy(r.date_of_birth) : '', r.age_band, r.gender, r.smoker ? 'Yes' : 'No', r.coverage_term, r.sum_assured_band, r.premium_type, r.ci_benefit ? 'Yes' : 'No',
+      r.client_type ?? '', r.residency ?? '', r.nationality ?? '', r.insurer ?? '', r.plan_name ?? '', r.currency ?? '',
+      r.amount_basis === 'premium' ? 'Premium' : r.amount_basis ? 'Sum assured' : '', r.amount != null ? String(r.amount) : '',
+      r.compare_term ? r.compare_product_1 ?? '' : '', r.compare_term ? r.compare_product_2 ?? '' : '',
       nameOf(people, r.introducer_id), people[r.introducer_id]?.company ?? '', r.assignee_id ? nameOf(people, r.assignee_id) : '',
       r.submitted_at, r.due_at ?? '', r.completed_at ?? '', due(r)?.label ?? ''])
     downloadCsv(`pi-requests-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...body])

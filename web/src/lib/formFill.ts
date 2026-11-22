@@ -2,11 +2,12 @@
 // Only the profile fields ops and bsd can already see on the request are used: gender, smoker and date of birth
 // (or the age band, on requests made before the form asked for the date of birth).
 // The client's real name is never used (only the introducer can see it); like the PIs themselves, the name
-// becomes "Mr VIP" or "Mrs VIP" from the gender. The form has no residency.
+// becomes "Mr VIP" or "Ms VIP" from the gender (Kumar, 22 Nov 2026). Residency comes from the form when the
+// PI has none (requests from 23 Nov 2026).
 import type { Found } from './piExtract.ts'
 
 /** date_of_birth: YYYY-MM-DD, or empty on older requests. */
-export interface FormProfile { gender: string; smoker: boolean; age_band: string; date_of_birth?: string | null }
+export interface FormProfile { gender: string; smoker: boolean; age_band: string; date_of_birth?: string | null; residency?: string | null }
 
 /** Marks a value that came from the request form, not the PI (the "line" of a Found). */
 export const FROM_FORM = 'From the request form'
@@ -28,8 +29,9 @@ export function fillFromForm(found: Record<string, Found>, values: Record<string
   else if (/smok/i.test(v.underwriting_class) && norm(v.underwriting_class) !== norm(formSmoker)) notes.push(`The PI says ${v.underwriting_class}, but the request form says ${formSmoker}.`)
   if (blank('insured_name')) {
     const g = (v.gender ?? '').trim().toLowerCase()
-    if (g === 'male' || g === 'female') put('insured_name', g === 'male' ? 'Mr VIP' : 'Mrs VIP')
+    if (g === 'male' || g === 'female') put('insured_name', g === 'male' ? 'Mr VIP' : 'Ms VIP')
   }
+  if (blank('residency') && form.residency) put('residency', form.residency)
   const formDob = (form.date_of_birth ?? '').replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
   if (blank('date_of_birth') && /^\d{2}\/\d{2}\/\d{4}$/.test(formDob)) put('date_of_birth', formDob)
   else if (blank('date_of_birth') && form.age_band) notes.push(`Client age band on the request form: ${form.age_band}.`)

@@ -34,13 +34,13 @@ do $$ begin
 end $$;
 
 -- 2. Create and edit
-select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}',
+select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}',
                       '{"client_name":"[Sample] Client Golf"}');
 select pg_temp.expect_error($$select create_request('{"gender":"Male"}', '{"client_name":"x"}')$$, 'date of birth');
-select pg_temp.expect_error($$select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'date of birth');
-select pg_temp.expect_error($$select create_request('{"date_of_birth":"2999-01-01","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'future');
-select pg_temp.expect_error($$select create_request('{"date_of_birth":"17/05/1990","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'as a date');
-select pg_temp.expect_error($$select create_request('{"date_of_birth":"1900-01-01","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000"}', '{"client_name":"x"}')$$, 'over 100 years');
+select pg_temp.expect_error($$select create_request('{"age_band":"30 to 34","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}', '{"client_name":"x"}')$$, 'date of birth');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"2999-01-01","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}', '{"client_name":"x"}')$$, 'future');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"17/05/1990","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}', '{"client_name":"x"}')$$, 'as a date');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"1900-01-01","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}', '{"client_name":"x"}')$$, 'over 100 years');
 select pg_temp.expect_error($$select create_request('{"date_of_birth":"1990-05-17","gender":"Male"}', '{"client_name":"x"}')$$, 'Fill in');
 do $$ begin
   if (select date_of_birth from request_list where ref = 'PI-00007') <> '1990-05-17'
@@ -50,12 +50,12 @@ do $$ begin
   end if;
   raise notice 'ok: date of birth is compulsory and sets the age band';
 end $$;
-select pg_temp.expect_error($$select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', '{"client_name":""}')$$, 'client name');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}', '{"client_name":""}')$$, 'client name');
 do $$ begin
   if (select count(*) from pi_requests) <> 4 then raise exception 'new request not visible'; end if;
   raise notice 'ok: introducer created a request';
 end $$;
-select pg_temp.expect_error($$select update_request('20000000-0000-0000-0000-000000000004', '{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y"}', null)$$, 'Not your request');
+select pg_temp.expect_error($$select update_request('20000000-0000-0000-0000-000000000004', '{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","sum_assured_band":"y","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}', null)$$, 'Not your request');
 select pg_temp.expect_error($$select resubmit_request('20000000-0000-0000-0000-000000000001')$$, 'sent back');
 
 -- 3. Introducer 2 cannot see introducer 1's data
@@ -236,7 +236,7 @@ end $$;
 -- 8. Priority (urgent flag): ops and bsd only. Introducers can neither see nor set it, nor see due times.
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 select pg_temp.expect_error($$select set_priority((select id from pi_requests where ref = 'PI-00007'), 'urgent')$$, 'Only the assigned ops user or bsd');
-select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","priority":"urgent"}',
+select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"6 to 10 years","sum_assured_band":"Up to S$100,000","priority":"urgent","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","insurer":"Other insurer","plan_name":"Some term plan","currency":"SGD","amount":"100000"}',
                       '{"client_name":"[Sample] Client Hotel"}');
 select pg_temp.expect_error($$select priority from pi_requests$$, 'permission denied');
 select pg_temp.expect_error($$select urgent_auto from pi_requests$$, 'permission denied');
@@ -697,6 +697,67 @@ do $$ begin
   if (select count(*) from audit_log where action = 'insurer.taught' and entity_id = 'Maple Life' and details ->> 'places' = '2') <> 1 then raise exception 'teaching not audited'; end if;
   if (select count(*) from audit_log where action = 'insurer.forgotten') <> 2 then raise exception 'deleting not audited'; end if;
   raise notice 'ok: teaching and deleting are in the audit log';
+end $$;
+
+-- 20. Knowledge Bank and the term product comparison on the request form
+select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
+do $$ begin
+  if (select count(*) from kb_checked_products) <> 5 then raise exception 'introducer should see 5 checked products, saw %', (select count(*) from kb_checked_products); end if;
+  if exists (select 1 from kb_checked_products where name = 'LionGate Term Plus') then raise exception 'draft product visible'; end if;
+  if exists (select 1 from kb_products) or exists (select 1 from kb_documents) or exists (select 1 from kb_rates) then raise exception 'introducer reads the Knowledge Bank tables'; end if;
+  if (select count(*) from kb_checked_documents) <> 10 or not exists (select 1 from kb_checked_rates) then raise exception 'introducer should see the checked documents and rates'; end if;
+  raise notice 'ok: introducers see only checked Knowledge Bank products';
+end $$;
+select pg_temp.expect_error($$insert into kb_products (insurer, name) values ('X', 'Y')$$, 'permission denied');
+select pg_temp.expect_error($$update kb_products set status = 'verified'$$, 'permission denied');
+do $$
+declare hl uuid := (select id from kb_checked_products where name = 'Harbour Term Secure');
+        sa uuid := (select id from kb_checked_products where name = 'Straits LifeGuard Term');
+        km uuid := (select id from kb_checked_products where name = 'Kallang FamilyTerm');
+        base jsonb := '{"date_of_birth":"1990-05-17","gender":"Female","smoker":false,"coverage_term":"21 to 30 years","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","currency":"SGD","amount":"1000000","amount_basis":"sum_assured","ci_benefit":true}';
+        rid uuid;
+begin
+  rid := create_request(base || jsonb_build_object('insurer', 'Wrong name', 'plan_name', 'Wrong plan', 'plan_kb_id', hl,
+           'compare_term', true, 'compare_kb_1', sa, 'compare_kb_2', km, 'compare_product_1', 'Fake name'), '{"client_name":"[Sample] Client India"}');
+  if not exists (select 1 from request_list where id = rid and insurer = 'Harbour Life (sample)' and plan_name = 'Harbour Term Secure'
+                 and compare_term and compare_product_1 = 'Straits Assurance (sample) · Straits LifeGuard Term' and compare_kb_2 = km
+                 and sum_assured_band = 'Sum assured SGD 1,000,000' and age_band is not null) then
+    raise exception 'request did not store the Knowledge Bank names';
+  end if;
+  rid := create_request(base || '{"insurer":"Other insurer","plan_name":"A plan not in the Knowledge Bank","amount_basis":"premium","amount":"2400"}', '{"client_name":"[Sample] Client Juliet"}');
+  if not exists (select 1 from request_list where id = rid and plan_kb_id is null and not compare_term and sum_assured_band = 'Premium SGD 2,400') then
+    raise exception 'request with a plan outside the Knowledge Bank not stored';
+  end if;
+  raise notice 'ok: products on the request come from the Knowledge Bank';
+end $$;
+select pg_temp.expect_error($$select create_request(('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","currency":"SGD","amount":"1","insurer":"Other","plan_name":"P","compare_term":true,"compare_kb_1":"' || (select id from kb_checked_products where name = 'Harbour Term Secure') || '"}')::jsonb, '{"client_name":"x"}')$$, 'at least 2 products');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","currency":"SGD","amount":"1","insurer":"Other","plan_name":"P","compare_term":true}', '{"client_name":"x"}')$$, '1st product to compare');
+select pg_temp.expect_error($$select create_request(('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","currency":"SGD","amount":"1","plan_kb_id":"' || (select id from kb_checked_products where name = 'Harbour Term Secure') || '","compare_term":true,"compare_kb_1":"' || (select id from kb_checked_products where name = 'Harbour Term Secure') || '"}')::jsonb, '{"client_name":"x"}')$$, 'different products');
+reset role;
+create temp table lg as select id from kb_products where name = 'LionGate Term Plus';
+grant select on lg to authenticated;
+set role authenticated;
+select pg_temp.expect_error($$select create_request(('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","client_type":"Family","residency":"Singapore citizen","nationality":"Singaporean","currency":"SGD","amount":"1","plan_kb_id":"' || (select id from lg) || '"}')::jsonb, '{"client_name":"x"}')$$, 'no longer in the Knowledge Bank');
+select pg_temp.expect_error($$select create_request('{"date_of_birth":"1990-05-17","gender":"Male","smoker":false,"coverage_term":"x","client_type":"Family","residency":"","nationality":"Singaporean","currency":"SGD","amount":"1","insurer":"Other","plan_name":"P"}', '{"client_name":"x"}')$$, 'residency');
+reset role;
+update kb_documents set valid_until = current_date - 1 where doc_type = 'Rate sheet' and product_id = (select id from kb_products where name = 'Kallang FamilyTerm');
+set role authenticated;
+do $$ begin
+  if (select count(*) from kb_checked_products) <> 4 or exists (select 1 from kb_checked_rates r join kb_products p on p.id = r.product_id where p.name = 'Kallang FamilyTerm') then
+    raise exception 'product with an out-of-date document still offered';
+  end if;
+  raise notice 'ok: a product drops out when one of its documents is out of date';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$ begin
+  if (select count(*) from kb_products) <> 6 or (select count(*) from kb_checked_products) <> 4 then raise exception 'ops should read the whole Knowledge Bank'; end if;
+  if not exists (select 1 from request_list where plan_name = 'Harbour Term Secure') then raise exception 'ops should see the new form fields'; end if;
+  raise notice 'ok: ops read the Knowledge Bank and the new request fields';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
+do $$ begin
+  if exists (select 1 from kb_checked_products) or exists (select 1 from kb_products) then raise exception 'admin should not see products'; end if;
+  raise notice 'ok: admin does not see the product comparison';
 end $$;
 
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

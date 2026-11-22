@@ -137,7 +137,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           }
           // Client particulars the PI doesn't show come from the request form (never the client's real name).
           const filled = fillFromForm(found, Object.fromEntries(FIELDS.map((f) => [f.key, found[f.key]?.value ?? ''])),
-            { gender: req.gender, smoker: req.smoker, age_band: req.age_band, date_of_birth: req.date_of_birth })
+            { gender: req.gender, smoker: req.smoker, age_band: req.age_band, date_of_birth: req.date_of_birth, residency: req.residency })
           const issueFound = findIssueDate(pages)
           out.push({ fileName: doc.file_name, found: filled.found, notes: [...notes, ...filled.notes], discounted, values: filled.values,
             issueDate: issueFound?.value ?? '', issueFound, pages, ocrPages: [...ocrPages] })

@@ -1,6 +1,7 @@
 -- ONLY FOR a project that ran 1h-upgrade.sql (the new request form, 11-12 Nov 2026), which Kumar then asked to undo.
 -- Puts the original request form back: plan category, age band, coverage term, sum assured band and CI benefit.
--- Paste the whole file into SQL Editor and Run once. Safe to run again, and harmless if 1h-upgrade.sql never ran.
+-- Paste the whole file into SQL Editor and Run once. It stops without changing anything if 1h-upgrade.sql never ran
+-- (it would otherwise drop the date of birth and the new request form's fields added by 1l and 1p).
 -- What happens to the requests:
 --  * requests from before 1h-upgrade.sql get their original values back (1h had copied them into the remarks and the
 --    new fields), and that copied "Earlier form: ..." line is removed from the remarks again
@@ -10,6 +11,12 @@
 --  * the new-form columns are then removed
 
 begin;
+-- 1h added a "riders" column that nothing else adds. Without it, 1h never ran (or was already undone): stop here.
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'pi_requests' and column_name = 'riders') then
+    raise exception 'Not needed: 1h-upgrade.sql was never run on this project (or is already undone). Nothing was changed.';
+  end if;
+end $$;
 alter table public.pi_requests
   add column if not exists plan_category text not null default 'All',
   add column if not exists age_band text,

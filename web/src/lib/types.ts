@@ -30,6 +30,21 @@ export interface PiRequest {
   premium_type: string
   ci_benefit: boolean
   remarks: string | null
+  // PI request form from 23 Nov 2026 (deck wireframe 2). Older requests have these empty.
+  client_type?: string | null
+  residency?: string | null
+  nationality?: string | null
+  insurer?: string | null
+  plan_name?: string | null
+  plan_kb_id?: string | null      // set when the product was picked from the Knowledge Bank
+  currency?: string | null
+  amount_basis?: 'sum_assured' | 'premium' | null
+  amount?: number | string | null
+  compare_term?: boolean | null
+  compare_product_1?: string | null
+  compare_kb_1?: string | null
+  compare_product_2?: string | null
+  compare_kb_2?: string | null
   status_reason: string | null
   // Ops and bsd only: the database returns null for introducers (they never see priority or deadlines).
   priority: 'normal' | 'urgent' | null
