@@ -1,0 +1,118 @@
+// The Knowledge Hub module's Knowledge Bank: documents (with versions and expiry) and product records with
+// maker-checker. Ops and BSD keep it; a BSD person who did not make a change checks it.
+import { supabase } from './supabase'
+import { FACT_ROWS } from './kb'
+
+export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Campaign', 'Regulatory', 'Other']
+export const KB_ACCEPT = '.pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx'
+export const KB_MAX_MB = 20
+/** Documents expiring within this many days are flagged (owners get time to upload the new version). */
+export const EXPIRY_WARN_DAYS = 40
+
+export interface KbDoc {
+  id: string; product_id: string | null; insurer: string; title: string; doc_type: string; version: string
+  effective_from: string | null; valid_until: string | null; storage_path: string | null; file_name: string | null
+  file_size: number | null; status: 'new' | 'checked'; replaces: string | null; replaced_by: string | null
+  uploaded_by: string | null; checked_by: string | null; checked_at: string | null; created_at: string; is_sample: boolean
+}
+
+export interface Fact { v?: string; doc?: string; page?: number }
+export interface Rate { age: number; gender: 'Male' | 'Female'; smoker: boolean; rate: number; ci_rate?: number | null }
+/** The editable record (what kb_save_product takes, and what a draft holds). */
+export interface ProductRecord {
+  insurer: string; name: string; category: string; dpi: boolean; jurisdiction: string; currencies: string[]
+  entry_age_min: number | string; entry_age_max: number | string; residency: string[]
+  sa_min: number | string | null; sa_max: number | string | null; has_tpd: boolean; has_ci: boolean
+  facts: Record<string, Fact>; rates?: Rate[]
+}
+export interface KbProductRow extends ProductRecord {
+  id: string; product_type: string; status: 'draft' | 'check' | 'verified' | 'withdrawn'; version: number; is_sample: boolean
+  pending: ProductRecord | null; pending_state: 'draft' | 'check' | null; pending_by: string | null; pending_at: string | null
+  pending_note: string | null; submitted_by: string | null; verified_by: string | null; verified_at: string | null
+  created_by: string | null; updated_at: string
+}
+export interface HistoryRow { id: number; product_id: string; version: number; record: ProductRecord & { rates_changed?: boolean }; changed_by: string | null; checked_by: string | null; checked_at: string }
+
+/** The comparison rows a person fills in (the rest come from the record's own fields). */
+export const FACT_FIELDS = FACT_ROWS.filter((r) => !r.key.startsWith('_'))
+
+export const blankRecord = (): ProductRecord => ({
+  insurer: '', name: '', category: 'Insurance', dpi: false, jurisdiction: 'Onshore', currencies: ['SGD'],
+  entry_age_min: 18, entry_age_max: 65, residency: [], sa_min: null, sa_max: null, has_tpd: false, has_ci: false, facts: {},
+})
+
+/** The checked version as an editable record. */
+export const liveRecord = (p: KbProductRow): ProductRecord => ({
+  insurer: p.insurer, name: p.name, category: p.category, dpi: p.dpi, jurisdiction: p.jurisdiction, currencies: p.currencies,
+  entry_age_min: p.entry_age_min, entry_age_max: p.entry_age_max, residency: p.residency,
+  sa_min: p.sa_min == null ? null : Number(p.sa_min), sa_max: p.sa_max == null ? null : Number(p.sa_max),
+  has_tpd: p.has_tpd, has_ci: p.has_ci, facts: p.facts ?? {},
+})
+
+export const today = () => new Date().toISOString().slice(0, 10)
+export const daysLeft = (iso: string | null) => (iso ? Math.ceil((new Date(iso + 'T00:00:00').getTime() - new Date(today() + 'T00:00:00').getTime()) / 86_400_000) : null)
+
+/** Where a document stands, in plain words, with a pill tone. */
+export function docState(d: KbDoc): { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info' } {
+  if (d.replaced_by) return { text: 'Older version', tone: 'grey' }
+  const left = daysLeft(d.valid_until)
+  if (left != null && left < 0) return { text: 'Out of date', tone: 'bad' }
+  if (d.status === 'new') return { text: d.replaces ? 'New version, not checked' : 'New, not checked', tone: 'info' }
+  if (left != null && left <= EXPIRY_WARN_DAYS) return { text: `Expires in ${left} day${left === 1 ? '' : 's'}`, tone: 'warn' }
+  return { text: 'Checked', tone: 'ok' }
+}
+
+/** Where a product record stands. */
+export function productState(p: KbProductRow, usable: boolean): { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info' | 'purple' } {
+  if (p.pending_state === 'check') return { text: p.status === 'verified' ? 'Changes waiting for check' : 'Waiting for check', tone: 'purple' }
+  if (p.status === 'withdrawn') return { text: 'Withdrawn', tone: 'grey' }
+  if (p.status === 'verified' && !usable) return { text: 'A source document is out of date', tone: 'bad' }
+  if (p.status === 'verified') return { text: p.pending ? 'Checked · draft changes' : 'Checked', tone: 'ok' }
+  return { text: p.pending_note ? 'Draft · sent back' : 'Draft', tone: 'info' }
+}
+
+export async function loadDocs(): Promise<KbDoc[]> {
+  const { data } = await supabase.from('kb_documents').select('*').order('insurer').order('title').order('created_at', { ascending: false })
+  return (data as KbDoc[]) ?? []
+}
+export async function loadProducts(): Promise<KbProductRow[]> {
+  const { data } = await supabase.from('kb_products').select('*').order('insurer').order('name')
+  return (data as KbProductRow[]) ?? []
+}
+/** Ids of the products Compare products offers now. */
+export async function loadUsable(): Promise<Set<string>> {
+  const { data } = await supabase.from('kb_checked_products').select('id')
+  return new Set(((data as { id: string }[]) ?? []).map((x) => x.id))
+}
+
+export async function openDoc(d: KbDoc): Promise<string | null> {
+  if (!d.storage_path) return 'No file was uploaded for this sample document.'
+  const { data, error } = await supabase.storage.from('kb-docs').createSignedUrl(d.storage_path, 60)
+  if (error || !data) return error?.message ?? 'Could not open the file'
+  window.open(data.signedUrl, '_blank', 'noopener')
+  return null
+}
+
+export const docLabel = (d: KbDoc) => (d.version && !d.title.endsWith(d.version) ? `${d.title} ${d.version}` : d.title)
+
+/** Rates as CSV lines: age,gender,smoker,rate,ci_rate (a header line is optional). */
+export const RATES_HEADER = 'age,gender,smoker,rate,ci_rate'
+export function ratesToCsv(rates: Rate[]) {
+  return [RATES_HEADER, ...rates.map((r) => [r.age, r.gender, r.smoker ? 'yes' : 'no', r.rate, r.ci_rate ?? ''].join(','))].join('\n')
+}
+export function parseRates(text: string): { rates: Rate[]; error: string } {
+  const rates: Rate[] = []
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  for (const [i, line] of lines.entries()) {
+    const c = line.split(/[,\t;]/).map((x) => x.trim())
+    if (i === 0 && /age/i.test(c[0])) continue
+    const age = Number(c[0]), rate = Number(c[3]), ci = c[4] ? Number(c[4]) : null
+    const g = /^f/i.test(c[1]) ? 'Female' : /^m/i.test(c[1]) ? 'Male' : ''
+    const smoker = /^(y|yes|true|1|s|smoker)$/i.test(c[2]) ? true : /^(n|no|false|0|ns|non-smoker)$/i.test(c[2]) ? false : null
+    if (!Number.isInteger(age) || age < 0 || age > 100 || !g || smoker == null || !(rate > 0) || (ci != null && !(ci > 0))) {
+      return { rates: [], error: `Line ${i + 1} ("${line}") needs: age, gender (M/F), smoker (yes/no), rate, and optionally the CI rate` }
+    }
+    rates.push({ age, gender: g, smoker, rate, ci_rate: ci })
+  }
+  return { rates, error: '' }
+}

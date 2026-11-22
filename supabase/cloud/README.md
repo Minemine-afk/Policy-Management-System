@@ -44,6 +44,10 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      details. The compare pop-up lists only checked Knowledge Bank products; to try it before real products are added,
      run `3c-sample-products.sql` (6 made-up plans marked "(sample)"), and remove them later with
      `4c-remove-sample-products.sql`.
+   - `1q-upgrade.sql` (23 Nov: the Knowledge Hub module with the Knowledge Bank screens: upload documents with versions
+     and expiry dates, product records, and checking by a second person). Ops and BSD get the module the first time you
+     run it; introducers only if an admin switches it on for them (they then see checked documents only). Files go to
+     a new private storage bucket `kb-docs`, created by the script.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 

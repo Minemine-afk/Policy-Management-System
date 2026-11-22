@@ -12,6 +12,8 @@ import Notifications from './pages/Notifications'
 import Account from './pages/Account'
 import Home from './pages/Home'
 import LearnedPlaces from './components/LearnedPlaces'
+import { KbDocuments, KbProducts } from './pages/KnowledgeHub'
+import KbProduct from './pages/KbProduct'
 import { useUnreadCount } from './lib/notifications'
 
 export default function App() {
@@ -44,6 +46,9 @@ export default function App() {
   const admin = has('admin')
   // Modules: the admin switches them per user. Inside a module the role decides what the user sees.
   const pi = !admin && can('pi_requests')
+  // Knowledge Hub: ops and bsd keep the Knowledge Bank; introducers given the module read checked documents.
+  const kb = !admin && can('knowledge_hub')
+  const kbStaff = kb && (has('ops') || has('bsd'))
   // Everyone starts on the module picker (Modules), even with only one module.
   const home = '/home'
   return (
@@ -56,6 +61,7 @@ export default function App() {
           {pi && <NavLink to="/board" className={cls}>Board</NavLink>}
           {pi && <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>}
           {pi && has('bsd') && <NavLink to="/reader" className={cls}>PI reader</NavLink>}
+          {kb && <NavLink to="/kb" className={cls}>Knowledge Hub</NavLink>}
           {admin && <NavLink to="/admin" className={cls}>Admin</NavLink>}
         </nav>
         <div className="who">
@@ -77,6 +83,10 @@ export default function App() {
         <Route path="/requests/:id" element={pi ? <RequestView /> : <Navigate to={home} replace />} />
         <Route path="/compare" element={<CompareMoved />} />
         <Route path="/reader" element={pi && has('bsd') ? <main className="page"><LearnedPlaces /></main> : <Navigate to={home} replace />} />
+        <Route path="/kb" element={kb ? <KbDocuments /> : <Navigate to={home} replace />} />
+        <Route path="/kb/products" element={kbStaff ? <KbProducts /> : <Navigate to={home} replace />} />
+        <Route path="/kb/products/new" element={kbStaff ? <KbProduct /> : <Navigate to={home} replace />} />
+        <Route path="/kb/products/:id" element={kbStaff ? <KbProduct /> : <Navigate to={home} replace />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/account" element={<Account />} />
         <Route path="/admin/*" element={admin ? <Admin /> : <Navigate to={home} replace />} />

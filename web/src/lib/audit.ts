@@ -24,6 +24,16 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'user.updated': 'User added or changed',
   'access.user_module': 'Module access changed for a person',
   'access.role_module': 'Module default changed for a role',
+  'kb.document_uploaded': 'Knowledge Bank document uploaded',
+  'kb.document_changed': 'Knowledge Bank document details changed',
+  'kb.document_checked': 'Knowledge Bank document checked',
+  'kb.document_removed': 'Knowledge Bank document removed',
+  'kb.product_saved': 'Product record draft saved',
+  'kb.product_sent_for_check': 'Product record sent for check',
+  'kb.product_checked': 'Product record checked',
+  'kb.product_sent_back': 'Product record sent back',
+  'kb.product_discarded': 'Product record draft discarded',
+  'kb.product_withdrawn': 'Product withdrawn from Compare products',
 }
 
 export const auditActionLabel = (action: string) => AUDIT_ACTION_LABEL[action] ?? action.replace(/[._]/g, ' ')
@@ -46,7 +56,18 @@ function describe(r: AuditRow, people: Record<string, Profile>): string {
     const p = typeof id === 'string' ? people[id] : undefined
     return p ? p.full_name || p.email : 'someone'
   }
+  const kbName = String(d.product ?? d.title ?? 'a Knowledge Bank item')
   switch (r.action) {
+    case 'kb.document_uploaded': return d.replaces ? `Uploaded a new version of “${d.title}” (${d.insurer})` : `Uploaded “${d.title}” (${d.insurer}) to the Knowledge Bank`
+    case 'kb.document_changed': return `Changed the details of “${kbName}”`
+    case 'kb.document_checked': return `Checked the document “${kbName}”`
+    case 'kb.document_removed': return `Removed the document “${kbName}”`
+    case 'kb.product_saved': return `Saved a draft of the product record ${kbName}`
+    case 'kb.product_sent_for_check': return `Sent the product record ${kbName} for check`
+    case 'kb.product_checked': return `Checked the product record ${kbName}${d.version ? ` (version ${d.version})` : ''}`
+    case 'kb.product_sent_back': return withReason(`Sent the product record ${kbName} back`, d.reason)
+    case 'kb.product_discarded': return d.deleted ? `Deleted the draft product record ${kbName}` : `Discarded the draft changes to ${kbName}`
+    case 'kb.product_withdrawn': return withReason(`Withdrew ${kbName} from Compare products`, d.reason)
     case 'request.submitted':
       // The same action is logged when ops hand a request back to the unassigned pool (that one carries a reason key).
       return 'reason' in d ? withReason(`Returned ${req} to the unassigned pool`, d.reason) : `Submitted a new ${req}`
