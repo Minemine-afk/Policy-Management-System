@@ -68,8 +68,9 @@ export function daysSince(s: string | null) {
   return Math.floor((Date.now() - new Date(s).getTime()) / 86_400_000)
 }
 
-export function summary(r: { age_band: string; gender: string; smoker: boolean; sum_assured_band: string; coverage_term: string }) {
-  return `${r.gender}, ${r.age_band}, ${r.smoker ? 'smoker' : 'non-smoker'} · ${r.sum_assured_band} · ${r.coverage_term}`
+export function summary(r: { age_band: string; gender: string; smoker: boolean; sum_assured_band: string; coverage_term: string; insurer?: string | null; plan_name?: string | null }) {
+  const plan = [r.insurer, r.plan_name].filter(Boolean).join(' ')
+  return `${plan ? `${plan} · ` : ''}${r.gender}, ${r.age_band}, ${r.smoker ? 'smoker' : 'non-smoker'} · ${r.sum_assured_band} · ${r.coverage_term}`
 }
 
 /** "48 hours" -> "2 days". */
