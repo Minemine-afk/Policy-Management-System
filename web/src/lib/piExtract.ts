@@ -99,7 +99,7 @@ const CURRENCIES: [RegExp, string][] = [
 const CODES = /^(SGD|USD|AUD|CAD|HKD|BND|NZD|MYR|GBP|EUR|CNY|RMB|JPY|IDR|CHF)$/
 
 export interface TextItem { str: string; x: number; y: number; w: number }
-export interface Line { page: number; text: string }
+export interface Line { page: number; text: string; /** Height on the page (PDF points, up = larger), when known. */ y?: number }
 export interface Page {
   page: number; items: TextItem[]; lines: Line[]
   /** A scanned page that was not read with OCR, because the main values had already been found. */
@@ -123,7 +123,7 @@ export function toLines(page: number, items: TextItem[]): Line[] {
       text += it.str
       end = it.x + it.w
     }
-    return { page, text: text.replace(/\s{3,}/g, '  ').trim() }
+    return { page, text: text.replace(/\s{3,}/g, '  ').trim(), y: r.y }
   })
 }
 
@@ -133,6 +133,8 @@ export interface Found {
   guess?: boolean
   /** Read with places ops taught for this insurer (piTeach.ts): ops should check it. */
   learned?: boolean
+  /** Read by the layout rules but it fails a cross-check (e.g. the total premium against annual x term): check it. */
+  check?: boolean
 }
 export interface Extracted {
   found: Record<string, Found>
@@ -451,15 +453,50 @@ function findRiderLines(lines: Line[]): Rider[] {
 const isTpd = (n: string) => /\bTPD\b|total\s*(?:and|&)\s*permanent\s+disab/i.test(n)
 const isCi = (n: string) => /critical\s+illness|\bCI\b|dread\s+disease/i.test(n) && !/waiver|payer/i.test(n)
 
-interface IllRow { year: number; age: number; total: string; rest: string[]; page: number; line: string }
+interface IllRow {
+  year: number; age: number; total: string; rest: string[]; page: number; line: string
+  /** The guaranteed surrender value read by column position: '' = that cell is empty; undefined = not known. */
+  sv?: string
+}
+
+/** Where a table's columns sit, from its heading pieces: the total premiums paid column and the surrender value
+ *  column (x = middle, w = half width). Only headings that name one column each are used. */
+interface Cols { page: number; total?: { x: number; w: number }; sv?: { x: number; w: number } }
+function headingCols(items: TextItem[], y: number, page: number): Cols {
+  const head = items.filter((i) => i.str.trim() && i.y >= y - 4 && i.y <= y + 30 && i.w < 160)
+  const one = (re: RegExp, not: RegExp) => {
+    const hit = head.filter((i) => re.test(i.str) && !not.test(i.str))
+    if (!hit.length) return undefined
+    const x0 = Math.min(...hit.map((i) => i.x)), x1 = Math.max(...hit.map((i) => i.x + i.w))
+    return x1 - x0 < 160 ? { x: (x0 + x1) / 2, w: Math.max(12, (x1 - x0) / 2) } : undefined
+  }
+  return {
+    page,
+    total: one(/\bpaid\b|to[\s-]*date/i, /distribution|death|surr?ender|annuali[sz]ed|benefit/i),
+    sv: one(/surr?ender/i, /death|paid|premium/i),
+  }
+}
+/** The number in the row at height y under column c, '' when that cell is empty, undefined when unsure. */
+function cellAt(items: TextItem[], y: number, c: { x: number; w: number }): string | undefined {
+  const row = items.filter((i) => i.str.trim() && Math.abs(i.y - y) <= 3)
+  if (!row.length) return undefined
+  const near = row.map((i) => ({ i, d: Math.abs(i.x + i.w / 2 - c.x) })).filter((r) => r.d <= c.w + 14).sort((a, b) => a.d - b.d)[0]
+  if (!near) return ''
+  const t = near.i.str.trim()
+  return /^(?:S\$|\$)?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?$/.test(t) ? t.replace(/^S?\$/, '') : /^[-–—]$/.test(t) ? '' : undefined
+}
 
 /** The year-by-year tables headed "Total Premiums Paid To-date". Tables about distribution cost are left out.
  *  A new illustration starts when the policy year goes back down (main plan first, then each rider). */
-function readIllustrations(lines: Line[]): { segments: IllRow[][]; surrender: boolean } {
+function readIllustrations(lines: Line[], pages: Page[] = []): { segments: IllRow[][]; surrender: boolean } {
   const segments: IllRow[][] = []
   let inTable = false, surrender = false, misses = 0, skip = 0
+  let cols: Cols | null = null
+  const itemsOf = (page: number) => pages.find((p) => p.page === page)?.items ?? []
   lines.forEach((l, i) => {
     if (/total\s*premiums?\s*paid|paid\s+to[\s-]*date/i.test(l.text)) {
+      // The columns by position, so an empty cell (a surrender value OCR saw nothing in) does not shift the others.
+      cols = l.y !== undefined ? headingCols(itemsOf(l.page), l.y, l.page) : null
       const near = lines.slice(Math.max(0, i - 1), i + 3).filter((x) => x.page === l.page).map((x) => x.text).join(' ')
       inTable = !/distribution/i.test(near)
       // A column before "Total Premiums Paid" (e.g. HSBC's "Annual Premium"): the total is the next number.
@@ -470,11 +507,30 @@ function readIllustrations(lines: Line[]): { segments: IllRow[][]; surrender: bo
       return
     }
     if (!inTable) return
+    // OCR can drop the slash ("5/51" read as "551"): split it back where the table's age-minus-year gap fits.
+    let text = l.text
+    const prev = segments[segments.length - 1]?.slice(-1)[0]
+    const joined = text.match(/^(\d{3,5})(?=\s)/)
+    if (prev && joined) {
+      const gap = prev.age - prev.year, d = joined[1]
+      for (let k = 1; k < d.length; k++) {
+        const y = +d.slice(0, k), a = +d.slice(k)
+        if (y > prev.year && a - y === gap) { text = `${y}/${a}` + text.slice(d.length); break }
+      }
+    }
     // "25/61  13,905 ..." or, with year and age in their own columns, "25  61  13,905 ..."
-    const m = l.text.match(new RegExp(`^(\\d{1,3})\\s*(?:\\/\\s*|\\s+)(\\d{1,3})\\s+${skip ? '(?:\\S+\\s+)' : ''}(?:S\\$|\\$)?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\b\\s*(.*)$`))
+    const m = text.match(new RegExp(`^(\\d{1,3})\\s*(?:\\/\\s*|\\s+)(\\d{1,3})\\s+${skip ? '(?:\\S+\\s+)' : ''}(?:S\\$|\\$)?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\b\\s*(.*)$`))
     if (!m) { if (++misses > 15) inTable = false; return }
     misses = 0
-    const row: IllRow = { year: +m[1], age: +m[2], total: amount(m[3]), rest: m[4].split(/\s+/).filter(Boolean), page: l.page, line: l.text }
+    const row: IllRow = { year: +m[1], age: +m[2], total: amount(m[3]), rest: m[4].split(/\s+/).filter(Boolean), page: l.page, line: text }
+    // Column positions, where the heading gives them: they win over the order of the numbers in the line.
+    const c = cols as Cols | null
+    if (c && c.page === l.page && l.y !== undefined) {
+      const its = itemsOf(l.page)
+      const t = c.total ? cellAt(its, l.y, c.total) : undefined
+      if (t) row.total = amount(t)
+      if (c.sv) row.sv = cellAt(its, l.y, c.sv)
+    }
     const seg = segments[segments.length - 1]
     const last = seg?.[seg.length - 1]
     if (!last || row.year < last.year) segments.push([row])
@@ -694,7 +750,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   if (mode && /single/i.test(mode)) notes.push('This is a single premium policy: the premium is paid once.')
 
   // ----- Total premium: the last "Total Premiums Paid To-date" of the main illustration, plus each rider's -----
-  const { segments } = readIllustrations(lines)
+  const { segments } = readIllustrations(lines, pages)
   if (segments.length) {
     const lasts = segments.map((s) => s[s.length - 1])
     const sum = lasts.reduce((n, r) => n + num(r.total), 0)
@@ -712,7 +768,8 @@ export function extract(pages: Page[], fileName: string): Extracted {
     if (main.some((r) => r.surrender)) {
       // The surrender value is the last of at least two columns after the premiums (death benefit, surrender value).
       // OCR often drops a lone "-", leaving only the death benefit: that row then has no surrender value.
-      const sv = main.map((r) => (r.rest.length >= 2 ? r.rest[r.rest.length - 1] : '-')).map((x) => (NUM.test(x) ? num(x.replace(/[^\d.]/g, '')) : 0))
+      // A surrender value read by column position wins: an empty cell there is no value, whatever else the row holds.
+      const sv = main.map((r) => (r.sv !== undefined ? r.sv || '-' : r.rest.length >= 2 ? r.rest[r.rest.length - 1] : '-')).map((x) => (NUM.test(x) ? num(x.replace(/[^\d.]/g, '')) : 0))
       const best = Math.max(...sv)
       set('cash_value', best > 0 ? money(String(best)) : 'NA', lasts[0].page, best > 0 ? `highest guaranteed surrender value ${best}` : 'guaranteed surrender values are all "-" or 0')
       if (best > 0) notes.push(`Cash value shown is the highest guaranteed surrender value in the illustration (${cm(money(String(best)))}).`)
@@ -812,9 +869,15 @@ export function extract(pages: Page[], fileName: string): Extracted {
     const v = fmt2(n('annual_premium')! * n('premium_term')!)
     found.total_premium = { value: v, page: null, line: `Calculated: annual premium ${found.annual_premium.value} × premium term ${found.premium_term.value} years` }
     notes.push(`Total premium was calculated as the annual premium × the premium term (${cm(v)}), as the PI has no illustration table. It assumes the premium stays level.`)
-  } else if (segments.length === 1 && !riders.length && n('total_premium') !== null && n('annual_premium') !== null && n('premium_term') !== null) {
+  } else if (n('total_premium') !== null && n('annual_premium') !== null && n('premium_term') !== null && !found.total_premium.guess) {
+    // Level premiums: total = annual premium x premium term. Riders with shorter terms make the total smaller, so
+    // with riders only a total that is larger than that (by more than 2%) is flagged. Renewals and step-ups differ too.
     const est = n('annual_premium')! * n('premium_term')!
-    if (Math.abs(est - n('total_premium')!) > Math.max(5, est * 0.02)) notes.push(`Check the total premium: ${cm(found.total_premium.value)} differs from the annual premium × the premium term (${cm(fmt2(est))}). This is expected if premiums change over time.`)
+    const off = riders.length ? n('total_premium')! - est > Math.max(5, est * 0.02) : Math.abs(est - n('total_premium')!) > Math.max(5, est * 0.02)
+    if (off) {
+      found.total_premium = { ...found.total_premium, check: true }
+      notes.push(`Check the total premium: ${cm(found.total_premium.value)} differs from the annual premium × the premium term (${cm(fmt2(est))}). This is expected if premiums change over time (renewals, step-ups).`)
+    }
   }
   for (const k of ['tpd_sa', 'ci_sa'] as const) {
     if (n(k) !== null && n('death_sa') !== null && n(k)! > n('death_sa')!) notes.push(`Check the ${k === 'tpd_sa' ? 'TPD' : 'CI'} sum assured: ${cm(found[k].value)} is more than the death sum assured.`)

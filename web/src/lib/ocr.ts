@@ -2,7 +2,8 @@
 // PaddleOCR (PP-OCRv5 mobile models, Apache 2.0) runs in the browser with ONNX Runtime Web (MIT), from files
 // this site serves itself (public/ocr/ from scripts/copy-ocr.mjs, and the runtime's .wasm in assets/):
 // no CDN, no server, no AI service. The PDF and its text never leave the computer.
-// The engine (about 28 MB) is only downloaded the first time a scanned page is met; the browser caches it.
+// The engine (about 28 MB, plus 8 MB for the second-opinion model when a page has unsure lines) is only downloaded
+// the first time a scanned page is met; the browser caches it.
 // Pages are straightened first (see paddleOcr.ts), so slightly tilted scans read like digital PDFs.
 import { SCALE } from './ocrConfig'
 import { toGray } from './paddleOcr'

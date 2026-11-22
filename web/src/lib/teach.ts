@@ -31,7 +31,12 @@ export async function saveRules(all: LearnedRule[]): Promise<{ added: number; er
   // Before 1n-upgrade.sql the database refuses table-row places and does not keep corrections: send the rest.
   const rules = tableRows ? all : all.filter((r) => r.how !== 'row').map(({ corrects: _c, row: _r, ...r }) => r)
   if (!rules.length) return { added: 0, error: '' }
-  const { data, error } = await supabase.rpc('teach_insurer', { p_rules: rules })
+  let { data, error } = await supabase.rpc('teach_insurer', { p_rules: rules })
+  // Before 1o-upgrade.sql the database refuses remembered NAs: save the rest.
+  if (error && /how_check|field_check/i.test(error.message) && rules.some((r) => r.how === 'na')) {
+    const rest = rules.filter((r) => r.how !== 'na')
+    ;({ data, error } = rest.length ? await supabase.rpc('teach_insurer', { p_rules: rest }) : { data: 0, error: null })
+  }
   if (error) return { added: 0, error: NEEDS_UPGRADE.test(error.message) ? UPGRADE_NOTE : error.message }
   return { added: Number(data ?? 0), error: '' }
 }

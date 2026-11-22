@@ -15,10 +15,11 @@ const pdfjs = await import(path.join(root, 'web/node_modules/pdfjs-dist/legacy/b
 const { readWith, extract, FIELDS } = await import(path.join(root, 'web/src/lib/piExtract.ts'))
 const { learn, applyLearned } = await import(path.join(root, 'web/src/lib/piTeach.ts'))
 const { ocrImage, toGray } = await import(path.join(root, 'web/src/lib/paddleOcr.ts'))
-const { SCALE, DET_MAX_SIDE, MODEL_FILES, charsFrom } = await import(path.join(root, 'web/src/lib/ocrConfig.ts'))
+const { SCALE, DET_MAX_SIDE, MODEL_FILES, SECOND_REC, REREAD_BELOW, charsFrom } = await import(path.join(root, 'web/src/lib/ocrConfig.ts'))
 const models = path.join(root, 'web/ocr-models')
 const session = async (f) => { const s = await ort.InferenceSession.create(path.join(models, f)); return async (data, dims) => { const r = await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', data, dims) }); const o = r[s.outputNames[0]]; return { data: o.data, dims: o.dims } } }
-const m = { det: await session(MODEL_FILES.det), rec: await session(MODEL_FILES.rec), chars: charsFrom(fs.readFileSync(path.join(models, MODEL_FILES.chars), 'utf8')) }
+const m = { det: await session(MODEL_FILES.det), rec: await session(MODEL_FILES.rec), chars: charsFrom(fs.readFileSync(path.join(models, MODEL_FILES.chars), 'utf8')),
+  ...(SECOND_REC ? { second: async () => ({ rec: await session(SECOND_REC.rec), chars: charsFrom(fs.readFileSync(path.join(models, SECOND_REC.chars), 'utf8')) }), rereadBelow: REREAD_BELOW } : {}) }
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ocr-')); const data = fs.readFileSync(pdf)
 const w = console.warn; console.warn = () => {}
 const pages = await readWith(pdfjs, data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), undefined, undefined, async (page) => {

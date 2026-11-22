@@ -16,7 +16,7 @@ const { PNG } = require('pngjs')
 const pdfjs = await import(path.join(here, '../../web/node_modules/pdfjs-dist/legacy/build/pdf.mjs'))
 const { extract, readWith, allFound, FIELDS } = await import(path.join(here, '../../web/src/lib/piExtract.ts'))
 const { ocrImage, toGray } = await import(path.join(here, '../../web/src/lib/paddleOcr.ts'))
-const { SCALE, DET_MAX_SIDE, MODEL_FILES, charsFrom } = await import(path.join(here, '../../web/src/lib/ocrConfig.ts'))
+const { SCALE, DET_MAX_SIDE, MODEL_FILES, SECOND_REC, REREAD_BELOW, charsFrom } = await import(path.join(here, '../../web/src/lib/ocrConfig.ts'))
 
 const [dir, expectedPath] = process.argv.slice(2)
 if (!dir) { console.error('Usage: node tests/pi-extract/check-ocr.mjs <folder> [expected.json]'); process.exit(2) }
@@ -26,7 +26,9 @@ const session = async (f) => {
   const s = await ort.InferenceSession.create(path.join(models, f))
   return async (data, dims) => { const r = await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', data, dims) }); const o = r[s.outputNames[0]]; return { data: o.data, dims: o.dims } }
 }
-const ocrModels = { det: await session(MODEL_FILES.det), rec: await session(MODEL_FILES.rec), chars: charsFrom(fs.readFileSync(path.join(models, MODEL_FILES.chars), 'utf8')) }
+const ocrModels = { det: await session(MODEL_FILES.det), rec: await session(MODEL_FILES.rec), chars: charsFrom(fs.readFileSync(path.join(models, MODEL_FILES.chars), 'utf8')),
+  // The second opinion on unsure lines, as the website does (SECOND_REC in ocrConfig.ts).
+  ...(SECOND_REC ? { second: async () => ({ rec: await session(SECOND_REC.rec), chars: charsFrom(fs.readFileSync(path.join(models, SECOND_REC.chars), 'utf8')) }), rereadBelow: REREAD_BELOW } : {}) }
 
 const files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.pdf')).sort()
 let pass = 0, fail = 0

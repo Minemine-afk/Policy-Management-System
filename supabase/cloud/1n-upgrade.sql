@@ -5,7 +5,7 @@
 
 begin;
 alter table public.insurer_label_rules drop constraint if exists insurer_label_rules_how_check;
-alter table public.insurer_label_rules add constraint insurer_label_rules_how_check check (how in ('beside', 'under', 'row'));
+alter table public.insurer_label_rules add constraint insurer_label_rules_how_check check (how in ('beside', 'under', 'row', 'na'));
 alter table public.insurer_label_rules add column if not exists row_at text not null default '';
 alter table public.insurer_label_rules drop constraint if exists insurer_label_rules_row_at_check;
 alter table public.insurer_label_rules add constraint insurer_label_rules_row_at_check check (row_at in ('', 'term', 'last'));
