@@ -27,3 +27,6 @@ On a normal machine, use `supabase start` instead and you don't need any of this
    `node tests/pi-extract/check-pdf.mjs out.pdf PI1.pdf [PI2.pdf] [PI3.pdf]` (builds the pack; check it with `pdfinfo`).
 9. Excel only: `node tests/pi-extract/check-excel.mjs <folder with up to 3 PIs> out.xlsx` fills the comparison template
    (built by `node web/scripts/make-template.mjs`) and prints the sheet.
+
+Knowledge Bank reader (fills product records from a Product Summary or rate sheet, PDF/Excel/CSV): `node tests/kb-extract/check.mjs`
+(made-up documents from `tests/kb-extract/make-samples.mjs`). The walkthrough also uploads them and checks what is filled in.

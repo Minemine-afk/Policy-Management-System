@@ -8,6 +8,7 @@ import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
+import { readableName } from '../lib/kbExtract'
 import {
   DOC_TYPES, KB_ACCEPT, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState,
   type KbDoc, type KbProductRow,
@@ -54,6 +55,7 @@ export function KbDocuments() {
   const [type, setType] = useState('')
   const [older, setOlder] = useState(false)
   const [dialog, setDialog] = useState<{ mode: 'new' | 'version' | 'edit'; doc?: KbDoc } | null>(null)
+  const [made, setMade] = useState<{ id: string; doc_type: string } | null>(null)
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const reload = useCallback(async () => {
@@ -68,12 +70,12 @@ export function KbDocuments() {
   const toCheck = docs.filter((d) => d.status === 'new').length
 
   async function act(fn: () => PromiseLike<{ error: { message: string } | null }>, ok: string) {
-    setError(''); setMsg('')
+    setError(''); setMsg(''); setMade(null)
     const { error } = await fn()
     if (error) setError(says(error.message)); else { setMsg(ok); reload() }
   }
   async function remove(d: KbDoc) {
-    setError(''); setMsg('')
+    setError(''); setMsg(''); setMade(null)
     const { data, error } = await supabase.rpc('kb_remove_document', { p_id: d.id })
     if (error) { setError(says(error.message)); return }
     if (data) await supabase.storage.from('kb-docs').remove([data as string])   // files go through the Storage API only
@@ -94,7 +96,8 @@ export function KbDocuments() {
           {member && <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={older} onChange={(e) => setOlder(e.target.checked)} /> Show older versions</label>}
         </div>
         {member && toCheck > 0 && <div className="notice" role="status">{toCheck} document{toCheck === 1 ? ' is' : 's are'} waiting for a BSD person to check {toCheck === 1 ? 'it' : 'them'}{checker ? '' : ' (someone other than the uploader)'}.</div>}
-        {msg && <div className="notice ok" role="status">{msg}</div>}
+        {msg && <div className="notice ok" role="status">{msg}
+          {made && <> <Link to={`/kb/products/new?${made.doc_type === 'Rate sheet' ? 'rates' : 'summary'}=${made.id}`}>Make a product record from it</Link> (the details are read from the file for you to check).</>}</div>}
         {error && <div className="error" role="alert">{error}</div>}
         <div className="tablewrap">
           <table aria-label="Knowledge Bank documents">
@@ -121,6 +124,9 @@ export function KbDocuments() {
                         {checker && d.status === 'new' && mine && <span className="small muted">Someone else checks it</span>}
                         {!d.replaced_by && <button className="btn small" onClick={() => setDialog({ mode: 'version', doc: d })}>New version</button>}
                         {!d.replaced_by && <button className="btn small" onClick={() => setDialog({ mode: 'edit', doc: d })}>Edit</button>}
+                        {!d.replaced_by && FILLS.includes(d.doc_type) && readableName(d.file_name) && (
+                          <Link className="btn small" to={`/kb/products/new?${d.doc_type === 'Rate sheet' ? 'rates' : 'summary'}=${d.id}`}
+                            title="Start a product record with the details read from this document">New record from it</Link>)}
                         {(d.status === 'new' || checker) && <button className="linkbtn danger" onClick={() => remove(d)}>Remove</button>}
                       </div></td>
                     )}
@@ -137,17 +143,25 @@ export function KbDocuments() {
         </p>
       </section>
       {dialog && <DocDialog mode={dialog.mode} doc={dialog.doc} docs={docs} products={products}
-        onClose={() => setDialog(null)} onDone={(m) => { setDialog(null); setMsg(m); setError(''); reload() }} />}
+        onClose={() => setDialog(null)} onDone={(m, c) => { setDialog(null); setMsg(m); setMade(c && FILLS.includes(c.doc_type) && readableName(c.file.name) ? c : null); setError(''); reload() }} />}
     </main>
   )
 }
 
-function DocDialog({ mode, doc, docs, products, onClose, onDone }: {
-  mode: 'new' | 'version' | 'edit'; doc?: KbDoc; docs: KbDoc[]; products: KbProductRow[]; onClose: () => void; onDone: (msg: string) => void
+/** Document types the reader can fill a product record from. */
+export const FILLS = ['Product Summary', 'Rate sheet']
+export interface Created { id: string; doc_type: string; file: File }
+
+export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }: {
+  mode: 'new' | 'version' | 'edit'; doc?: KbDoc; docs: KbDoc[]; products: KbProductRow[]
+  /** For an upload started from a product record: the type and insurer to start with. */
+  preset?: { doc_type?: string; insurer?: string; product_id?: string }
+  onClose: () => void; onDone: (msg: string, created?: Created) => void
 }) {
   const [file, setFile] = useState<File | null>(null)
   const [f, setF] = useState({
-    insurer: doc?.insurer ?? '', product_id: doc?.product_id ?? '', title: doc?.title ?? '', doc_type: doc?.doc_type ?? 'Product Summary',
+    insurer: doc?.insurer ?? preset?.insurer ?? '', product_id: doc?.product_id ?? preset?.product_id ?? '', title: doc?.title ?? '',
+    doc_type: doc?.doc_type ?? preset?.doc_type ?? 'Product Summary',
     version: mode === 'edit' ? doc?.version ?? '' : '', effective_from: mode === 'edit' ? doc?.effective_from ?? '' : '',
     valid_until: mode === 'edit' ? doc?.valid_until ?? '' : '',
   })
@@ -184,10 +198,11 @@ function DocDialog({ mode, doc, docs, products, onClose, onDone }: {
     const path = `${crypto.randomUUID()}/${file!.name.replace(/[^\w.-]+/g, '_')}`
     const up = await supabase.storage.from('kb-docs').upload(path, file!, { contentType: file!.type || 'application/octet-stream' })
     if (up.error) { setBusy(false); setError(says(up.error.message)); return }
-    const { error } = await supabase.rpc('kb_add_document', { p: { ...p, storage_path: path, file_name: file!.name, file_size: file!.size, replaces: mode === 'version' ? doc!.id : null } })
+    const { data, error } = await supabase.rpc('kb_add_document', { p: { ...p, storage_path: path, file_name: file!.name, file_size: file!.size, replaces: mode === 'version' ? doc!.id : null } })
     setBusy(false)
     if (error) { await supabase.storage.from('kb-docs').remove([path]); setError(says(error.message)); return }
-    onDone(mode === 'version' ? `Uploaded the new version. It replaces the earlier one once a BSD person checks it.` : `Uploaded ${f.title}. A BSD person (not you) checks it next.`)
+    onDone(mode === 'version' ? `Uploaded the new version. It replaces the earlier one once a BSD person checks it.` : `Uploaded ${f.title}. A BSD person (not you) checks it next.`,
+      { id: data as string, doc_type: f.doc_type, file: file! })
   }
 
   return (
