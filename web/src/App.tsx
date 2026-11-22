@@ -14,6 +14,7 @@ import Home from './pages/Home'
 import LearnedPlaces from './components/LearnedPlaces'
 import { KbDocuments, KbProducts } from './pages/KnowledgeHub'
 import KbProduct from './pages/KbProduct'
+import ProductMatrixPage from './pages/ProductMatrixPage'
 import { useUnreadCount } from './lib/notifications'
 
 export default function App() {
@@ -49,6 +50,8 @@ export default function App() {
   // Knowledge Hub: ops and bsd keep the Knowledge Bank; introducers given the module read checked documents.
   const kb = !admin && can('knowledge_hub')
   const kbStaff = kb && (has('ops') || has('bsd'))
+  // Product Comparison Matrix: the compare pop-up as a page, with "Add to PI request".
+  const matrix = !admin && can('product_matrix')
   // Everyone starts on the module picker (Modules), even with only one module.
   const home = '/home'
   return (
@@ -61,6 +64,7 @@ export default function App() {
           {pi && <NavLink to="/board" className={cls}>Board</NavLink>}
           {pi && <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>}
           {pi && has('bsd') && <NavLink to="/reader" className={cls}>PI reader</NavLink>}
+          {matrix && <NavLink to="/matrix" className={cls}>Compare products</NavLink>}
           {kb && <NavLink to="/kb" className={cls}>Knowledge Hub</NavLink>}
           {admin && <NavLink to="/admin" className={cls}>Admin</NavLink>}
         </nav>
@@ -83,6 +87,7 @@ export default function App() {
         <Route path="/requests/:id" element={pi ? <RequestView /> : <Navigate to={home} replace />} />
         <Route path="/compare" element={<CompareMoved />} />
         <Route path="/reader" element={pi && has('bsd') ? <main className="page"><LearnedPlaces /></main> : <Navigate to={home} replace />} />
+        <Route path="/matrix" element={matrix ? <ProductMatrixPage /> : <Navigate to={home} replace />} />
         <Route path="/kb" element={kb ? <KbDocuments /> : <Navigate to={home} replace />} />
         <Route path="/kb/products" element={kbStaff ? <KbProducts /> : <Navigate to={home} replace />} />
         <Route path="/kb/products/new" element={kbStaff ? <KbProduct /> : <Navigate to={home} replace />} />

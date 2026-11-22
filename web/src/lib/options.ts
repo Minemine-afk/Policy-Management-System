@@ -47,7 +47,7 @@ export const ROLE_LABEL: Record<string, string> = {
 }
 
 export const EVENT_LABEL: Record<string, string> = {
-  submitted: 'Submitted', edited: 'Details edited', assigned: 'Assigned', reassigned: 'Reassigned',
+  submitted: 'Submitted', edited: 'Details edited', products_added: 'Products added from the Product Comparison Matrix', assigned: 'Assigned', reassigned: 'Reassigned',
   started: 'Work started', sent_back: 'Sent back to introducer', resubmitted: 'Resubmitted by introducer',
   completed: 'Completed', removed: 'Removed', status_changed: 'Status changed',
   pi_uploaded: 'PI document uploaded', attachment_added: 'Attachment added', pi_pack_saved: 'PI pack saved (comparison and PIs in one PDF)',

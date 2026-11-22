@@ -5,6 +5,7 @@ import type { AuditRow, Profile } from './types'
 export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'request.submitted': 'Request submitted (or returned to the pool)',
   'request.edited': 'Request details edited',
+  'request.products_added': 'Products added to a request',
   'request.resubmitted': 'Request resubmitted',
   'request.claimed': 'Request picked up by ops',
   'request.assigned': 'Request assigned',
@@ -72,6 +73,7 @@ function describe(r: AuditRow, people: Record<string, Profile>): string {
       // The same action is logged when ops hand a request back to the unassigned pool (that one carries a reason key).
       return 'reason' in d ? withReason(`Returned ${req} to the unassigned pool`, d.reason) : `Submitted a new ${req}`
     case 'request.edited': return `Edited the details of ${req}`
+    case 'request.products_added': return `Added ${Array.isArray(d.products) ? (d.products as string[]).join(', ') : 'products'} to ${req} from the Product Comparison Matrix`
     case 'request.resubmitted': return `Resubmitted ${req} after correcting it`
     case 'request.claimed': return `Picked up ${req} from the unassigned pool`
     case 'request.assigned': return d.to ? `Assigned ${req} to ${person(d.to)}` : `Assigned ${req}`

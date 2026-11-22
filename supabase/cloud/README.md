@@ -48,6 +48,8 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      and expiry dates, product records, and checking by a second person). Ops and BSD get the module the first time you
      run it; introducers only if an admin switches it on for them (they then see checked documents only). Files go to
      a new private storage bucket `kb-docs`, created by the script.
+   - `1r-upgrade.sql` (23 Nov: the Product Comparison Matrix module: the Compare products pop-up as its own page,
+     with "Add to PI request" by PI number). Introducers, ops and BSD get the module the first time you run it.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 

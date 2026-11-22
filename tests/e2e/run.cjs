@@ -44,7 +44,7 @@ const SG_LABELS = {
   await picker(sam)
   ok('after login the introducer lands on the module picker')
   await check(sam.getByRole('heading', { name: /^Good (morning|afternoon|evening), Sam$/ }).isVisible(), 'the picker greets the user by first name')
-  await check(sam.getByRole('navigation', { name: 'Modules', exact: true }).getByRole('link').count().then((n) => n === 1), 'the picker shows only the modules the user can open (one here)')
+  await check(sam.getByRole('navigation', { name: 'Modules', exact: true }).getByRole('link').count().then((n) => n === 2), 'the picker shows only the modules the user can open (PI Requests and Product Comparison Matrix here)')
   await check(sam.locator('.tile', { hasText: 'PI Requests' }).getByText(/^\d+ in progress$/).waitFor().then(() => true, () => false), 'the PI Requests tile shows the introducer how many requests are in progress')
   await check(sam.locator('.tile', { hasText: 'PI Requests' }).getByText(/overdue|unassigned/).count().then((n) => n === 0), 'the introducer tile shows no staff counts')
   await sam.screenshot({ path: SHOTS + '/0-module-picker-introducer.png' })
@@ -179,7 +179,7 @@ const SG_LABELS = {
   await check(olivia.getByRole('button', { name: 'Mark completed' }).isDisabled(), 'cannot complete until the PI pack is saved to the request')
 
   // PI comparison on the request page: the three uploaded PIs are read straight away into the Excel template
-  await check(olivia.getByRole('link', { name: /Compare/ }).count().then((n) => n === 0), 'there is no separate Compare PIs page or link any more')
+  await check(olivia.getByRole('link', { name: /Compare PIs/ }).count().then((n) => n === 0), 'there is no separate Compare PIs page or link any more')
   const cmp = olivia.getByRole('region', { name: 'PI comparison' })
   await cmp.getByLabel('Insurer for PI 3', { exact: true }).waitFor()
   ok('the uploaded PIs are compared directly on the request page')
@@ -938,7 +938,7 @@ const SG_LABELS = {
   await up.getByRole('button', { name: 'Upload' }).click()
   await olivia.getByText('Uploaded Maple Term Product Summary. A BSD person (not you) checks it next.').waitFor()
   const mapleDoc = olivia.locator('tr', { hasText: 'Maple Term Product Summary v1' })
-  await check(mapleDoc.getByText('New, not checked').isVisible(), 'an upload waits for a check')
+  await check(seen(mapleDoc.getByText('New, not checked')), 'an upload waits for a check')
   await check(mapleDoc.getByRole('button', { name: 'Check' }).count().then((n) => n === 0), 'ops cannot check documents')
   await olivia.screenshot({ path: SHOTS + '/23-knowledge-bank-documents.png', fullPage: true })
   await olivia.getByRole('link', { name: 'Product records' }).click()
@@ -1062,6 +1062,41 @@ const SG_LABELS = {
   await check(seen(olivia.getByText(/rates are per 100,000 of sum assured; they were converted to per 1,000/)), 'and its per-S$100,000 rates are converted, with a note')
   await check(olivia.getByLabel('Premium rate table (CSV)').inputValue().then((v) => v.includes('\n18,Male,no,0.6,\n')), 'converted rates are right')
   fs.rmSync(kbDir, { recursive: true, force: true })
+  // Product Comparison Matrix: the compare pop-up as its own page, and "Add to PI request" by PI number
+  // Sam's oldest request, made editable again (sent back) for this step
+  const samRef = (await db.query(`update pi_requests set status = 'sent_back' where id = (select id from pi_requests where introducer_id = '00000000-0000-0000-0000-000000000001' order by submitted_at limit 1) returning ref`)).rows[0].ref
+  await sam.goto(BASE + '/home')
+  await sam.locator('a.tile', { hasText: 'Product Comparison Matrix' }).click()
+  await check(sam.getByRole('heading', { name: 'Find term products to compare' }).waitFor().then(() => true, () => false), 'the Product Comparison Matrix tile opens the finder as a page')
+  await check(sam.getByRole('link', { name: 'Compare products' }).isVisible(), 'and it has a link in the top bar')
+  await sam.getByLabel('Smoker', { exact: true }).selectOption('yes')
+  const boxes = sam.locator('table input[type=checkbox]')
+  await check(boxes.count().then((n) => n >= 2), 'matching checked products are listed')
+  await boxes.nth(0).check(); await boxes.nth(1).check()
+  await sam.getByRole('button', { name: 'Compare selected (2)' }).click()
+  await sam.getByRole('heading', { name: 'Side-by-side comparison' }).waitFor()
+  await sam.getByLabel('PI number').fill(samRef.toLowerCase())
+  await check(seen(sam.getByText(new RegExp(`^${samRef} \\(\\w[\\w ]*\\) now has:`))), 'it shows what the request has now and what it will get')
+  await sam.getByRole('button', { name: 'Add these 2 products to the PI request' }).click()
+  await check(seen(sam.getByText(`Added to ${samRef}.`)), 'an introducer adds the compared products to their own request by PI number')
+  await sam.screenshot({ path: SHOTS + '/27-product-matrix-add-to-request.png', fullPage: true })
+  const added = (await db.query(`select compare_term, plan_kb_id, compare_kb_1, compare_kb_2 from pi_requests where ref = $1`, [samRef])).rows[0]
+  await check(Promise.resolve(added.compare_term && !!added.plan_kb_id && !!added.compare_kb_1 && !added.compare_kb_2), 'the request now has product 9 and product 12 from the comparison')
+  await sam.getByRole('link', { name: `Open ${samRef}` }).click()
+  await sam.getByRole('button', { name: /^History \(/ }).click()
+  await check(seen(sam.getByText('Products added from the Product Comparison Matrix')), "the request's history says so")
+  // Ops can only change requests assigned to them
+  const notOlivia = (await db.query(`select ref from pi_requests where status not in ('completed', 'removed') and (assignee_id is null or assignee_id <> '00000000-0000-0000-0000-000000000003') limit 1`)).rows[0].ref
+  await olivia.goto(BASE + '/matrix')
+  await olivia.getByRole('heading', { name: 'Find term products to compare' }).waitFor()
+  const oboxes = olivia.locator('table input[type=checkbox]')
+  await oboxes.nth(0).check(); await oboxes.nth(1).check()
+  await olivia.getByRole('button', { name: 'Compare selected (2)' }).click()
+  await olivia.getByLabel('PI number').fill(notOlivia)
+  await olivia.getByRole('button', { name: 'Add these 2 products to the PI request' }).click()
+  await check(olivia.getByRole('alert').filter({ hasText: /cannot change the products on|No PI request/ }).waitFor().then(() => true, () => false), 'ops cannot change a request that is not assigned to them')
+  await alex.goto(BASE + '/admin/audit')
+  await check(alex.locator('td', { hasText: new RegExp(`^Added .+ to request ${samRef} from the Product Comparison Matrix$`) }).first().waitFor().then(() => true, () => false), 'adding products is in the audit log in plain English')
   await db.end()
 
   await check(Promise.resolve(errors.length === 0), 'no uncaught page errors' + (errors.length ? ': ' + errors[0] : ''))
