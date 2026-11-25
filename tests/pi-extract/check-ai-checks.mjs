@@ -3,7 +3,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
-const { checkAnswer, parseAnswer, buildMessages, blankKeys } = await import(path.join(here, '../../web/src/lib/piAi.ts'))
+const { checkAnswer, parseAnswer, buildMessages, blankKeys, readOutPage, pictureCrossChecks, aiGroups } = await import(path.join(here, '../../web/src/lib/piAi.ts'))
 
 const lines = [
   'Acme Life Assurance', 'Quote for Life Term 20', 'Coverage amount $250,000.00', 'Insurance cost $21.50 / Month',
@@ -51,9 +51,9 @@ okR ? pass++ : fail++; console.log(`${okR ? '✓' : '✗'} a rider written besid
 const r2 = checkAnswer({ ci_sa: '500,000' }, rid, ['ci_sa'], { death_sa: '200000' }).found
 const okR2 = !r2.ci_sa; okR2 ? pass++ : fail++; console.log(`${okR2 ? '✓' : '✗'} a rider above the death cover already read is dropped`)
 const man = [{ page: 1, items: [], lines: ['September 12, 2024', 'Family Term', 'Term-20  $100,000  $14.90  $166.44'].map((text) => ({ page: 1, text })) }]
-const m1 = checkAnswer({ premium_term: '12', policy_term: '20', base_premium: { amount: '100,000', per: 'year' } }, man, ['premium_term', 'policy_term', 'base_premium'], { death_sa: '100000' }).found
-const okM = !m1.premium_term && m1.policy_term?.value === '20' && !m1.base_premium
-okM ? pass++ : fail++; console.log(`${okM ? '✓' : '✗'} a term read from a date, or a premium as big as the cover, is dropped${okM ? '' : ' ' + JSON.stringify(m1)}`)
+const x1 = checkAnswer({ premium_term: '12', policy_term: '20', base_premium: { amount: '100,000', per: 'year' } }, man, ['premium_term', 'policy_term', 'base_premium'], { death_sa: '100000' }).found
+const okM = !x1.premium_term && x1.policy_term?.value === '20' && !x1.base_premium
+okM ? pass++ : fail++; console.log(`${okM ? '✓' : '✗'} a term read from a date, or a premium as big as the cover, is dropped${okM ? '' : ' ' + JSON.stringify(x1)}`)
 const my = [{ page: 1, items: [], lines: ['Acme Life Term Life Insurance', 'Benefit of up to RM1,000,000 per life', 'for a single premium of RM2,000.00 payable', 'Example: RM200,000 x 4.92 = RM984.00', 'Duration: 50 years', 'Acme Life Super Term 20'].map((text) => ({ page: 1, text })) }]
 const y1 = checkAnswer({ death_sa: 'RM1,000,000', annual_premium: { amount: '2,000.00', per: 'year' }, base_premium: { amount: '984.00', per: 'year' }, premium_term: '50', policy_term: '50' }, my, ['death_sa', 'annual_premium', 'base_premium', 'premium_term', 'policy_term']).found
 const okY = Object.keys(y1).join() === 'policy_term'
@@ -93,5 +93,37 @@ const okMsg = msg.includes('Coverage amount $250,000.00') && msg.includes('"annu
 okMsg ? pass++ : fail++; console.log(`${okMsg ? '✓' : '✗'} the prompt holds the PI text and only the fields asked`)
 const bk = blankKeys({ insurer: { value: 'Acme', page: 1, line: '' }, death_sa: { value: '', page: null, line: null } })
 const okB = !bk.includes('insurer') && bk.includes('death_sa'); okB ? pass++ : fail++; console.log(`${okB ? '✓' : '✗'} only blank cells go to the AI`)
+{
+// The fields beyond the plan's numbers (26 Nov 2026): client particulars, currency, total premium, covers, cash value, campaigns.
+const more = [{ page: 1, items: [], lines: [
+  'Policy Currency  Singapore Dollars', 'Country of Residence  : Indonesia', 'Date prepared : 30/10/2026',
+  'Date of Birth : 24/08/1980', 'Name  Gender  Smoker Status', 'VIP  Female  Non-smoker',
+  'Total premium  S$1,000.00 per year', 'Total premiums paid to date  30,000', 'Protection against terminal illness (TI).',
+  'Optional rider: Accidental Death Benefit', 'There is no cash value if the policy ends.', '20% discount for the first year (promo code TP05)',
+].map((text) => ({ page: 1, text })) }]
+const mk = ['currency', 'residency', 'date_of_birth', 'gender', 'underwriting_class', 'total_premium', 'terminal_illness', 'accidental_death', 'cash_value', 'campaigns']
+const x1 = checkAnswer({ currency: 'Singapore Dollars', residency: 'Indonesia', date_of_birth: '24/08/1980', gender: 'Female', underwriting_class: 'Non-Smoker', total_premium: '30,000',
+  terminal_illness: 'yes', accidental_death: 'yes', cash_value: 'none', campaigns: '20% discount for the first year (promo code TP05)' }, more, mk, { annual_premium: '1000.00' }).found
+const want1 = { currency: 'SGD', residency: 'Indonesia', date_of_birth: '24/08/1980', gender: 'Female', underwriting_class: 'Non-Smoker', total_premium: '30000', terminal_illness: 'Included', cash_value: 'NA', campaigns: '20% discount for the first year (promo code TP05)' }
+const sorted = (o) => JSON.stringify(Object.fromEntries(Object.entries(o).sort()))
+const okX1 = sorted(Object.fromEntries(Object.entries(x1).map(([k, v]) => [k, v.value]))) === sorted(want1)
+okX1 ? pass++ : fail++; console.log(`${okX1 ? '✓' : '✗'} client particulars, currency, total premium, covers, cash value and campaign: right answers kept, an optional rider is not "Included"${okX1 ? '' : ' ' + JSON.stringify(x1)}`)
+const x2 = checkAnswer({ residency: 'Singapore', date_of_birth: '30/10/2026', gender: 'Male', total_premium: '1,000', currency: 'USD', campaigns: 'free gift' }, more, mk, { annual_premium: '1000.00' }).found
+const okX2 = !Object.keys(x2).length
+okX2 ? pass++ : fail++; console.log(`${okX2 ? '✓' : '✗'} wrong ones dropped: a country under another label, the date prepared as a birth date, a gender not in the PI, one year's premium as the total, a currency not in the PI, a made-up campaign${okX2 ? '' : ' ' + JSON.stringify(x2)}`)
+const x3 = checkAnswer({ total_premium: '30,000' }, more, ['total_premium']).found
+const okX3 = !x3.total_premium
+okX3 ? pass++ : fail++; console.log(`${okX3 ? '✓' : '✗'} a total premium needs the yearly premium to check it against`)
+// Page pictures: the model's read-out becomes PI text, and its looping tail is dropped.
+const ro = readOutPage('Plans covered\nFuture First\n| S$10,884.00 | Annually |\n| | |\n|---|---|\n| | |\n| | |\njunk after the loop', 3)
+const okRo = JSON.stringify(ro.lines.map((l) => l.text)) === JSON.stringify(['Plans covered', 'Future First', 'S$10,884.00  Annually']) && ro.page === 3
+okRo ? pass++ : fail++; console.log(`${okRo ? '✓' : '✗'} a page picture's read-out becomes PI text lines, without its looping tail${okRo ? '' : ' ' + JSON.stringify(ro.lines)}`)
+const pc = { annual_premium: { value: '10955.80' }, base_premium: { value: '10884.00' }, tpd_premium: { value: '71.80' }, ci_premium: { value: '500.00' } }
+pictureCrossChecks(pc, [], {})
+const okPc = !pc.annual_premium && !pc.base_premium
+okPc ? pass++ : fail++; console.log(`${okPc ? '✓' : '✗'} premiums read from pictures that don't add up are all dropped`)
+const okG2 = JSON.stringify(aiGroups(['gender', 'death_sa', 'insurer'])) === JSON.stringify([['insurer', 'death_sa'], ['gender']])
+okG2 ? pass++ : fail++; console.log(`${okG2 ? '✓' : '✗'} the plan fields are asked first, the rest in a second question`)
+}
 console.log(`\n${pass}/${pass + fail} passed`)
 process.exit(fail ? 1 : 0)

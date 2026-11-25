@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { says } from '../lib/options'
-import { FIELDS, SECTIONS, extract, labelWith, readPdf, type Found, type Page } from '../lib/piExtract'
+import { FIELDS, SECTIONS, ReadStopped, extract, labelWith, readPdf, type Found, type Page } from '../lib/piExtract'
 import { applyLearned, learn } from '../lib/piTeach'
-import { AI_FIELDS, blankKeys } from '../lib/piAi'
+import { blankKeys, pictureCrossChecks, pictureKeys } from '../lib/piAi'
 import { AI_MODELS } from '../lib/aiConfig'
 import { loadRules, saveRules, type SavedRule } from '../lib/teach'
 import { TEMPLATE_URL, buildWorkbook, preloadExcel, commonCurrency, isComparisonFile, type ExportColumn } from '../lib/piExcel'
@@ -16,6 +16,8 @@ import { fmtNum, groupMoneyInText, plain } from '../lib/num'
 
 interface Column {
   fileName: string
+  /** The request document it was read from (its PDF stays in memory, for the AI helper's page pictures). */
+  docId?: string
   found: Record<string, Found>
   values: Record<string, string>
   notes: string[]
@@ -27,6 +29,8 @@ interface Column {
   pages?: Page[]
   /** Pages read with OCR (scanned): values from them are tagged "Check". */
   ocrPages?: number[]
+  /** Reading stopped part-way: `pages` holds only the pages read before it. */
+  partial?: boolean
   error?: string
 }
 
@@ -35,6 +39,7 @@ interface Column {
  *  rules, OCR, a failed cross-check, a calculation). Nothing for a value typed by hand or taken from the request form. */
 function confidence(fd: Found | undefined, ocrPages: number[] | undefined): { level: 'Sure' | 'Learned' | 'Check' | 'AI'; why: string } | null {
   if (!fd?.value) return null
+  if (fd.picture) return { level: 'AI', why: "Read by the free AI helper (it ran in this browser) from a picture of the page, because the reader got no text from it. The AI read the page's words out first and the value passed the same checks against them, but a read-out can be wrong: check it against the PDF." }
   if (fd.ai) return { level: 'AI', why: "Filled by the free AI helper (it ran in this browser) in a cell the reader's rules left blank. It passed checks against the PI's text, but AI can still be wrong: check it against the PI." }
   if (fd.learned) return { level: 'Learned', why: 'Read from a place ops taught for this insurer when they saved an earlier comparison. Check it against the PI.' }
   if (fd.guess) return { level: 'Check', why: "This PI's layout is new to the reader: this value was read by general rules. Check it against the PI." }
@@ -46,7 +51,7 @@ function confidence(fd: Found | undefined, ocrPages: number[] | undefined): { le
 
 interface Progress { file: number; files: number; name: string; page: number; pages: number; ocr: boolean }
 
-const failed = (fileName: string, error: string): Column => ({ fileName, found: {}, values: {}, notes: [], discounted: false, issueDate: '', issueFound: null, error })
+const failed = (fileName: string, error: string, docId?: string): Column => ({ fileName, docId, found: {}, values: {}, notes: [], discounted: false, issueDate: '', issueFound: null, error })
 
 const MAX = 3
 
@@ -113,24 +118,43 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
     ;(async () => {
       setChecked(false); setSaved(''); setError(''); setAiState({ busy: false, text: '', error: '' })
       const out: Column[] = []
+      // Client particulars the PI doesn't show come from the request form (never the client's real name), also for a
+      // PI that could not be read at all.
+      const form = { gender: req.gender, smoker: req.smoker, age_band: req.age_band, date_of_birth: req.date_of_birth, residency: req.residency }
+      const withForm = (c: Column): Column => {
+        const filled = fillFromForm(c.found, Object.fromEntries(FIELDS.map((f) => [f.key, c.found[f.key]?.value ?? ''])), form)
+        return { ...c, found: filled.found, values: filled.values, notes: [...c.notes, ...filled.notes] }
+      }
       for (const [i, doc] of list.entries()) {
         if (cancelled) return
         setProgress({ file: i, files: list.length, name: doc.file_name, page: 0, pages: 0, ocr: false })
+        let stopped = ''
         try {
           const dl = await withLimit(supabase.storage.from('request-docs').download(doc.storage_path), READ_LIMIT_MS, 'Downloading')
-          if (!dl.data) { out.push(failed(doc.file_name, dl.error?.message ?? 'Download failed')); continue }
+          if (!dl.data) { out.push(withForm(failed(doc.file_name, dl.error?.message ?? 'Download failed'))); continue }
           files.current.set(doc.id, dl.data)
           const ocrPages = new Set<number>()
-          const pages = await readPdf(await dl.data.arrayBuffer(), (page, total, ocr) => {
-            if (ocr) ocrPages.add(Math.floor(page) + 1)
-            if (!cancelled) setProgress({ file: i, files: list.length, name: doc.file_name, page, pages: total, ocr })
-          }, READ_LIMIT_MS)
+          let pages: Page[]
+          try {
+            pages = await readPdf(await dl.data.arrayBuffer(), (page, total, ocr) => {
+              if (ocr) ocrPages.add(Math.floor(page) + 1)
+              if (!cancelled) setProgress({ file: i, files: list.length, name: doc.file_name, page, pages: total, ocr })
+            }, READ_LIMIT_MS)
+          } catch (e) {
+            // Stopped part-way (too slow, or OCR failed): the pages read before it are still used.
+            const got = e instanceof ReadStopped ? e.pages.filter((p) => p.lines.length) : []
+            if (!got.length) throw e
+            pages = (e as ReadStopped).pages
+            const last = pages[pages.length - 1]?.page ?? 0
+            stopped = `Reading stopped after page ${plain(last)}: ${(e as Error).message.replace(/\. Reload the page.*$/, '')}. Values on later pages are missing: press "Read the PIs again", or use the AI helper.`
+          }
           if (!pages.some((p) => p.lines.length)) {
-            out.push(failed(doc.file_name, 'No text could be read, even with OCR. Type the values in by hand.'))
+            out.push(withForm(failed(doc.file_name, 'No text could be read, even with OCR.', doc.id)))
             continue
           }
           const read = extract(pages, doc.file_name)
           const { notes, discounted } = read
+          if (stopped) notes.unshift(stopped)
           // Blanks (and general-rule guesses) filled from places ops taught for this insurer.
           const taught = applyLearned(read.found, pages, rules)
           const found = taught.found
@@ -143,14 +167,11 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           if (skipped.length) {
             notes.push(`Scanned ${skipped.length === 1 ? 'page' : 'pages'} ${pageList(skipped)} ${skipped.length === 1 ? 'was' : 'were'} not read, because the main values were found before ${skipped.length === 1 ? 'it' : 'them'}.`)
           }
-          // Client particulars the PI doesn't show come from the request form (never the client's real name).
-          const filled = fillFromForm(found, Object.fromEntries(FIELDS.map((f) => [f.key, found[f.key]?.value ?? ''])),
-            { gender: req.gender, smoker: req.smoker, age_band: req.age_band, date_of_birth: req.date_of_birth, residency: req.residency })
           const issueFound = findIssueDate(pages)
-          out.push({ fileName: doc.file_name, found: filled.found, notes: [...notes, ...filled.notes], discounted, values: filled.values,
-            issueDate: issueFound?.value ?? '', issueFound, pages, ocrPages: [...ocrPages] })
+          out.push(withForm({ fileName: doc.file_name, docId: doc.id, found, notes, discounted, values: {},
+            issueDate: issueFound?.value ?? '', issueFound, pages, ocrPages: [...ocrPages], partial: !!stopped }))
         } catch (e) {
-          out.push(failed(doc.file_name, 'Could not read this PDF: ' + (e as Error).message))
+          out.push(withForm(failed(doc.file_name, 'Could not read this PDF: ' + (e as Error).message, files.current.has(doc.id) ? doc.id : undefined)))
         }
       }
       if (!cancelled) { setCols(out); setProgress(null) }
@@ -168,42 +189,80 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
     setChecked(false); setSaved('')
     setCols((cs) => cs.map((c, j) => (j === i ? { ...c, issueDate: v } : c)))
   }
-  // Cells the AI may fill: left blank by the reader and not typed in by hand.
-  const aiTodo = (c: Column) => (c.error || !c.pages ? [] : blankKeys(c.found).filter((k) => !(c.values[k] ?? '').trim()))
+  // Cells the AI may fill: left blank by the reader (and the request form) and not typed in by hand.
+  const hasText = (c: Column) => !!c.pages?.some((p) => p.lines.length)
+  // Page pictures help where the text is missing or poor: no text at all, reading stopped part-way, or scanned pages.
+  const canPicture = (c: Column) => !!c.docId && files.current.has(c.docId) && (!hasText(c) || !!c.partial)
+  const blanks = (c: Column) => blankKeys(c.found).filter((k) => !(c.values[k] ?? '').trim())
+  const aiTodo = (c: Column) => (hasText(c) ? blanks(c) : canPicture(c) ? pictureKeys(blanks(c)) : [])
   const aiCells = cols.reduce((n, c) => n + aiTodo(c).length, 0)
-  // Blank cells the AI helper never fills (covers, riders, client details…), named so ops know why there is no button for them.
-  const aiKeys = new Set(AI_FIELDS.map((f) => f.key))
-  // PIs that could not be read at all: neither the rules nor the AI helper have any text from them.
+  // PIs that could not be read at all: the rules have no text from them; the AI can only look at their page pictures.
   const unread = cols.map((c, i) => ({ c, i })).filter(({ c }) => c.error)
-  const otherBlanks = [...new Set(cols.filter((c) => !c.error).flatMap((c) => FIELDS.filter((f) => f.section !== 'meta' && !aiKeys.has(f.key) && !(c.values[f.key] ?? '').trim()).map((f) => f.label)))]
   const noWasm = typeof WebAssembly === 'undefined'
 
   async function fillWithAi() {
     setAiState({ busy: true, text: 'Starting the AI helper…', error: '' })
     try {
-      const { askAi } = await import('../lib/aiModel')
-      let filled = 0
+      const { askAi, readOutPicture } = await import('../lib/aiModel')
+      const { pagePictures, picturePages } = await import('../lib/piPictures')
+      let filled = 0, fromPictures = 0
       for (const [i, c] of cols.entries()) {
         const keys = aiTodo(c)
         if (!keys.length) continue
-        const res = await askAi(c.pages!, keys, c.values, (p) => setAiState({ busy: true, error: '',
+        const text = hasText(c)
+        const got: Record<string, Found> = {}
+        const dropped: string[] = []
+        const say = (what: string) => (p: { stage: string; pct?: number; device?: string; model?: string }) => setAiState({ busy: true, error: '',
           text: p.stage === 'download' ? `Downloading the AI model, first time only: ${plain(Math.round((p.pct ?? 0) * 100))}%`
-            : `The AI (${p.model}) is reading PI${plain(i + 1)} (${c.fileName})${p.device === 'wasm' ? ' on the processor, which can take a few minutes' : ''}…` }))
-        const got = Object.keys(res.found)
-        filled += got.length
+            : `The AI (${p.model}) is ${what} of PI${plain(i + 1)} (${c.fileName})${p.device === 'wasm' ? ', on the processor: this can take several minutes' : ''}…` })
+        if (text) {
+          const res = await askAi(c.pages!, keys, c.values, say('reading the text'))
+          Object.assign(got, res.found); dropped.push(...res.dropped)
+        }
+        // No text (or reading stopped part-way): the AI reads out the page pictures the reader could not get, then is
+        // asked about that text, with the same checks.
+        const rest = pictureKeys(keys.filter((k) => !got[k]))
+        if (rest.length && canPicture(c)) {
+          const done = new Set((c.pages ?? []).filter((p) => p.lines.length).map((p) => p.page))
+          setAiState({ busy: true, error: '', text: `Drawing the pages of PI${plain(i + 1)} for the AI…` })
+          const pics = (await pagePictures(await files.current.get(c.docId!)!.arrayBuffer(), picturePages(99, text, done)))
+          const read: Page[] = []
+          for (const pic of pics) read.push(await readOutPicture(pic.image, pic.page, say(`reading the picture of page ${plain(pic.page)}`)))
+          if (read.some((p) => p.lines.length)) {
+            const all = [...(c.pages ?? []).filter((p) => p.lines.length), ...read].sort((x, y) => x.page - y.page)
+            const res = await askAi(all, rest, { ...c.values, ...Object.fromEntries(Object.entries(got).map(([k, v]) => [k, v.value])) }, say('reading the pictures'))
+            const fromRead = new Set(read.map((p) => p.page))
+            for (const [k, v] of Object.entries(res.found)) {
+              got[k] = fromRead.has(v.page ?? -1) ? { ...v, picture: true } : v
+              if (got[k].picture) fromPictures++
+            }
+            dropped.push(...res.dropped)
+            // Values from page pictures must also fit with each other and with the rest.
+            const pic = Object.fromEntries(Object.entries(got).filter(([, v]) => v.picture))
+            const before = Object.keys(pic).length
+            pictureCrossChecks(pic, dropped, { ...c.values, ...Object.fromEntries(Object.entries(got).filter(([, v]) => !v.picture).map(([k, v]) => [k, v.value])) })
+            for (const k of Object.keys(got)) if (got[k].picture && !pic[k]) delete got[k]
+            fromPictures -= before - Object.keys(pic).length
+          }
+        }
+        const keys2 = Object.keys(got)
+        filled += keys2.length
         const names = (ks: string[]) => ks.map((k) => FIELDS.find((f) => f.key === k)?.label ?? k).join(', ')
         setCols((cs) => cs.map((col, j) => {
           if (j !== i) return col
           const found = { ...col.found }, values = { ...col.values }
-          for (const k of got) if (!(values[k] ?? '').trim()) { found[k] = res.found[k]; values[k] = res.found[k].value }
+          for (const k of keys2) if (!(values[k] ?? '').trim()) { found[k] = got[k]; values[k] = got[k].value }
           const notes = [...col.notes]
-          if (got.length) notes.push(`The free AI helper filled ${fmtNum(got.length)} blank ${got.length === 1 ? 'cell' : 'cells'} (${names(got)}), tagged "AI": check ${got.length === 1 ? 'it' : 'them'} against the PI.`)
-          if (res.dropped.length) notes.push(`The AI's answers for ${names([...new Set(res.dropped)])} did not match the PI's text, so they were left blank.`)
+          if (keys2.length) notes.push(`The free AI helper filled ${fmtNum(keys2.length)} blank ${keys2.length === 1 ? 'cell' : 'cells'} (${names(keys2)}), tagged "AI": check ${keys2.length === 1 ? 'it' : 'them'} against the PI.`)
+          const pic = keys2.filter((k) => got[k].picture)
+          if (pic.length) notes.push(`${names(pic)}: read by the AI from page pictures (the reader got no text from ${pic.length === 1 ? 'that page' : 'those pages'}). Check ${pic.length === 1 ? 'it' : 'each one'} against the PDF.`)
+          const bad = [...new Set(dropped)].filter((k) => !got[k])
+          if (bad.length) notes.push(`The AI's answers for ${names(bad)} did not pass the checks${text ? " against the PI's text" : ''}, so they were left blank.`)
           return { ...col, found, values, notes }
         }))
       }
       setChecked(false); setSaved('')
-      setAiState({ busy: false, error: '', text: filled ? `The AI filled ${fmtNum(filled)} of ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PI text: the blank cells stay blank.' })
+      setAiState({ busy: false, error: '', text: filled ? `The AI filled ${fmtNum(filled)} of ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'}${fromPictures ? ` (${fmtNum(fromPictures)} from page pictures)` : ''}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PIs: the blank cells stay blank.' })
     } catch (e) {
       setAiState({ busy: false, text: '', error: 'The AI helper could not run in this browser: ' + (e as Error).message + '. Fill the blank cells by hand.' })
     }
@@ -344,8 +403,9 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         <>
           {unread.map(({ c, i }) => (
             <div key={i} className="error" role="alert">
-              PI{plain(i + 1)} ({c.fileName}) could not be read: {c.error} Nothing in its column comes from the PDF, and the AI helper can't help with it either,
-              because it only works from text it can check in the PI. Press "Read the PIs again", or type its values from the PDF.
+              {canPicture(c)
+                ? `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Its client details come from the request form. The free AI helper can look at its page pictures for the rest: press the AI helper button below, then check each value it fills against the PDF.`
+                : `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Only its client details come from the request form: the AI helper has nothing to look at either, as the PDF could not be downloaded. Press "Read the PIs again", or type its values from the PDF.`}
             </div>
           ))}
           <div className="row between">
@@ -355,18 +415,16 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           {(missing > 0 || aiState.text || aiState.error) && (
             <div className="row" style={{ gap: 10, flexWrap: 'wrap' }} aria-label="AI helper">
               {aiCells > 0 && noWasm && <span className="error small" role="note">The free AI helper can't run in this browser (no WebAssembly). Please use an up-to-date Chrome or Edge.</span>}
-              {aiCells === 0 && !aiState.busy && !aiState.text && unread.length > 0 && unread.length === cols.length && (
-                <span className="small muted" role="note">Free AI helper: no PI could be read, so it has no text to work with.</span>
-              )}
-              {aiCells === 0 && !aiState.busy && !aiState.text && unread.length < cols.length && (
+              {aiCells === 0 && !aiState.busy && !aiState.text && (
                 <span className="small muted" role="note">
-                  Free AI helper: nothing for it to fill here. It only fills the {fmtNum(AI_FIELDS.length)} plan fields (insurer, plan name, terms, cover age, sums assured, premiums).
-                  {otherBlanks.length > 0 && ` The blank ${otherBlanks.length === 1 ? 'cell' : 'cells'} left (${otherBlanks.slice(0, 4).join(', ')}${otherBlanks.length > 4 ? ` and ${fmtNum(otherBlanks.length - 4)} more` : ''}) ${otherBlanks.length === 1 ? 'is' : 'are'} not something it fills: usually the PI doesn't mention ${otherBlanks.length === 1 ? 'it' : 'them'}. Check the PI and type the value, for example Included or NA.`}
+                  {cols.every((c) => !hasText(c) && !canPicture(c))
+                    ? 'Free AI helper: no PI could be read or downloaded, so it has nothing to look at.'
+                    : `Free AI helper: nothing left for it to fill.${missing ? ' Check the PI for the blank cells left and type them, for example Included or NA.' : ''}`}
                 </span>
               )}
               {aiCells > 0 && !noWasm && (
                 <button className="btn small" disabled={aiState.busy} onClick={fillWithAi}
-                  title={`A free, open AI model (${fmtNum(AI_FIELDS.length)} plan fields: names, terms, sums assured, premiums) runs in this browser: the PI never leaves this computer. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.small.mb / 1000, 1)} GB) and keeps it for next time.`}>
+                  title={`A free, open AI model runs in this browser and reads the PI's text, and its page pictures where the text is missing or scanned: the PI never leaves this computer. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.small.mb / 1000, 1)} GB) and keeps it for next time.`}>
                   {aiState.busy ? 'AI helper working…' : `Fill ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'} with the free AI helper`}
                 </button>
               )}
@@ -432,7 +490,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                                 {conf && <div className={`pill ${conf.level === 'Sure' ? 'ok' : 'info'}`} style={{ margin: '4px 0 2px', fontSize: 12 }} title={conf.why}>{conf.level}</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
-                                  {edited ? 'Changed by hand' : c.error ? 'This PI could not be read (see the top of this column): type it from the PDF' : fd?.ai ? `AI${fd.page ? `, page ${plain(fd.page)}` : ''}: “${(fd.line ?? '').slice(0, 44)}${(fd.line ?? '').length > 44 ? '…' : ''}”` : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${plain(fd.page)}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : aiKeys.has(f.key) ? 'Not found' : 'Not found: check the PI and type it (the AI helper does not fill this)'}
+                                  {edited ? 'Changed by hand' : fd?.picture ? `AI, from the picture of page ${plain(fd.page ?? 0)}: “${(fd.line ?? '').slice(0, 36)}${(fd.line ?? '').length > 36 ? '…' : ''}”` : fd?.ai ? `AI${fd.page ? `, page ${plain(fd.page)}` : ''}: “${(fd.line ?? '').slice(0, 44)}${(fd.line ?? '').length > 44 ? '…' : ''}”` : isFromForm(fd) ? 'From the request form (not in the PI)' : c.error ? 'This PI could not be read (see the top): type it from the PDF' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${plain(fd.page)}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}
                                 </div>
                               </td>
                             )

@@ -1,18 +1,20 @@
 // Runs the AI helper's model off the main thread (started by aiModel.ts). One model for every reader that uses
 // the AI helper (PI comparison, Knowledge Bank documents): a model change in aiConfig.ts applies to all of them. Uses the graphics card through WebGPU
-// when the browser has it, else the CPU. The PI text stays in this browser: only the model and engine files are
-// downloaded (Hugging Face and jsDelivr), never uploaded to.
+// when the browser has it, else the CPU. The PI text (and any page picture) stays in this browser: only the model and
+// engine files are downloaded (Hugging Face and jsDelivr), never uploaded to.
 import { AI_MODELS, MAX_NEW_TOKENS } from './aiConfig'
+import { generate, loadModel, type ChatMsg, type Loaded } from './aiRun'
 
-type Ask = { id: number; messages: { role: string; content: string }[]; maxTokens?: number; force?: { device?: string; dtype?: string; model?: string } }
-type Gen = (messages: Ask['messages'], opts: Record<string, unknown>) => Promise<{ generated_text: { content: string }[] }[]>
+type Ask = { id: number; messages: ChatMsg[]; images?: Blob[]; maxTokens?: number; force?: { device?: string; dtype?: string; model?: string } }
 
-let gen: Promise<Gen> | null = null
+let gen: Promise<Loaded> | null = null
 let device = ''
 let label = ''
+let RawImage: any = null
 
-async function load(onProgress: (pct: number) => void, force: Ask['force'] = {}, noGpu = false): Promise<Gen> {
+async function load(onProgress: (pct: number) => void, force: Ask['force'] = {}, noGpu = false): Promise<Loaded> {
   const t = await import('@huggingface/transformers')
+  RawImage = t.RawImage
   // ONNX Runtime's engine file (27 MB, over Cloudflare Pages' 25 MB file limit, so this site can't serve it) comes
   // from the jsDelivr CDN, at the exact version transformers.js was built with. It is code only: nothing is sent.
   t.env.allowLocalModels = false
@@ -25,7 +27,7 @@ async function load(onProgress: (pct: number) => void, force: Ask['force'] = {},
   const m = gpu ? AI_MODELS.gpu : AI_MODELS.small
   label = m.label
   const files = new Map<string, { loaded: number; total: number }>()
-  const p = await t.pipeline('text-generation', force.model ?? m.id, {
+  return loadModel(t, force.model ?? m.id, {
     device: gpu ? 'webgpu' : 'wasm', dtype: force.dtype ? (force.dtype.startsWith('{') ? JSON.parse(force.dtype) : force.dtype) : m.dtype,
     progress_callback: (e: any) => {
       if (e.status !== 'progress' || !e.total) return
@@ -34,12 +36,11 @@ async function load(onProgress: (pct: number) => void, force: Ask['force'] = {},
       for (const f of files.values()) { a += f.loaded; b += f.total }
       onProgress(b ? a / b : 0)
     },
-  } as any)
-  return p as unknown as Gen
+  })
 }
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
-  const { id, messages, force, maxTokens } = e.data
+  const { id, messages, images = [], force, maxTokens } = e.data
   try {
     gen ??= load((pct) => self.postMessage({ id, loading: pct }), force).catch((err) => {
       if (force?.device) throw err
@@ -48,18 +49,19 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
     })
     const g = await gen
     self.postMessage({ id, thinking: true, device, model: label })
-    let out
+    const pics = await Promise.all(images.map((b) => RawImage.fromBlob(b)))
+    let out: string
     try {
-      out = await g(messages, { max_new_tokens: maxTokens ?? MAX_NEW_TOKENS, do_sample: false })
+      out = await generate(g, messages, pics, maxTokens ?? MAX_NEW_TOKENS)
     } catch (err) {
       // A graphics chip that loads the model but can't run it: once more on the processor.
       if (device !== 'webgpu' || force?.device) throw err
       gen = load((pct) => self.postMessage({ id, loading: pct }), force, true)
       const g2 = await gen
       self.postMessage({ id, thinking: true, device, model: label })
-      out = await g2(messages, { max_new_tokens: maxTokens ?? MAX_NEW_TOKENS, do_sample: false })
+      out = await generate(g2, messages, pics, maxTokens ?? MAX_NEW_TOKENS)
     }
-    self.postMessage({ id, text: out[0].generated_text.at(-1)?.content ?? '' })
+    self.postMessage({ id, text: out })
   } catch (err) {
     gen = null
     self.postMessage({ id, error: (err as Error).message || String(err) })

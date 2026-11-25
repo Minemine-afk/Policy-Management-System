@@ -1,0 +1,15 @@
+{
+  "_about": "Truths for check-ai-pictures.mjs on scanned SG PIs (no pdf.js text), checked by hand against the page pictures on 26 Nov 2026. The insurer's name is blacked out in these copies. Merged over expected-sg-samples.json, which holds the digital SG PIs.",
+  "SG_FWD_FutureFirst_3.pdf": {
+    "insured_name": "VIP", "gender": "Female", "underwriting_class": "Non-Smoker", "currency": "SGD", "cover_age": "99",
+    "insurer": "", "policy_name": "Future First", "policy_term": "58", "premium_term": "58",
+    "annual_premium": "10955.80", "total_premium": "635436.00", "death_sa": "2000000", "terminal_illness": "Included", "accidental_death": "NA",
+    "base_premium": "10884.00", "tpd_sa": "100000", "tpd_premium": "71.80", "ci_sa": "NA", "ci_premium": "NA", "cash_value": "NA", "campaigns": "NA"
+  },
+  "SG_Manulife_ManuProtectTermII_500k.pdf": {
+    "insured_name": "Mr VIP", "gender": "Male", "underwriting_class": "Non-Smoker", "currency": "SGD", "cover_age": "85",
+    "insurer": "", "policy_name": "~Term", "policy_term": "5", "premium_term": "5", "annual_premium": "502.50", "death_sa": "500000",
+    "terminal_illness": "Included", "accidental_death": "NA", "base_premium": "502.50", "tpd_sa": "NA", "tpd_premium": "NA",
+    "ci_sa": "NA", "ci_premium": "NA", "cash_value": "NA", "campaigns": "NA"
+  }
+}

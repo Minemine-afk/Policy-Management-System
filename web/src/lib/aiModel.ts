@@ -2,7 +2,8 @@
 // Knowledge Bank's Product Summary reader (kbAi.ts). One worker and one model (aiConfig.ts) for all of them, so a
 // model change applies everywhere. Each reader writes its own prompt and checks its own answers against the
 // document's text; only answers that pass are used.
-import { buildMessages, checkAnswer, parseAnswer, type AiFill } from './piAi'
+import { READ_OUT_TOKENS, aiGroups, buildMessages, checkAnswer, parseAnswer, readOutMessages, readOutPage, type AiFill } from './piAi'
+import type { ChatMsg } from './aiRun'
 import type { Page } from './piExtract'
 
 type Reply = { id: number; loading?: number; thinking?: boolean; device?: string; model?: string; text?: string; error?: string }
@@ -33,18 +34,31 @@ function getWorker(): Worker {
 }
 
 /** Sends chat messages to the shared model and resolves with its raw answer text (check it before use!). */
-export function runAi(messages: { role: string; content: string }[], progress?: AiProgress, maxTokens?: number): Promise<string> {
+export function runAi(messages: ChatMsg[], progress?: AiProgress, maxTokens?: number, images: Blob[] = []): Promise<string> {
   const id = ++nextId
   return new Promise((resolve, reject) => {
     waiting.set(id, { progress, done: (r) => (r.error ? reject(new Error(r.error)) : resolve(r.text ?? '')) })
     // Tests (check-ai-browser.cjs) can pick the device and model file through globalThis.__AI_FORCE.
-    getWorker().postMessage({ id, messages, maxTokens, force: (globalThis as { __AI_FORCE?: object }).__AI_FORCE })
+    getWorker().postMessage({ id, messages, images, maxTokens, force: (globalThis as { __AI_FORCE?: object }).__AI_FORCE })
   })
 }
 
 /** Asks the AI about `keys` (blank cells) of one PI; `known` holds the cells already filled, for cross-checks. Resolves with the values that passed the checks. */
 export async function askAi(pages: Page[], keys: string[], known: Record<string, string>, progress?: AiProgress): Promise<AiFill> {
-  return checkAnswer(parseAnswer(await runAi(buildMessages(pages, keys), progress)), pages, keys, known)
+  const out: AiFill = { found: {}, dropped: [] }
+  // One question per group (the plan's numbers, then the rest), each checked with what is known so far.
+  for (const group of aiGroups(keys)) {
+    const res = checkAnswer(parseAnswer(await runAi(buildMessages(pages, group), progress)), pages, group,
+      { ...known, ...Object.fromEntries(Object.entries(out.found).map(([k, v]) => [k, v.value])) })
+    Object.assign(out.found, res.found)
+    out.dropped.push(...res.dropped)
+  }
+  return out
+}
+
+/** The model's read-out of one page picture (see piAi.ts readOutPage), as PI text. */
+export async function readOutPicture(image: Blob, page: number, progress?: AiProgress): Promise<Page> {
+  return readOutPage(await runAi(readOutMessages(), progress, READ_OUT_TOKENS, [image]), page)
 }
 
 /** Frees the model's memory (it is large) when the comparison is left. */

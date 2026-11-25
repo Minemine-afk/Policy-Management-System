@@ -46,17 +46,22 @@ for (const f of Object.keys(expected).filter((k) => !k.startsWith('_')).sort()) 
   if (!keys.length) { console.log(`${f}: nothing blank for the AI`); continue }
   asked += keys.length
   const t = Date.now()
-  const msgs = ai.buildMessages(pages, keys)
-  // --cache <dir>: keeps each raw model answer (by model, file and prompt), so changes to the checks can be re-scored
-  // in seconds without running the model again.
-  const cacheFile = cacheDir && path.join(cacheDir, `${model.replace(/\W+/g, '_')}-${dtype}-${createHash('sha1').update(JSON.stringify(msgs)).digest('hex').slice(0, 16)}.txt`)
-  let raw = cacheFile && fs.existsSync(cacheFile) ? fs.readFileSync(cacheFile, 'utf8') : null
-  if (raw === null) {
-    raw = (await (await getGen())(msgs, { max_new_tokens: cfg.MAX_NEW_TOKENS, do_sample: false }))[0].generated_text.at(-1).content
-    if (cacheFile) fs.writeFileSync(cacheFile, raw)
+  // One question per group, as the browser asks (aiModel.askAi).
+  const res = { found: {}, dropped: [] }
+  for (const group of ai.aiGroups(keys)) {
+    const msgs = ai.buildMessages(pages, group)
+    // --cache <dir>: keeps each raw model answer (by model, file and prompt), so changes to the checks can be re-scored
+    // in seconds without running the model again.
+    const cacheFile = cacheDir && path.join(cacheDir, `${model.replace(/\W+/g, '_')}-${dtype}-${createHash('sha1').update(JSON.stringify(msgs)).digest('hex').slice(0, 16)}.txt`)
+    let raw = cacheFile && fs.existsSync(cacheFile) ? fs.readFileSync(cacheFile, 'utf8') : null
+    if (raw === null) {
+      raw = (await (await getGen())(msgs, { max_new_tokens: cfg.MAX_NEW_TOKENS, do_sample: false }))[0].generated_text.at(-1).content
+      if (cacheFile) fs.writeFileSync(cacheFile, raw)
+    }
+    const r = ai.checkAnswer(ai.parseAnswer(raw), pages, group, { ...known, ...Object.fromEntries(Object.entries(res.found).map(([k, v]) => [k, v.value])) })
+    Object.assign(res.found, r.found); res.dropped.push(...r.dropped)
   }
   secs += (Date.now() - t) / 1000
-  const res = ai.checkAnswer(ai.parseAnswer(raw), pages, keys, known)
   const lines = []
   for (const [k, v] of Object.entries(res.found)) {
     const want = expected[f][k]
