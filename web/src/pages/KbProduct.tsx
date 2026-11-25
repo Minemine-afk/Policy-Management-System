@@ -248,7 +248,7 @@ export default function KbProduct() {
     for (const [k, f] of Object.entries(rec.facts)) {
       if (k.startsWith('_')) { if (f?.doc) facts[k] = { doc: f.doc }; continue }
       if (!f?.v?.trim()) continue
-      facts[k] = { v: f.v.trim(), doc: f.doc || ps, page: f.page ? Number(f.page) : undefined }
+      facts[k] = { v: f.v.trim(), doc: f.doc || ps || rec.facts._cof?.doc, page: f.page ? Number(f.page) : undefined }
     }
     const keepRates = ratesTouched && !fin ? parsed.rates : undefined
     const p = { ...rec, facts, ...(keepRates ? { rates: keepRates } : {}), ...(fin ? { fin_rates: finTouched ? finParsed.rates : rec.fin_rates ?? finParsed.rates } : { fin_rates: undefined }) }
@@ -301,8 +301,7 @@ export default function KbProduct() {
       {why && row?.status !== 'withdrawn' && <div className="notice warn" role="status">{why}.</div>}
       {fin && <div className="notice" role="note"><strong>Premium financing.</strong> {FINANCING_NOTE} This record is kept in the Knowledge Bank and is not offered in Compare products for now.</div>}
       {finStale && <div className="notice warn" role="status"><strong>Rates out of date.</strong> A source document of this record has passed its valid-until date. Upload the bank's latest sheet as a new version of it.</div>}
-      {row?.auto_read && <div className="notice warn" role="status"><strong>Auto-read, not yet reviewed.</strong> The values marked "From document" were read by the system
-        and are shown in Compare products as they are. Reviewing them is optional: change anything wrong and save, or mark it as reviewed.{row.read_note ? ` ${row.read_note}` : ''}</div>}
+      {row?.auto_read && <div className="notice warn" role="status"><strong>Auto-read, not yet reviewed.</strong> The values marked "From document" were read by the system{fin ? '' : ' and are shown in Compare products as they are'}. Reviewing them is optional: change anything wrong and save, or mark it as reviewed.{row.read_note ? ` ${row.read_note}` : ''}</div>}
       {row?.missing?.includes('entry_age') && <div className="notice warn" role="status"><strong>Entry ages not stated in the document.</strong> The product is
         searchable, but the age filter skips it and Compare products says the ages are not stated. The {plain(18)} and {plain(65)} in the entry age boxes are only
         a starting point: type the real entry ages before you save, because saving counts them as the product's ages.</div>}
@@ -325,8 +324,8 @@ export default function KbProduct() {
           <section className="card" aria-labelledby="kb-src">
             <h3 id="kb-src" className="eyebrow">Source documents</h3>
             <p className="small muted" style={{ margin: 0 }}>
-              Upload the insurer's Product Summary and rate sheet (PDF or Excel), or pick ones already in the Knowledge Bank, and the details below are
-              read from them for you. The reader can miss or misread things, so check each value against the document before you save.
+              {fin ? "Upload the bank's financing factsheet and its monthly cost-of-funds sheet (PDF or Excel), or pick ones already in the Knowledge Bank, and the details below are read from them for you."
+                : "Upload the insurer's Product Summary and rate sheet (PDF or Excel), or pick ones already in the Knowledge Bank, and the details below are read from them for you."} The reader can miss or misread things, so check each value against the document before you save.
             </p>
             <div className="form-grid">
               {fin && ([['Financing factsheet', '_ps'], ['Cost-of-funds sheet (monthly)', '_cof']] as const).map(([t, key]) => {
