@@ -372,7 +372,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
             <label className="field">Product
               <select aria-label="Product" value={f.product_id} onChange={(e) => { set('product_id', e.target.value); const p = products.find((x) => x.id === e.target.value); if (p) setPlan(planKey(p.product_type)) }} disabled={mode === 'version' && reads}>
                 <option value="">{reads && mode === 'new' ? 'New product record' : 'All products / not one product'}</option>
-                {plans.map((p) => <option key={p.id} value={p.id}>{p.name}{plan ? '' : ` · ${planLabel(p.product_type)}`}</option>)}
+                {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </label>
             {needName && (

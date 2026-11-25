@@ -1,0 +1,6 @@
+anon key eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJleHAiOjE5ODM4MTI5OTZ9.nujK57TLb9fW2FunL20yZf04iMz5R3KoKLclUM6WbbE
+(node:4375) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/user/Policy-Management-System/supabase/functions/admin-create-user/index.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/user/Policy-Management-System/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+gateway on 54321

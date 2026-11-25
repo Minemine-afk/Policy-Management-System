@@ -441,7 +441,7 @@ export default function KbProduct() {
           <div className="card dialog" role="dialog" aria-modal="true" aria-label="Delete this product record" style={{ maxWidth: 480 }}>
             <h2>Delete {row!.name}?</h2>
             <p className="small">The record, its rates and history are deleted and it leaves Compare products. Its documents stay in the Knowledge Bank; PI requests keep the product's name.</p>
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
+            <div className="row dialog-foot" style={{ justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setDialog(null)}>Cancel</button>
               <button className="btn danger" onClick={() => call('kb_delete_product', { p_id: row!.id }, '')}>Delete</button>
             </div>
