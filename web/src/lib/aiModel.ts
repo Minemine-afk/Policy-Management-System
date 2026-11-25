@@ -56,9 +56,26 @@ export async function askAi(pages: Page[], keys: string[], known: Record<string,
   return out
 }
 
-/** The model's read-out of one page picture (see piAi.ts readOutPage), as PI text. */
-export async function readOutPicture(image: Blob, page: number, progress?: AiProgress): Promise<Page> {
-  return readOutPage(await runAi(readOutMessages(), progress, READ_OUT_TOKENS, [image]), page)
+/** The model's read-out of one page from its pictures (its top and bottom halves), as PI text (see piAi.ts
+ *  readOutPage). Lines read twice where the halves overlap are kept once. */
+export async function readOutPicture(images: Blob[], page: number, progress?: AiProgress): Promise<Page> {
+  const lines: string[] = []
+  for (const image of images) {
+    const part = readOutPage(await runAi(readOutMessages(), progress, READ_OUT_TOKENS, [image]), page).lines.map((l) => l.text)
+    // The overlap: the first lines of this half that repeat the last lines of the one before.
+    let skip = 0
+    while (skip < part.length && skip < 6 && lines.slice(-8).includes(part[skip])) skip++
+    lines.push(...part.slice(skip))
+  }
+  return { page, items: [], lines: lines.map((text) => ({ page, text })) }
+}
+
+/** True when the AI will run on the graphics chip (WebGPU with 16-bit maths, as the worker checks): page pictures are
+ *  then quick; on the processor each takes minutes. */
+export async function aiOnGraphics(): Promise<boolean> {
+  const gpu = (navigator as any).gpu
+  const adapter = gpu ? await gpu.requestAdapter().catch(() => null) : null
+  return !!adapter?.features?.has?.('shader-f16')
 }
 
 /** Frees the model's memory (it is large) when the comparison is left. */

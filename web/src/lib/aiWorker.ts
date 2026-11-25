@@ -12,7 +12,7 @@ let device = ''
 let label = ''
 let RawImage: any = null
 
-async function load(onProgress: (pct: number) => void, force: Ask['force'] = {}, noGpu = false): Promise<Loaded> {
+async function load(onProgress: (pct: number) => void, force: Ask['force'] = {}, noGpu = false, vision = false): Promise<Loaded> {
   const t = await import('@huggingface/transformers')
   RawImage = t.RawImage
   // ONNX Runtime's engine file (27 MB, over Cloudflare Pages' 25 MB file limit, so this site can't serve it) comes
@@ -36,16 +36,24 @@ async function load(onProgress: (pct: number) => void, force: Ask['force'] = {},
       for (const f of files.values()) { a += f.loaded; b += f.total }
       onProgress(b ? a / b : 0)
     },
-  })
+  }, vision)
 }
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
   const { id, messages, images = [], force, maxTokens } = e.data
   try {
-    gen ??= load((pct) => self.postMessage({ id, loading: pct }), force).catch((err) => {
+    // Page pictures need the model's picture reader too: the text-only model is swapped for the whole one (one model
+    // in memory at a time; the browser keeps the files, so this is quick after the first time).
+    const vision = images.length > 0
+    if (gen && vision && !(await gen.catch(() => null))?.vision) {
+      const old = await gen.catch(() => null)
+      gen = null
+      await old?.model?.dispose?.()
+    }
+    gen ??= load((pct) => self.postMessage({ id, loading: pct }), force, false, vision).catch((err) => {
       if (force?.device) throw err
       // The graphics chip could not load it: the processor instead.
-      return load((pct) => self.postMessage({ id, loading: pct }), force, true)
+      return load((pct) => self.postMessage({ id, loading: pct }), force, true, vision)
     })
     const g = await gen
     self.postMessage({ id, thinking: true, device, model: label })
@@ -56,7 +64,7 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
     } catch (err) {
       // A graphics chip that loads the model but can't run it: once more on the processor.
       if (device !== 'webgpu' || force?.device) throw err
-      gen = load((pct) => self.postMessage({ id, loading: pct }), force, true)
+      gen = load((pct) => self.postMessage({ id, loading: pct }), force, true, vision)
       const g2 = await gen
       self.postMessage({ id, thinking: true, device, model: label })
       out = await generate(g2, messages, pics, maxTokens ?? MAX_NEW_TOKENS)

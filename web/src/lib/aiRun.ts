@@ -4,12 +4,15 @@
 export type ChatPart = { type: 'image' } | { type: 'text'; text: string }
 export type ChatMsg = { role: string; content: string | ChatPart[] }
 type T = typeof import('@huggingface/transformers')
-export interface Loaded { processor: any; model: any }
 
-export async function loadModel(t: T, id: string, opts: { device?: string; dtype?: unknown; progress_callback?: (e: any) => void }): Promise<Loaded> {
+export interface Loaded { processor: any; model: any; vision: boolean }
+
+/** Loads the model; with `vision`, also its picture reader (more memory: loaded only when a page picture is asked about). */
+export async function loadModel(t: T, id: string, opts: { device?: string; dtype?: unknown; progress_callback?: (e: any) => void }, vision = false): Promise<Loaded> {
   const processor = await (t as any).AutoProcessor.from_pretrained(id, { progress_callback: opts.progress_callback })
-  const model = await (t as any).AutoModelForImageTextToText.from_pretrained(id, opts)
-  return { processor, model }
+  const dtype = opts.dtype && typeof opts.dtype === 'object' && !vision ? Object.fromEntries(Object.entries(opts.dtype).filter(([k]) => k !== 'vision_encoder')) : opts.dtype
+  const model = await (vision ? (t as any).AutoModelForImageTextToText : (t as any).AutoModelForCausalLM).from_pretrained(id, { ...opts, dtype })
+  return { processor, model, vision }
 }
 
 /** The model's answer to `messages`; `images` (one per {type: 'image'} part, in order) are RawImages. */

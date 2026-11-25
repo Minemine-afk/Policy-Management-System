@@ -8,9 +8,10 @@ export interface AiModel { id: string; dtype: string | Record<string, string>; m
 const ID = 'onnx-community/Qwen3.5-0.8B-ONNX'
 export const AI_MODELS: { gpu: AiModel; small: AiModel } = {
   /** With a graphics chip that does 16-bit maths through WebGPU (e.g. Intel Iris Xe in Chrome or Edge): fast. */
-  gpu: { id: ID, dtype: { embed_tokens: 'fp16', decoder_model_merged: 'q4f16', vision_encoder: 'q4f16' }, mb: 1010, label: 'Qwen3.5 0.8B' },
-  /** Otherwise the processor. The 4-bit word table needs an operation the processor engine lacks, so 16-bit there. */
-  small: { id: ID, dtype: { embed_tokens: 'fp16', decoder_model_merged: 'q4', vision_encoder: 'q4' }, mb: 1060, label: 'Qwen3.5 0.8B' },
+  gpu: { id: ID, dtype: { embed_tokens: 'fp16', decoder_model_merged: 'q4f16', vision_encoder: 'fp16' }, mb: 1210, label: 'Qwen3.5 0.8B' },
+  /** Otherwise the processor. The 4-bit word table and picture reader need an operation the processor engine lacks
+   *  (GatherBlockQuantized), so 16-bit for those. The picture reader (vision_encoder) is used only for page pictures. */
+  small: { id: ID, dtype: { embed_tokens: 'fp16', decoder_model_merged: 'q4', vision_encoder: 'fp16' }, mb: 1260, label: 'Qwen3.5 0.8B' },
 }
 /** The Node tests' default (Node's engine has every operation, so plain 4-bit). */
 export const AI_MODEL = ID

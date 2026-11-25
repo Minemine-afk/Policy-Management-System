@@ -854,7 +854,7 @@ const SG_LABELS = {
       clearInterval(tick)
       console.log(`  (AI helper on page pictures: ${Math.round((Date.now() - t0) / 1000)} s)`)
       await check(cmp.getByText(/could not run/).count().then((n) => n === 0), 'the AI helper ran on the page pictures')
-      const labels = { policy_name: 'Policy Name', policy_term: 'Policy Term (Years)', premium_term: 'Premium Term (Years)', death_sa: 'Death', annual_premium: 'Annual Premium', base_premium: 'Premium', tpd_sa: 'Total & Permanent Disability', tpd_premium: 'TPD Premium', currency: 'Policy Currency', terminal_illness: 'Terminal Illness' }
+      const labels = { policy_name: 'Policy Name', policy_term: 'Policy Term (Years)', premium_term: 'Premium Term (Years)', death_sa: 'Death', annual_premium: 'Annual Premium', base_premium: 'Premium', tpd_sa: 'Total & Permanent Disability', tpd_premium: 'TPD Premium', terminal_illness: 'Terminal Illness' }
       let filled = 0, wrong = []
       for (const [k, label] of Object.entries(labels)) {
         const got = (await cmp.getByLabel(new RegExp(`^${label.replace(/[()&]/g, '\\$&')}( \\(\\w+\\))? for PI 1$`)).inputValue()).replace(/(\d),(?=\d{3})/g, '$1')

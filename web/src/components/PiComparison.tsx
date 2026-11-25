@@ -203,7 +203,8 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   async function fillWithAi() {
     setAiState({ busy: true, text: 'Starting the AI helper…', error: '' })
     try {
-      const { askAi, readOutPicture } = await import('../lib/aiModel')
+      const { askAi, readOutPicture, aiOnGraphics } = await import('../lib/aiModel')
+      const slowAi = !(await aiOnGraphics())
       const { pagePictures, picturePages } = await import('../lib/piPictures')
       let filled = 0, fromPictures = 0
       for (const [i, c] of cols.entries()) {
@@ -225,9 +226,10 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         if (rest.length && canPicture(c)) {
           const done = new Set((c.pages ?? []).filter((p) => p.lines.length).map((p) => p.page))
           setAiState({ busy: true, error: '', text: `Drawing the pages of PI${plain(i + 1)} for the AI…` })
-          const pics = (await pagePictures(await files.current.get(c.docId!)!.arrayBuffer(), picturePages(99, text, done)))
+          // On a processor each page takes minutes, so only the first 2 there (the summary is near the front).
+          const pics = (await pagePictures(await files.current.get(c.docId!)!.arrayBuffer(), picturePages(99, text, done, slowAi ? 2 : undefined)))
           const read: Page[] = []
-          for (const pic of pics) read.push(await readOutPicture(pic.image, pic.page, say(`reading the picture of page ${plain(pic.page)}`)))
+          for (const pic of pics) read.push(await readOutPicture(pic.images, pic.page, say(`reading the picture of page ${plain(pic.page)} (of ${plain(pics.length)})`)))
           if (read.some((p) => p.lines.length)) {
             const all = [...(c.pages ?? []).filter((p) => p.lines.length), ...read].sort((x, y) => x.page - y.page)
             const res = await askAi(all, rest, { ...c.values, ...Object.fromEntries(Object.entries(got).map(([k, v]) => [k, v.value])) }, say('reading the pictures'))
@@ -404,7 +406,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           {unread.map(({ c, i }) => (
             <div key={i} className="error" role="alert">
               {canPicture(c)
-                ? `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Its client details come from the request form. The free AI helper can look at its page pictures for the rest: press the AI helper button below, then check each value it fills against the PDF.`
+                ? `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Its client details come from the request form. The free AI helper can look at its page pictures for the rest: press the AI helper button below, then check each value it fills against the PDF. This is quick on a laptop with a graphics chip (such as Intel Iris Xe in Chrome or Edge), but takes several minutes a page without one.`
                 : `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Only its client details come from the request form: the AI helper has nothing to look at either, as the PDF could not be downloaded. Press "Read the PIs again", or type its values from the PDF.`}
             </div>
           ))}

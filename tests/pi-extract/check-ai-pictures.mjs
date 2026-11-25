@@ -34,7 +34,7 @@ const cacheDir = opt('--cache', null)
 if (cacheDir) fs.mkdirSync(cacheDir, { recursive: true })
 
 let m = null
-const model = async () => (m ??= await run.loadModel(t, cfg.AI_MODEL, { dtype: { embed_tokens: 'q4', decoder_model_merged: 'q4', vision_encoder: 'q4' } }))
+const model = async () => (m ??= await run.loadModel(t, cfg.AI_MODEL, { dtype: { embed_tokens: 'q4', decoder_model_merged: 'q4', vision_encoder: 'q4' } }, true))
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pics-'))
 let right = 0, wrong = 0, unscored = 0, secs = 0
 for (const f of files) {
