@@ -30,7 +30,8 @@ On a normal machine, use `supabase start` instead and you don't need any of this
 
 10. Free AI helper (fills blank cells, in the browser): `node tests/pi-extract/check-ai-checks.mjs` (its safety checks, no model,
    seconds), `node tests/pi-extract/check-ai.mjs <pi-samples> ../pi-extract/expected-unknown-formats.json --extra
-   ../pi-extract/expected-ai-extra.json --max-wrong 0` (the real model on the CPU in Node, ~12 minutes, downloads ~1.8 GB once;
+   ../pi-extract/expected-ai-extra.json --max-wrong 0` (the real model on the CPU in Node, ~10 minutes, downloads it once; add `--cache <dir>` to keep the raw answers and re-score
+   changes to the checks in seconds, `--model <id>` to try another model;
    add `--all` to ask about every field, a harder test of the checks), and `node tests/pi-extract/check-ai-browser.cjs <pi-samples>
    CA_iA_TermQuote_2024.pdf` (the website's own worker in Chromium; also checks that nothing is sent out of the page).
 
