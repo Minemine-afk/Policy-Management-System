@@ -72,28 +72,50 @@ export function coverFor(kb: Kb, p: KbProduct, n: Needs): number | null {
   return p.sa_max ? Math.min(cover, p.sa_max) : cover
 }
 
-/** Why a product does not fit the needs (empty = it fits). */
-export function whyNot(kb: Kb, p: KbProduct, n: Needs): string[] {
-  const why: string[] = []
+/** "Any" in the currency and residency filters (the Product Comparison Matrix page starts with every product shown). */
+export const ANY = 'All'
+/** The currency a premium is shown in: the filter's, else the product's first policy currency. */
+export const curOf = (p: KbProduct, n: Needs) => (n.currency && n.currency !== ANY ? n.currency : p.currencies[0] ?? '')
+
+/** The filters a product can fail, by name as on screen (for "3 products hidden by the Currency filter"). */
+export type FilterName = 'Age' | 'Residency' | 'Currency' | 'Critical illness cover' | 'Insurer' | 'Insurance or investment' | 'Plan type'
+  | 'Onshore / offshore' | 'Sum assured' | 'Budget'
+/** Why a product does not fit the needs, with the filter that hides it (empty = it fits). */
+export function misses(kb: Kb, p: KbProduct, n: Needs): { filter: FilterName; why: string }[] {
+  const out: { filter: FilterName; why: string }[] = []
+  const add = (filter: FilterName, why: string) => out.push({ filter, why })
   const money = (x: number) => `${p.currencies[0] ?? ''} ${fmtNum(x)}`
-  if (n.age != null && p.ages_stated !== false && (n.age < p.entry_age_min || n.age > p.entry_age_max)) why.push(`entry age ${plain(p.entry_age_min)} to ${plain(p.entry_age_max)}`)
-  if (n.residency && p.residency.length && !p.residency.includes(n.residency)) why.push(`not open to: ${n.residency.toLowerCase()}`)
-  if (n.currency && !p.currencies.includes(n.currency)) why.push(`no ${n.currency} policies`)
-  if (n.ci && !p.has_ci) why.push('no critical illness cover')
-  if (n.insurer !== 'All' && p.insurer !== n.insurer) why.push('other insurer')
-  if (n.category !== 'All' && p.category !== n.category) why.push(`${p.category.toLowerCase()} product`)
-  if (n.family && n.family !== 'All' && planKey(p.product_type) !== n.family) why.push(`plan type ${planLabel(p.product_type)}`)
-  if (n.jurisdiction !== 'All' && p.jurisdiction !== n.jurisdiction) why.push(p.jurisdiction.toLowerCase())
+  if (n.age != null && p.ages_stated !== false && (n.age < p.entry_age_min || n.age > p.entry_age_max)) add('Age', `entry age ${plain(p.entry_age_min)} to ${plain(p.entry_age_max)}`)
+  if (n.residency && n.residency !== ANY && p.residency.length && !p.residency.includes(n.residency)) add('Residency', `not open to: ${n.residency.toLowerCase()}`)
+  if (n.currency && n.currency !== ANY && !p.currencies.includes(n.currency)) add('Currency', `no ${n.currency} policies (${p.currencies.join(', ') || 'no currency'} only)`)
+  if (n.ci && !p.has_ci) add('Critical illness cover', 'no critical illness cover')
+  if (n.insurer !== 'All' && p.insurer !== n.insurer) add('Insurer', 'other insurer')
+  if (n.category !== 'All' && p.category !== n.category) add('Insurance or investment', `${p.category.toLowerCase()} product`)
+  if (n.family && n.family !== 'All' && planKey(p.product_type) !== n.family) add('Plan type', `plan type ${planLabel(p.product_type)}`)
+  if (n.jurisdiction !== 'All' && p.jurisdiction !== n.jurisdiction) add('Onshore / offshore', p.jurisdiction.toLowerCase())
   if (n.mode === 'coverage' && n.amount > 0) {
-    if (p.sa_min != null && n.amount < p.sa_min) why.push(`minimum sum assured ${money(p.sa_min)}`)
-    if (p.sa_max != null && n.amount > p.sa_max) why.push(`maximum sum assured ${money(p.sa_max)}`)
+    if (p.sa_min != null && n.amount < p.sa_min) add('Sum assured', `minimum sum assured ${money(p.sa_min)}`)
+    if (p.sa_max != null && n.amount > p.sa_max) add('Sum assured', `maximum sum assured ${money(p.sa_max)}`)
   }
   if (n.mode === 'budget' && n.amount > 0) {
     const c = coverFor(kb, p, n)
-    if (c != null && p.sa_min != null && c < p.sa_min) why.push(`the budget buys less than the minimum sum assured (${money(p.sa_min)})`)
+    if (c != null && p.sa_min != null && c < p.sa_min) add('Budget', `the budget buys less than the minimum sum assured (${money(p.sa_min)})`)
   }
-  return why
+  return out
 }
+/** Why a product does not fit the needs (empty = it fits). */
+export const whyNot = (kb: Kb, p: KbProduct, n: Needs): string[] => misses(kb, p, n).map((m) => m.why)
+
+/** How many products each filter hides, most first: "4 by Currency (SGD), 1 by Sum assured". A product hidden by two
+ *  filters counts under each. */
+export function hiddenBy(kb: Kb, n: Needs): { filter: FilterName; count: number }[] {
+  const by = new Map<FilterName, number>()
+  for (const p of kb.products) for (const f of new Set(misses(kb, p, n).map((m) => m.filter))) by.set(f, (by.get(f) ?? 0) + 1)
+  return [...by].map(([filter, count]) => ({ filter, count })).sort((a, b) => b.count - a.count)
+}
+/** The same needs with every filter that can hide a product set to "any" (gender, smoker and the amount's mode stay). */
+export const clearedNeeds = (n: Needs): Needs => ({ ...n, age: null, residency: ANY, currency: ANY, amount: 0, insurer: 'All', category: 'All',
+  family: 'All', jurisdiction: 'All', ci: false })
 
 /** The plan types a row applies to (families.ts keys). A row without `only` applies to every plan type. */
 const LIFE = ['Term life', 'Critical illness', 'Whole life', 'Mortgage cover', 'Investment-linked', 'Universal life', 'Endowment', 'Retirement and annuity']
@@ -209,7 +231,7 @@ export function cellOf(kb: Kb, p: KbProduct, key: string, n: Needs): Cell {
       const prem = sa ? premiumFor(kb, p, n, sa) : null
       if (prem == null) return { text: '', source: sourceOf(kb, rs) }
       const who = `age ${plain(n.age)}, ${n.gender.toLowerCase()}, ${n.smoker ? 'smoker' : 'non-smoker'}`
-      return { text: `${n.currency} ${fmtNum(Math.round(prem))} a year for ${n.currency} ${fmtNum(sa)} cover (${who}, paying to age 65${n.ci ? ', with critical illness rider' : ''}). Indicative only; the PI gives the actual premium.`, source: sourceOf(kb, rs) }
+      return { text: `${curOf(p, n)} ${fmtNum(Math.round(prem))} a year for ${curOf(p, n)} ${fmtNum(sa)} cover (${who}, paying to age 65${n.ci ? ', with critical illness rider' : ''}). Indicative only; the PI gives the actual premium.`, source: sourceOf(kb, rs) }
     }
     default: {
       const f = p.facts[key]

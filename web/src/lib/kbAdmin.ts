@@ -117,6 +117,22 @@ export function productState(p: KbProductRow, usable: boolean, docs?: KbDoc[]): 
   return { text: 'In search', tone: 'ok' }
 }
 
+/** Is a document's product in the Product Comparison Matrix, and if not, why, in plain words (Documents tab).
+ *  `readable`: the document is of a type and file the reader reads (kbAuto.readsInto). Null for documents that never
+ *  belong to a product (training material, circulars ...). */
+export function docInSearch(d: KbDoc, product: KbProductRow | undefined, usable: boolean, readable: boolean):
+  { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info'; why?: string } | null {
+  if (!hasProduct(d.doc_type)) return null
+  if (d.replaced_by) return { text: 'Not used (older version)', tone: 'grey' }
+  if (!product) {
+    if (readable) return { text: 'Not in the matrix', tone: 'bad', why: 'No product record was made from it (it was uploaded before reading was switched on, or the reading did not finish). Press Read again.' }
+    return { text: 'Filed only', tone: 'grey', why: d.doc_type === 'Brochure' ? 'Brochures are kept with the product, not read. A Product Summary puts the product in the matrix.' : 'This file type is not read. Upload the PDF or Excel version to put the product in the matrix.' }
+  }
+  if (isFinancing(product.product_type)) return { text: 'Premium financing: kept, not in the matrix', tone: 'info' }
+  if (usable) return { text: 'In the matrix', tone: 'ok', why: (product.missing ?? []).includes('entry_age') ? 'Entry ages are not stated, so the age filter skips it.' : undefined }
+  return { text: 'Not in the matrix', tone: 'bad', why: whyNotSearchable(product, false) + (readable && blocking(product.missing).length ? '. Or press Read again' : '') }
+}
+
 /** A financing record whose documents (its monthly cost-of-funds sheet) have passed their valid-until date. */
 export const finOutOfDate = (p: { facts: Record<string, Fact | undefined> }, docs: KbDoc[]) =>
   Object.values(p.facts ?? {}).some((f) => { const left = daysLeft(docs.find((d) => d.id === f?.doc && !d.replaced_by)?.valid_until ?? null); return left != null && left < 0 })
