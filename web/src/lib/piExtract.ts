@@ -872,6 +872,17 @@ export function extract(pages: Page[], fileName: string): Extracted {
     const v = fmt2(n('annual_premium')! * n('premium_term')!)
     found.total_premium = { value: v, page: null, line: `Calculated: annual premium ${found.annual_premium.value} × premium term ${found.premium_term.value} years` }
     notes.push(`Total premium was calculated as the annual premium × the premium term (${cm(v)}), as the PI has no illustration table. It assumes the premium stays level.`)
+  }
+  // Renewable term: the illustration runs on past the policy term (renewals up to the cover age). The total premium is
+  // up to that maximum age (Kumar, 2026-11-25); the note gives the first term's own total too.
+  const termY = n('policy_term')
+  const renews = !!segments.length && termY !== null && segments[0][segments[0].length - 1].year > termY && !found.total_premium.guess
+  if (renews) {
+    const atTerm = segments.map((s) => s.filter((r) => r.year <= termY!).pop()).filter((r): r is IllRow => !!r)
+    const first = atTerm.reduce((t, r) => t + num(r.total), 0)
+    const last = segments[0][segments[0].length - 1]
+    found.total_premium = { ...found.total_premium, check: true, line: `${found.total_premium.line ?? ''} (to age ${plain(last.age)}, renewals included)` }
+    notes.push(`Total premium is up to the maximum age ${plain(last.age)} (${cm(found.total_premium.value)}), with the renewal premiums the PI shows. Renewal premiums may change. The first ${plain(termY!)}-year term alone is ${cm(fmt2(first))}.`)
   } else if (n('total_premium') !== null && n('annual_premium') !== null && n('premium_term') !== null && !found.total_premium.guess) {
     // Level premiums: total = annual premium x premium term. Riders with shorter terms make the total smaller, so
     // with riders only a total that is larger than that (by more than 2%) is flagged. Renewals and step-ups differ too.
