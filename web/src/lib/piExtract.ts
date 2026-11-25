@@ -135,6 +135,8 @@ export interface Found {
   learned?: boolean
   /** Read by the layout rules but it fails a cross-check (e.g. the total premium against annual x term): check it. */
   check?: boolean
+  /** Filled by the optional AI helper (piAi.ts) in a cell the rules left blank: ops should check it. */
+  ai?: boolean
 }
 export interface Extracted {
   found: Record<string, Found>

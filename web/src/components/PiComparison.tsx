@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase'
 import { says } from '../lib/options'
 import { FIELDS, SECTIONS, extract, labelWith, readPdf, type Found, type Page } from '../lib/piExtract'
 import { applyLearned, learn } from '../lib/piTeach'
+import { AI_FIELDS, blankKeys } from '../lib/piAi'
+import { AI_MODELS } from '../lib/aiConfig'
 import { loadRules, saveRules, type SavedRule } from '../lib/teach'
 import { TEMPLATE_URL, buildWorkbook, preloadExcel, commonCurrency, isComparisonFile, type ExportColumn } from '../lib/piExcel'
 import { buildPack, packFileName, packState, preloadPdf, sha256 } from '../lib/piPdf'
@@ -29,8 +31,9 @@ interface Column {
 /** How sure the reader is of a cell, so ops check only the uncertain ones. Sure = the reader's rules for this layout,
  *  from the PDF's own text, passing its cross-checks; Learned = a place ops taught; Check = anything else (general
  *  rules, OCR, a failed cross-check, a calculation). Nothing for a value typed by hand or taken from the request form. */
-function confidence(fd: Found | undefined, ocrPages: number[] | undefined): { level: 'Sure' | 'Learned' | 'Check'; why: string } | null {
+function confidence(fd: Found | undefined, ocrPages: number[] | undefined): { level: 'Sure' | 'Learned' | 'Check' | 'AI'; why: string } | null {
   if (!fd?.value) return null
+  if (fd.ai) return { level: 'AI', why: "Filled by the free AI helper (it ran in this browser) in a cell the reader's rules left blank. It passed checks against the PI's text, but AI can still be wrong: check it against the PI." }
   if (fd.learned) return { level: 'Learned', why: 'Read from a place ops taught for this insurer when they saved an earlier comparison. Check it against the PI.' }
   if (fd.guess) return { level: 'Check', why: "This PI's layout is new to the reader: this value was read by general rules. Check it against the PI." }
   if (fd.check) return { level: 'Check', why: 'This value fails a cross-check (see the notes). Check it against the PI.' }
@@ -88,6 +91,9 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   // Places the reader learned from earlier saved comparisons (null while loading).
   const [rules, setRules] = useState<SavedRule[] | null>(null)
   const [teachReady, setTeachReady] = useState(true)
+  // The optional AI helper: fills blank cells, in this browser (see lib/piAi.ts).
+  const [aiState, setAiState] = useState<{ busy: boolean; text: string; error: string }>({ busy: false, text: '', error: '' })
+  useEffect(() => () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }, [])
   useEffect(() => {
     let gone = false
     loadRules().then((r) => { if (!gone) { setRules(r.rules); setTeachReady(r.ready && !r.error) } })
@@ -103,7 +109,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
     let cancelled = false
     const list = docs.filter((d) => key.split(',').includes(d.id)).sort((a, b) => key.indexOf(a.id) - key.indexOf(b.id))
     ;(async () => {
-      setChecked(false); setSaved(''); setError('')
+      setChecked(false); setSaved(''); setError(''); setAiState({ busy: false, text: '', error: '' })
       const out: Column[] = []
       for (const [i, doc] of list.entries()) {
         if (cancelled) return
@@ -160,6 +166,41 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
     setChecked(false); setSaved('')
     setCols((cs) => cs.map((c, j) => (j === i ? { ...c, issueDate: v } : c)))
   }
+  // Cells the AI may fill: left blank by the reader and not typed in by hand.
+  const aiTodo = (c: Column) => (c.error || !c.pages ? [] : blankKeys(c.found).filter((k) => !(c.values[k] ?? '').trim()))
+  const aiCells = cols.reduce((n, c) => n + aiTodo(c).length, 0)
+
+  async function fillWithAi() {
+    setAiState({ busy: true, text: 'Starting the AI helper…', error: '' })
+    try {
+      const { askAi } = await import('../lib/aiModel')
+      let filled = 0
+      for (const [i, c] of cols.entries()) {
+        const keys = aiTodo(c)
+        if (!keys.length) continue
+        const res = await askAi(c.pages!, keys, c.values, (p) => setAiState({ busy: true, error: '',
+          text: p.stage === 'download' ? `Downloading the AI model, first time only: ${Math.round((p.pct ?? 0) * 100)}%`
+            : `The AI (${p.model}) is reading PI${i + 1} (${c.fileName})${p.device === 'wasm' ? ' on the processor, which can take a few minutes' : ''}…` }))
+        const got = Object.keys(res.found)
+        filled += got.length
+        const names = (ks: string[]) => ks.map((k) => FIELDS.find((f) => f.key === k)?.label ?? k).join(', ')
+        setCols((cs) => cs.map((col, j) => {
+          if (j !== i) return col
+          const found = { ...col.found }, values = { ...col.values }
+          for (const k of got) if (!(values[k] ?? '').trim()) { found[k] = res.found[k]; values[k] = res.found[k].value }
+          const notes = [...col.notes]
+          if (got.length) notes.push(`The free AI helper filled ${got.length} blank ${got.length === 1 ? 'cell' : 'cells'} (${names(got)}), tagged "AI": check ${got.length === 1 ? 'it' : 'them'} against the PI.`)
+          if (res.dropped.length) notes.push(`The AI's answers for ${names([...new Set(res.dropped)])} did not match the PI's text, so they were left blank.`)
+          return { ...col, found, values, notes }
+        }))
+      }
+      setChecked(false); setSaved('')
+      setAiState({ busy: false, error: '', text: filled ? `The AI filled ${filled} of ${aiCells} blank ${aiCells === 1 ? 'cell' : 'cells'}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PI text: the blank cells stay blank.' })
+    } catch (e) {
+      setAiState({ busy: false, text: '', error: 'The AI helper could not run in this browser: ' + (e as Error).message + '. Fill the blank cells by hand.' })
+    }
+  }
+
   const badDates = cols.filter((c) => c.issueDate.trim() && !toDmy(c.issueDate)).length
 
   const currency = commonCurrency(cols)
@@ -266,12 +307,13 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       </div>
       <p className="small muted" style={{ margin: 0 }}>
         The first three PI PDFs uploaded above fill PI1, PI2 and PI3 of the comparison, in upload order.
-        They are read in your browser by fixed rules (no AI), scanned pages with OCR, and nothing is sent anywhere. Fields that can't be read are left
+        They are read in your browser by fixed rules (no AI), scanned pages with OCR, and nothing is sent anywhere.
+        For cells left blank, you can ask the free AI helper, which also runs in your browser (tagged “AI”). Fields that can't be read are left
         blank for you to fill; client details the PI doesn't show come from the request form. Check each value against the PDF,
         then save the PI pack: one PDF with the comparison and every PI, which is all the introducer receives. It can be printed but not edited.
         Saving also teaches the reader where the values you typed sit in a PI layout it doesn't know (only the words beside
         them, never the values), and your corrections and NAs, so the next PI from that insurer fills in more (tagged “Learned”).
-        Each value is tagged: “Sure” (the reader's rules, from the PDF's own text), “Learned”, or “Check” (new layout,
+        Each value is tagged: “Sure” (the reader's rules, from the PDF's own text), “Learned”, “AI”, or “Check” (new layout,
         scanned page, calculated, or failing a cross-check). Check those first.
         {pdfs.length > MAX && ` Only the first ${MAX} of the ${pdfs.length} PDFs are compared.`}
       </p>
@@ -296,6 +338,19 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
             <h3 className="small" style={{ margin: 0 }}>Check the values</h3>
             <span className="small muted">{missing ? `${missing} empty ${missing === 1 ? 'cell' : 'cells'} (shaded) to fill or leave blank` : 'Every field has a value'}</span>
           </div>
+          {(aiCells > 0 || aiState.text || aiState.error) && (
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap' }} aria-label="AI helper">
+              {aiCells > 0 && (
+                <button className="btn small" disabled={aiState.busy} onClick={fillWithAi}
+                  title={`A free, open AI model (${AI_FIELDS.length} plan fields: names, terms, sums assured, premiums) runs in this browser: the PI never leaves this computer. The first time, the browser downloads the model (about ${(AI_MODELS.gpu.mb / 1000).toFixed(1)} GB on a computer whose graphics chip works with the browser, ${(AI_MODELS.small.mb / 1000).toFixed(1)} GB (a smaller model that fills fewer cells) otherwise) and keeps it for next time.`}>
+                  {aiState.busy ? 'AI helper working…' : `Fill ${aiCells} blank ${aiCells === 1 ? 'cell' : 'cells'} with the free AI helper`}
+                </button>
+              )}
+              {aiState.text && <span className="small" role="status">{aiState.text}</span>}
+              {aiState.error && <span className="error small" role="alert">{aiState.error}</span>}
+              {aiCells > 0 && !aiState.busy && !aiState.text && <span className="small muted">Runs in your browser, nothing is sent. First use downloads about {(AI_MODELS.small.mb / 1000).toFixed(1)}–{(AI_MODELS.gpu.mb / 1000).toFixed(1)} GB.</span>}
+            </div>
+          )}
           <div className="tablewrap">
             <table className="compare" aria-label="Extracted values">
               <thead>
@@ -350,7 +405,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                                 {conf && <div className={`pill ${conf.level === 'Sure' ? 'ok' : 'info'}`} style={{ margin: '4px 0 2px', fontSize: 12 }} title={conf.why}>{conf.level}</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
-                                  {edited ? 'Changed by hand' : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}
+                                  {edited ? 'Changed by hand' : fd?.ai ? `AI${fd.page ? `, page ${fd.page}` : ''}: “${(fd.line ?? '').slice(0, 44)}${(fd.line ?? '').length > 44 ? '…' : ''}”` : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}
                                 </div>
                               </td>
                             )
