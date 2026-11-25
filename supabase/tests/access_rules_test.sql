@@ -939,4 +939,28 @@ do $$ begin
   raise notice 'ok: Product Comparison Matrix access and audit';
 end $$;
 
+-- More document types: Training material / Product Financing / Circulars need no insurer; "Others" needs a typed name
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select pg_temp.expect_error($$select kb_add_document('{"title":"Note","doc_type":"Others","effective_from":"2026-01-01","storage_path":"f9/a.pdf"}')$$, 'Type a name for the document type');
+select pg_temp.expect_error($$select kb_add_document('{"title":"Note","doc_type":"Others","doc_type_name":"   ","effective_from":"2026-01-01","storage_path":"f9/a.pdf"}')$$, 'Type a name for the document type');
+select pg_temp.expect_error($$select kb_add_document('{"title":"Note","doc_type":"Brochure","effective_from":"2026-01-01","storage_path":"f9/a.pdf"}')$$, 'Fill in the insurer');
+select pg_temp.expect_error($$select kb_add_document('{"title":"Note","doc_type":"Other","effective_from":"2026-01-01","storage_path":"f9/a.pdf"}')$$, 'Choose the document type');
+do $$
+declare t uuid; o uuid;
+begin
+  t := kb_add_document('{"title":"Term basics","doc_type":"Training material","effective_from":"2026-01-01","storage_path":"f9/t.pdf"}');
+  perform kb_add_document('{"title":"Premium financing 101","doc_type":"Product Financing","insurer":"  ","effective_from":"2026-01-01","storage_path":"f9/f.pdf"}');
+  perform kb_add_document('{"title":"LIA circular 12/2026","doc_type":"Circulars","effective_from":"2026-01-01","storage_path":"f9/c.pdf"}');
+  o := kb_add_document('{"title":"Underwriting tips","doc_type":"Others","doc_type_name":"  Underwriting guide ","insurer":"Maple Life","effective_from":"2026-01-01","storage_path":"f9/o.pdf"}');
+  if not exists (select 1 from kb_documents where id = t and insurer = '' and doc_type_name is null) then raise exception 'training material without insurer not stored'; end if;
+  if (select doc_type_name from kb_documents where id = o) <> 'Underwriting guide' then raise exception 'Others name not kept'; end if;
+  -- a name is only kept for Others
+  perform kb_update_document(o, '{"title":"Underwriting tips","doc_type":"Guide","doc_type_name":"x","insurer":"Maple Life","effective_from":"2026-01-01"}');
+  if (select doc_type_name from kb_documents where id = o) is not null then raise exception 'name kept for a fixed type'; end if;
+  perform kb_update_document(o, '{"title":"Underwriting tips","doc_type":"Others","doc_type_name":"Checklist","effective_from":"2026-01-01"}');
+  if not exists (select 1 from kb_documents where id = o and doc_type_name = 'Checklist' and insurer = '' and status = 'new') then raise exception 'changing to Others did not apply'; end if;
+  raise notice 'ok: Knowledge Bank document types incl. Others with a typed name';
+end $$;
+select pg_temp.expect_error($$select kb_add_document('{"title":"Note","doc_type":"Others","doc_type_name":"a very long name that goes on and on past the sixty character limit","effective_from":"2026-01-01","storage_path":"f9/a.pdf"}')$$, '60 characters');
+
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

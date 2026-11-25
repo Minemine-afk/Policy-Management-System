@@ -8,7 +8,7 @@ import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, fmtDateTime, says } from '../lib/options'
 import { CURRENCIES, RESIDENCIES, STANDARD_INSURERS } from '../lib/formOptions'
 import {
-  FACT_FIELDS, RATES_HEADER, blankRecord, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
+  FACT_FIELDS, RATES_HEADER, blankRecord, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
   type Fact, type HistoryRow, type KbDoc, type KbProductRow, type ProductRecord, type Rate,
 } from '../lib/kbAdmin'
 import { AmountInput, ReasonDialog } from '../components/ui'
@@ -224,7 +224,7 @@ export default function KbProduct() {
   const docSelect = (value: string | undefined, onChange: (v: string) => void, label: string, blank = 'Choose a document', elId?: string) => (
     <select id={elId} aria-label={elId ? undefined : label} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       <option value="">{blank}</option>
-      {docOptions.map((d) => <option key={d.id} value={d.id}>{docLabel(d)} · {d.doc_type}{d.replaced_by ? ' (older version)' : d.status === 'new' ? ' (not checked yet)' : ''}</option>)}
+      {docOptions.map((d) => <option key={d.id} value={d.id}>{docLabel(d)} · {docTypeName(d)}{d.replaced_by ? ' (older version)' : d.status === 'new' ? ' (not checked yet)' : ''}</option>)}
     </select>
   )
 

@@ -50,6 +50,10 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      a new private storage bucket `kb-docs`, created by the script.
    - `1r-upgrade.sql` (23 Nov: the Product Comparison Matrix module: the Compare products pop-up as its own page,
      with "Add to PI request" by PI number). Introducers, ops and BSD get the module the first time you run it.
+   - `1s-upgrade.sql` (25 Nov: more Knowledge Bank document types: Training material, Product Financing, Circulars,
+     and Others, where the uploader types the name shown as the type; the insurer is optional for these four).
+     Existing "Other" documents become "Others" named "Other". Until you run it, uploading still works with the old types
+     only (the new ones are refused).
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 
