@@ -292,6 +292,8 @@ export function phrases(r: Read): { str: string; x0: number; x1: number }[] {
  *  is a number apart from such letters (at least two real digits, and a letter only between or next to digits), the
  *  letters are put back as digits. Words with other letters ("Plan 5", "Total") are left alone. */
 export function fixDigits(s: string): string {
+  // "S$" before a number read as "$$", "5$" or "s$" (rough scans): put the S back, or the amount loses its currency.
+  s = s.replace(/(^|[\s(:])(?:\$\$|5\$|s\$)(?=\d)/g, (_m, pre: string) => pre + 'S$')
   return s.replace(/(^|[\s(:])((?:S\$|\$)?)([0-9oOlI|,.]+)(?=$|[\s)%])/g, (m, pre: string, cur: string, body: string) => {
     if ((body.match(/\d/g) ?? []).length < 2 || !/[oOlI|]/.test(body) || !/^[\doOlI|]+(?:[,.][\doOlI|]+)*$/.test(body)) return m
     // Only a number's shape: groups of three after a comma, or two decimals.

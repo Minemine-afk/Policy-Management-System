@@ -49,11 +49,15 @@ export interface HistoryRow { id: number; product_id: string; version: number; r
 /** What a record still needs before it can be found in search, in plain words. */
 export const MISSING_LABEL: Record<string, string> = { currencies: 'policy currency', entry_age: 'entry ages' }
 export const missingText = (m: string[]) => m.map((x) => MISSING_LABEL[x] ?? x).join(' and ')
+/** What a record needs before it is searchable. Entry ages are not needed (Kumar, 25 Nov 2026): a product without
+ *  them is searchable, marked "Entry ages not stated in the document". */
+export const blocking = (m: string[] | null | undefined) => (m ?? []).filter((x) => x !== 'entry_age')
 /** Why a product is not in Compare products (empty = it is). */
 export function whyNotSearchable(p: KbProductRow, usable: boolean): string {
   if (usable) return ''
   if (p.status === 'withdrawn') return 'Withdrawn'
-  if (p.missing?.length) return `Not searchable: the ${missingText(p.missing)} ${p.missing.length > 1 ? 'were' : 'was'} not found in the documents. Open the record and fill ${p.missing.length > 1 ? 'them' : 'it'} in`
+  const m = blocking(p.missing)
+  if (m.length) return `Not searchable: the ${missingText(m)} ${m.length > 1 ? 'were' : 'was'} not found in the documents. Open the record and fill ${m.length > 1 ? 'them' : 'it'} in`
   if (p.status === 'draft') return 'Not saved yet: open it and save it to put it in search'
   return 'Not searchable: a source document is out of date. Upload the new version'
 }
@@ -89,8 +93,8 @@ export function docState(d: KbDoc): { text: string; tone: 'ok' | 'warn' | 'bad' 
 /** Where a product record stands. */
 export function productState(p: KbProductRow, usable: boolean): { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info' | 'purple' } {
   if (p.status === 'withdrawn') return { text: 'Withdrawn', tone: 'grey' }
-  if (p.status === 'draft' && !p.missing?.length) return { text: 'Not saved yet', tone: 'info' }
-  if (!usable) return { text: p.missing?.length ? `Not searchable: no ${missingText(p.missing)}` : 'A source document is out of date', tone: 'bad' }
+  if (p.status === 'draft' && !blocking(p.missing).length) return { text: 'Not saved yet', tone: 'info' }
+  if (!usable) return { text: blocking(p.missing).length ? `Not searchable: no ${missingText(blocking(p.missing))}` : 'A source document is out of date', tone: 'bad' }
   if (p.auto_read) return { text: 'In search · auto-read, not yet reviewed', tone: 'warn' }
   return { text: 'In search', tone: 'ok' }
 }

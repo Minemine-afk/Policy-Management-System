@@ -1138,9 +1138,9 @@ const SG_LABELS = {
     await check(Promise.resolve(sent.length === 0), 'no document text was sent out of the page' + (sent.length ? ': ' + sent[0] : ''))
     await upa.getByLabel('Effective from').fill('2026-01-01')
     await upa.getByRole('button', { name: 'Upload' }).click()
-    await check(seen(olivia.getByText(/not searchable yet: the .*entry ages (?:was|were) not found/)), 'entry ages the document does not state stay blank: not searchable')
+    await check(seen(olivia.getByText(/^Uploaded FWD Future First Term Product Summary\./)), 'the summary is uploaded after the AI helper ran')
     const fwd = (await db.query(`select missing, auto_fields from kb_products where name = 'FWD Future First'`)).rows[0]
-    await check(Promise.resolve(!!fwd && fwd.missing.includes('entry_age') && !fwd.auto_fields.some((x) => x === 'ai:entry_age')), 'no entry ages filled by the AI')
+    await check(Promise.resolve(!!fwd && fwd.missing.includes('entry_age') && !fwd.auto_fields.some((x) => x === 'ai:entry_age')), 'entry ages the document does not state stay blank (none filled by the AI)')
     await olivia.screenshot({ path: SHOTS + '/28-kb-ai-helper.png', fullPage: true })
   }
   await db.end()

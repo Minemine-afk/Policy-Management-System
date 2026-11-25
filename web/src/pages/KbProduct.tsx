@@ -8,7 +8,7 @@ import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, fmtDateTime, says } from '../lib/options'
 import { CURRENCIES, RESIDENCIES, STANDARD_INSURERS } from '../lib/formOptions'
 import {
-  FACT_FIELDS, RATES_HEADER, blankRecord, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
+  FACT_FIELDS, RATES_HEADER, blankRecord, blocking, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
   whyNotSearchable, type Fact, type HistoryRow, type KbDoc, type KbProductRow, type ProductRecord, type Rate,
 } from '../lib/kbAdmin'
 import { AmountInput, ReasonDialog } from '../components/ui'
@@ -260,6 +260,9 @@ export default function KbProduct() {
       {why && row?.status !== 'withdrawn' && <div className="notice warn" role="status">{why}.</div>}
       {row?.auto_read && <div className="notice warn" role="status"><strong>Auto-read, not yet reviewed.</strong> The values marked "From document" were read by the system
         and are shown in Compare products as they are. Reviewing them is optional: change anything wrong and save, or mark it as reviewed.{row.read_note ? ` ${row.read_note}` : ''}</div>}
+      {row?.missing?.includes('entry_age') && <div className="notice warn" role="status"><strong>Entry ages not stated in the document.</strong> The product is
+        searchable, but the age filter skips it and Compare products says the ages are not stated. The {plain(18)} and {plain(65)} in the entry age boxes are only
+        a starting point: type the real entry ages before you save, because saving counts them as the product's ages.</div>}
       {reading && <div className="notice" role="status">{reading}</div>}
       {aiState && <div className="notice" role="status">{aiState}</div>}
       {msg && <div className="notice ok" role="status">{msg}</div>}
@@ -390,7 +393,7 @@ export default function KbProduct() {
             <span className="small muted">{row?.status === 'withdrawn' ? 'Saved changes apply when the product is put back.' : 'Saving puts the record in Compare products straight away. No check is needed.'}</span>
             {row?.auto_read && <button className="btn" onClick={() => call('kb_mark_reviewed', { p_id: row.id }, 'Marked as reviewed. The "Auto-read, not yet reviewed" tag is gone.')} disabled={busy || dirty}>Mark as reviewed (no changes)</button>}
             {row?.status === 'verified' && <button className="linkbtn danger" onClick={() => setDialog('withdraw')} disabled={busy}>Withdraw from Compare products</button>}
-            {row && row.status !== 'verified' && !row.missing?.length && <button className="btn" onClick={() => call('kb_restore_product', { p_id: row.id }, 'Put back. It is in Compare products again.')} disabled={busy}>Put back in Compare products</button>}
+            {row && row.status !== 'verified' && !blocking(row.missing).length && <button className="btn" onClick={() => call('kb_restore_product', { p_id: row.id }, 'Put back. It is in Compare products again.')} disabled={busy}>Put back in Compare products</button>}
             {row && <button className="linkbtn danger" onClick={() => setDialog('delete')} disabled={busy}>Delete this product record</button>}
           </section>
 
