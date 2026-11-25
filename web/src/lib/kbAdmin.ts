@@ -2,6 +2,7 @@
 // maker-checker. Ops and BSD keep it; a BSD person who did not make a change checks it.
 import { supabase } from './supabase'
 import { FACT_ROWS } from './kb'
+import { fmtNum, plain } from './num.ts'
 
 export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Campaign', 'Regulatory', 'Other']
 export const KB_ACCEPT = '.pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx'
@@ -58,7 +59,7 @@ export function docState(d: KbDoc): { text: string; tone: 'ok' | 'warn' | 'bad' 
   const left = daysLeft(d.valid_until)
   if (left != null && left < 0) return { text: 'Out of date', tone: 'bad' }
   if (d.status === 'new') return { text: d.replaces ? 'New version, not checked' : 'New, not checked', tone: 'info' }
-  if (left != null && left <= EXPIRY_WARN_DAYS) return { text: `Expires in ${left} day${left === 1 ? '' : 's'}`, tone: 'warn' }
+  if (left != null && left <= EXPIRY_WARN_DAYS) return { text: `Expires in ${fmtNum(left)} day${left === 1 ? '' : 's'}`, tone: 'warn' }
   return { text: 'Checked', tone: 'ok' }
 }
 
@@ -110,7 +111,7 @@ export function parseRates(text: string): { rates: Rate[]; error: string } {
     const g = /^f/i.test(c[1]) ? 'Female' : /^m/i.test(c[1]) ? 'Male' : ''
     const smoker = /^(y|yes|true|1|s|smoker)$/i.test(c[2]) ? true : /^(n|no|false|0|ns|non-smoker)$/i.test(c[2]) ? false : null
     if (!Number.isInteger(age) || age < 0 || age > 100 || !g || smoker == null || !(rate > 0) || (ci != null && !(ci > 0))) {
-      return { rates: [], error: `Line ${i + 1} ("${line}") needs: age, gender (M/F), smoker (yes/no), rate, and optionally the CI rate` }
+      return { rates: [], error: `Line ${plain(i + 1)} ("${line}") needs: age, gender (M/F), smoker (yes/no), rate, and optionally the CI rate` }
     }
     rates.push({ age, gender: g, smoker, rate, ci_rate: ci })
   }

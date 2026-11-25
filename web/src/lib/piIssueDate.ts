@@ -4,6 +4,7 @@
 //   Tokio    a line holding only "17/03/2023" near the foot of the cover page
 // Dates of birth, "as at" ages, effective or commencement dates are never taken.
 import type { Page } from './piExtract.ts'
+import { plain } from './num.ts'
 
 export interface IssueDate { value: string; page: number; line: string }
 
@@ -29,7 +30,7 @@ export function toDmy(raw: string): string {
 }
 function valid(d: number, mo: number, y: number): string {
   const dt = new Date(Date.UTC(y, mo - 1, d))
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d ? `${pad(d)}/${pad(mo)}/${y}` : ''
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d ? `${pad(d)}/${pad(mo)}/${plain(y)}` : ''
 }
 
 /** "10/11/2026" -> "10 Nov 2026". Anything else is returned as typed. */
@@ -37,10 +38,10 @@ export function showDate(dmy: string): string {
   const m = dmy.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
   if (!m) return dmy.trim()
   const mo = MONTHS[Number(m[2]) - 1]
-  return `${Number(m[1])} ${mo[0].toUpperCase()}${mo.slice(1)} ${m[3]}`
+  return `${plain(Number(m[1]))} ${mo[0].toUpperCase()}${mo.slice(1)} ${m[3]}`
 }
 
-export const todayDmy = (d = new Date()) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`
+export const todayDmy = (d = new Date()) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${plain(d.getFullYear())}`
 
 // In order of trust. Each must be followed (after an optional colon) by the date.
 const LABELLED = [
@@ -79,7 +80,7 @@ export function issueDateHeading(dates: string[], generated = todayDmy()): { tex
   if (!distinct.length) return { text: `PI issue date: ${showDate(generated)} (date of comparison)`, note: 'No issue date was found in the PIs, so the date of the comparison is shown.' }
   if (distinct.length === 1) {
     const missing = found.map((d, i) => (d ? 0 : i + 1)).filter(Boolean)
-    return { text: `PI issue date: ${showDate(distinct[0])}`, note: missing.length ? `No issue date was found in ${missing.map((i) => `PI${i}`).join(' and ')}.` : '' }
+    return { text: `PI issue date: ${showDate(distinct[0])}`, note: missing.length ? `No issue date was found in ${missing.map((i) => `PI${plain(i)}`).join(' and ')}.` : '' }
   }
-  return { text: `PI issue dates: ${found.map((d, i) => `PI${i + 1} ${d ? showDate(d) : 'not shown'}`).join(' · ')}`, note: '' }
+  return { text: `PI issue dates: ${found.map((d, i) => `PI${plain(i + 1)} ${d ? showDate(d) : 'not shown'}`).join(' · ')}`, note: '' }
 }

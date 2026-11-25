@@ -8,6 +8,7 @@ import { useAuth } from '../lib/auth'
 import { says } from '../lib/options'
 import { loadKb, productLabel, type Kb, type KbProduct } from '../lib/kb'
 import ProductMatrix from '../components/ProductMatrix'
+import { fmtNum } from '../lib/num'
 
 interface Target { id: string; ref: string; status: string; insurer: string | null; plan_name: string | null; compare_term: boolean | null }
 
@@ -69,7 +70,7 @@ function AddToRequest({ products }: { products: KbProduct[] }) {
     <div className="card" style={{ background: 'var(--panel-2, transparent)' }} aria-label="Add to PI request">
       <h3 className="eyebrow" style={{ margin: 0 }}>Add to PI request</h3>
       <p className="small muted" style={{ margin: 0 }}>
-        The {products.length} products become the request's product (9) and the products to compare (12{products.length > 2 ? ' and 13' : ''}), in the order shown above.
+        The {fmtNum(products.length)} products become the request's product (9) and the products to compare (12{products.length > 2 ? ' and 13' : ''}), in the order shown above.
         They replace what the request had.
       </p>
       <div className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
@@ -77,7 +78,7 @@ function AddToRequest({ products }: { products: KbProduct[] }) {
           <input type="text" list="pm-targets" placeholder="PI-00012" value={ref} onChange={(e) => { setRef(e.target.value); setDone(null); setError('') }} />
           <datalist id="pm-targets">{(targets ?? []).map((t) => <option key={t.id} value={t.ref}>{STATUS[t.status] ?? t.status}{t.plan_name ? ` · ${t.insurer ?? ''} ${t.plan_name}` : ''}</option>)}</datalist>
         </label>
-        <button type="button" className="btn primary" onClick={add} disabled={busy || !products.length}>{busy ? 'Adding…' : `Add these ${products.length} products to the PI request`}</button>
+        <button type="button" className="btn primary" onClick={add} disabled={busy || !products.length}>{busy ? 'Adding…' : `Add these ${fmtNum(products.length)} products to the PI request`}</button>
       </div>
       {target && !done && <p className="small" style={{ margin: 0 }}>{target.ref} ({STATUS[target.status] ?? target.status}) now has: {now || 'no product chosen'}. After adding: {products.map(productLabel).join(', ')}.</p>}
       {targets && !targets.length && <p className="small muted" style={{ margin: 0 }}>You have no open PI requests you can change right now.</p>}

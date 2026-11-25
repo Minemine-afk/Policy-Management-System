@@ -9,6 +9,7 @@
 // ExcelJS is loaded in the background when the comparison first shows (preloadExcel), not with the app.
 import { FIELDS, labelWith, type FieldDef } from './piExtract.ts'
 import { issueDateHeading } from './piIssueDate.ts'
+import { fmtNum, plain } from './num.ts'
 
 export interface ExportColumn {
   fileName: string
@@ -49,7 +50,7 @@ const toNumber = (v: string): number | null => {
   const s = v.replace(/,/g, '').trim()
   return s !== '' && !isNaN(Number(s)) ? Number(s) : null
 }
-const withCommas = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
+const withCommas = (n: number) => fmtNum(n)
 
 /** "Annual Premium (SGD)" -> "annual premium". */
 const norm = (s: unknown) => String(s ?? '').replace(/\([^)]*\)/g, '').replace(/:\s*.*$/, '').toLowerCase().replace(/\s+/g, ' ').trim()
@@ -118,7 +119,7 @@ export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer)
     const f = FIELDS.find((x) => x.key === k)!
     const h = headerValue(cols, k)
     ws.getCell(rowOf[k], 1).value = `${f.label}: ${h.value}${h.fromForm ? ' (from request form)' : ''}`.trim()
-    for (const [i, x] of h.differs) extraNotes.push(`PI${i + 1}: ${f.label} is "${x}" in this PI (the header shows "${h.value}").`)
+    for (const [i, x] of h.differs) extraNotes.push(`PI${plain(i + 1)}: ${f.label} is "${x}" in this PI (the header shows "${h.value}").`)
   }
   // The PI issue date, top right.
   const heading = issueDateHeading(cols.map((c) => c.issueDate ?? ''))
@@ -138,7 +139,7 @@ export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer)
     const base = toNumber(first(k))
     cols.forEach((c, i) => {
       const n = toNumber(c.values[k] ?? '')
-      if (base !== null && n !== null && n !== base) extraNotes.push(`PI${i + 1}: ${what} is ${withCommas(n)}, not ${withCommas(base)} as in the banner above the table.`)
+      if (base !== null && n !== null && n !== base) extraNotes.push(`PI${plain(i + 1)}: ${what} is ${withCommas(n)}, not ${withCommas(base)} as in the banner above the table.`)
     })
   }
 
@@ -162,7 +163,7 @@ export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer)
 
   // Notes under the table, one line per PI (for example a discounted premium).
   let r = lastRow + 2
-  const all = [...cols.flatMap((c, i) => c.notes.map((n) => `PI${i + 1}: ${n}`)), ...extraNotes]
+  const all = [...cols.flatMap((c, i) => c.notes.map((n) => `PI${plain(i + 1)}: ${n}`)), ...extraNotes]
   for (const n of all) {
     const cell = ws.getCell(r++, 1)
     cell.value = n
@@ -174,7 +175,7 @@ export async function buildWorkbook(cols: ExportColumn[], template: ArrayBuffer)
   src.addRow(['Column', 'File', 'Field', 'Value', 'Page found on', 'Changed by hand', 'From request form'])
   src.getRow(1).font = { bold: true }
   cols.forEach((c, i) => FIELDS.forEach((f) => src.addRow([
-    `PI${i + 1}`, c.fileName, labelWith(f, (c.values.currency ?? '').trim().toUpperCase()), c.values[f.key] ?? '', c.pages[f.key] ?? '', c.edited[f.key] ? 'Yes' : '', c.fromForm?.[f.key] ? 'Yes' : '',
+    `PI${plain(i + 1)}`, c.fileName, labelWith(f, (c.values.currency ?? '').trim().toUpperCase()), c.values[f.key] ?? '', c.pages[f.key] ?? '', c.edited[f.key] ? 'Yes' : '', c.fromForm?.[f.key] ? 'Yes' : '',
   ])))
   src.columns.forEach((col) => { col.width = 24 })
 

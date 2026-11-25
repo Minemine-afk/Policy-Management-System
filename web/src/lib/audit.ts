@@ -1,5 +1,6 @@
 import { ROLE_LABEL, STATUS_LABEL, fmtHours } from './options'
 import type { AuditRow, Profile } from './types'
+import { fmtNum } from './num.ts'
 
 /** Short plain-English names for the audit log's Action filter. */
 export const AUDIT_ACTION_LABEL: Record<string, string> = {
@@ -85,22 +86,22 @@ function describe(r: AuditRow, people: Record<string, Profile>): string {
     case 'request.priority': return d.priority === 'urgent' ? `Marked ${req} as urgent` : `Removed the urgent flag from ${req}`
     case 'document.viewed':
       return d.request ? `Opened a document of request ${d.request} (file name removed when the request was deleted)` : `Opened the document “${d.file ?? 'a file'}”`
-    case 'document.pack_saved': return `Saved the PI pack ${d.request ? `of request ${d.request}` : `“${d.file ?? 'a file'}”`} (${d.pis ?? '?'} PIs, fingerprint ${String(d.sha256 ?? '').slice(0, 12)}…)`
-    case 'insurer.taught': return `Taught the PI reader ${d.places ?? '?'} new ${Number(d.places) === 1 ? 'place' : 'places'} for ${r.entity_id ?? 'an insurer'} (label words only)`
-    case 'insurer.forgotten': return `Deleted ${d.places ?? '?'} learned ${Number(d.places) === 1 ? 'place' : 'places'} for ${r.entity_id ?? 'an insurer'}`
+    case 'document.pack_saved': return `Saved the PI pack ${d.request ? `of request ${d.request}` : `“${d.file ?? 'a file'}”`} (${d.pis == null ? '?' : fmtNum(Number(d.pis))} PIs, fingerprint ${String(d.sha256 ?? '').slice(0, 12)}…)`
+    case 'insurer.taught': return `Taught the PI reader ${d.places == null ? '?' : fmtNum(Number(d.places))} new ${Number(d.places) === 1 ? 'place' : 'places'} for ${r.entity_id ?? 'an insurer'} (label words only)`
+    case 'insurer.forgotten': return `Deleted ${d.places == null ? '?' : fmtNum(Number(d.places))} learned ${Number(d.places) === 1 ? 'place' : 'places'} for ${r.entity_id ?? 'an insurer'}`
     case 'settings.updated':
       return `Changed the deadline settings: due ${fmtHours(Number(d.deadline_hours))} after submission, ` +
         `“due soon” ${fmtHours(Number(d.due_soon_hours))} before, pause the clock while sent back: ${yesNo(d.pause_when_sent_back)}`
     case 'settings.auto_delete':
       return d.auto_delete_on
-        ? `Switched automatic deletion on: open requests overdue for more than ${d.auto_delete_days} days are deleted`
-        : `Switched automatic deletion off (setting kept: ${d.auto_delete_days} days)`
+        ? `Switched automatic deletion on: open requests overdue for more than ${fmtNum(Number(d.auto_delete_days))} days are deleted`
+        : `Switched automatic deletion off (setting kept: ${fmtNum(Number(d.auto_delete_days))} days)`
     case 'request.auto_deleted': {
       const status = STATUS_LABEL[String(d.status)] ?? String(d.status ?? '')
       const files = Number(d.files ?? 0)
       return `Deleted ${req} for good${r.actor_id ? ' (Delete now)' : ' automatically'}: open (“${status}”) and ` +
-        `${d.days_overdue} days overdue, more than the ${d.after_days} days allowed. Its client details, comments, history and ` +
-        `${files === 1 ? '1 file' : `${files} files`} were deleted`
+        `${fmtNum(Number(d.days_overdue))} days overdue, more than the ${fmtNum(Number(d.after_days))} days allowed. Its client details, comments, history and ` +
+        `${files === 1 ? '1 file' : `${fmtNum(files)} files`} were deleted`
     }
     case 'user.updated': {
       const role = d.role ? ROLE_LABEL[String(d.role)] ?? String(d.role) : 'no role'

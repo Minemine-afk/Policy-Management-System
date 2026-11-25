@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react'
+import { groupDigits, ungroup } from '../lib/num'
 import { introGroup, statusLabel } from '../lib/options'
 import { useAuth } from '../lib/auth'
 import type { RequestStatus } from '../lib/types'
@@ -74,3 +75,41 @@ export function ReasonDialog({ title, confirmLabel, onConfirm, onCancel, fieldLa
 export function UrgentPill({ auto }: { auto?: boolean | null }) {
   return <span className="pill bad urgent" title={auto ? 'Urgent because it is overdue' : 'Marked urgent'}>Urgent</span>
 }
+
+/**
+ * A box for an amount that shows a comma at every thousand while you type (1,000,000) and hands back
+ * the plain number text ("1000000") to save. Accepts pasted amounts with or without commas.
+ */
+export function AmountInput({ value, onValue, decimals = true, allowText = false, ...rest }: {
+  value: string | number | null | undefined; onValue: (plain: string) => void; decimals?: boolean
+  /** Also takes words, such as "NA" or "Included" in a PI comparison cell; only the digits get commas. */
+  allowText?: boolean
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
+  const ref = useRef<HTMLInputElement>(null)
+  const caret = useRef<number | null>(null)
+  const shown = groupDigits(value == null ? '' : String(value))
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || caret.current == null || document.activeElement !== el) return
+    // Put the cursor back after the same characters it was after, skipping the commas that moved.
+    let seen = 0, pos = 0
+    while (pos < shown.length && seen < caret.current) { if (!isGroupComma(shown, pos)) seen++; pos++ }
+    el.setSelectionRange(pos, pos)
+    caret.current = null
+  })
+  const keep = (t: string) => {
+    const u = ungroup(t)
+    if (allowText) return u
+    const d = u.replace(decimals ? /[^\d.]/g : /\D/g, '')
+    return decimals ? d.replace(/^([^.]*\.)(.*)$/, (_, a: string, b: string) => a + b.replace(/\./g, '')) : d
+  }
+  return <input {...rest} ref={ref} type="text" inputMode={allowText ? undefined : decimals ? 'decimal' : 'numeric'} value={shown}
+    onChange={(e) => {
+      const raw = e.target.value
+      const at = e.target.selectionStart ?? raw.length
+      caret.current = keep(raw.slice(0, at)).length
+      onValue(keep(raw))
+    }} />
+}
+
+const isGroupComma = (s: string, i: number) => s[i] === ',' && /\d/.test(s[i - 1] ?? '') && /\d/.test(s[i + 1] ?? '')

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmtDateTime, says } from '../lib/options'
 import type { RequestDocument } from '../lib/types'
+import { plain } from '../lib/num'
 
 /** A list of files of one kind, with upload and download. */
 export default function Files({ title, hint, requestId, kind, docs, canUpload, userId, onChange }: {
@@ -17,7 +18,7 @@ export default function Files({ title, hint, requestId, kind, docs, canUpload, u
     if (!files?.length) return
     setBusy(true); setError('')
     for (const file of Array.from(files)) {
-      const path = `${requestId}/${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_')}`
+      const path = `${requestId}/${plain(Date.now())}-${file.name.replace(/[^\w.-]+/g, '_')}`
       const up = await supabase.storage.from('request-docs').upload(path, file, { contentType: file.type || 'application/octet-stream' })
       if (up.error) { setError(says(up.error.message)); continue }
       const ins = await supabase.rpc('add_document', { p_request: requestId, p_kind: kind, p_path: path, p_name: file.name })

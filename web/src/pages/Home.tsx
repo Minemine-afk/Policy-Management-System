@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { dueInfo, introGroup } from '../lib/options'
 import { useSettings } from '../lib/settings'
 import { MODULE_HOME, useModules, type ModuleKey } from '../lib/modules'
+import { fmtNum } from '../lib/num'
 
 /** Simple stroke icons, one per module and admin tool. */
 const ICON: Record<string, ReactNode> = {
@@ -39,13 +40,13 @@ function usePiBadges(on: boolean, introducer: boolean, soonHours: number): Badge
       if (introducer) {
         const prog = data.filter((r) => introGroup(r.status) === 'in_progress').length
         const back = data.filter((r) => r.status === 'sent_back').length
-        if (prog) out.push({ text: `${prog} in progress`, tone: 'info' })
-        if (back) out.push({ text: `${back} sent back to you`, tone: 'warn' })
+        if (prog) out.push({ text: `${fmtNum(prog)} in progress`, tone: 'info' })
+        if (back) out.push({ text: `${fmtNum(back)} sent back to you`, tone: 'warn' })
       } else {
         const pool = data.filter((r) => r.status === 'submitted' && !r.assignee_id).length
         const late = data.filter((r) => dueInfo(r, soonHours)?.overdue).length
-        if (pool) out.push({ text: `${pool} unassigned`, tone: 'info' })
-        if (late) out.push({ text: `${late} overdue`, tone: 'bad' })
+        if (pool) out.push({ text: `${fmtNum(pool)} unassigned`, tone: 'info' })
+        if (late) out.push({ text: `${fmtNum(late)} overdue`, tone: 'bad' })
       }
       setBadges(out)
     })
@@ -70,8 +71,8 @@ function useKbBadges(on: boolean): Badge[] {
       const check = docs.filter((x) => x.status === 'new').length + ((p.data ?? []) as { pending_state: string | null }[]).filter((x) => x.pending_state === 'check').length
       const expiring = docs.filter((x) => !x.replaced_by && x.valid_until && x.valid_until <= soon).length
       const out: Badge[] = []
-      if (check) out.push({ text: `${check} to check`, tone: 'info' })
-      if (expiring) out.push({ text: `${expiring} document${expiring === 1 ? '' : 's'} expiring`, tone: 'warn' })
+      if (check) out.push({ text: `${fmtNum(check)} to check`, tone: 'info' })
+      if (expiring) out.push({ text: `${fmtNum(expiring)} document${expiring === 1 ? '' : 's'} expiring`, tone: 'warn' })
       setBadges(out)
     })
     return () => { live = false }

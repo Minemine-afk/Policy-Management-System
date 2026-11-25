@@ -12,6 +12,7 @@ import { createUser, tempPassword } from '../lib/users'
 import UserCsv from '../components/UserCsv'
 import ModuleAccess from '../components/ModuleAccess'
 import AutoDelete from '../components/AutoDelete'
+import { fmtNum } from '../lib/num'
 
 export default function Admin() {
   const cls = ({ isActive }: { isActive: boolean }) => `btn small ${isActive ? 'primary' : ''}`
@@ -234,8 +235,8 @@ function Audit() {
         {filtered && <button type="button" className="btn small" onClick={() => setF(NO_AUDIT_FILTER)}>Clear filters</button>}
       </div>
       <div className="small muted" role="status">
-        {loading ? 'Loading…' : `${rows.length}${rows.length === AUDIT_LIMIT ? '+' : ''} ${rows.length === 1 ? 'entry' : 'entries'}`}
-        {!loading && rows.length === AUDIT_LIMIT && ` (showing the latest ${AUDIT_LIMIT}; narrow the filters to see older ones)`}
+        {loading ? 'Loading…' : `${fmtNum(rows.length)}${rows.length === AUDIT_LIMIT ? '+' : ''} ${rows.length === 1 ? 'entry' : 'entries'}`}
+        {!loading && rows.length === AUDIT_LIMIT && ` (showing the latest ${fmtNum(AUDIT_LIMIT)}; narrow the filters to see older ones)`}
         {f.role && f.role !== 'system' && ' · Role is the person\'s current role.'}
       </div>
       <div className="tablewrap">

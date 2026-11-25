@@ -2,6 +2,7 @@
 // the client-needs filters (wireframe 4) and the side-by-side comparison rows (wireframe 5).
 // Facts only: nothing here ranks products or says which suits the client (no advice, MAS).
 import { supabase } from './supabase'
+import { fmtNum, groupMoneyInText, plain } from './num.ts'
 
 export interface KbFact { v: string; doc?: string; page?: number }
 export interface KbProduct {
@@ -67,8 +68,8 @@ export function coverFor(kb: Kb, p: KbProduct, n: Needs): number | null {
 /** Why a product does not fit the needs (empty = it fits). */
 export function whyNot(kb: Kb, p: KbProduct, n: Needs): string[] {
   const why: string[] = []
-  const money = (x: number) => `${p.currencies[0] ?? ''} ${x.toLocaleString('en-SG')}`
-  if (n.age != null && (n.age < p.entry_age_min || n.age > p.entry_age_max)) why.push(`entry age ${p.entry_age_min} to ${p.entry_age_max}`)
+  const money = (x: number) => `${p.currencies[0] ?? ''} ${fmtNum(x)}`
+  if (n.age != null && (n.age < p.entry_age_min || n.age > p.entry_age_max)) why.push(`entry age ${plain(p.entry_age_min)} to ${plain(p.entry_age_max)}`)
   if (n.residency && p.residency.length && !p.residency.includes(n.residency)) why.push(`not open to: ${n.residency.toLowerCase()}`)
   if (n.currency && !p.currencies.includes(n.currency)) why.push(`no ${n.currency} policies`)
   if (n.ci && !p.has_ci) why.push('no critical illness cover')
@@ -129,7 +130,7 @@ const fmtDate = (iso: string | null | undefined) => iso ? new Date(iso).toLocale
 function sourceOf(kb: Kb, docId: string | undefined, page?: number) {
   const d = docId ? kb.docs[docId] : undefined
   if (!d) return ''
-  return `${d.title}${page ? `, p.${page}` : ''}${d.effective_from ? ` · effective ${fmtDate(d.effective_from)}` : ''}`
+  return `${d.title}${page ? `, p.${plain(page)}` : ''}${d.effective_from ? ` · effective ${fmtDate(d.effective_from)}` : ''}`
 }
 
 /** One cell of the comparison: the value and where it came from. */
@@ -137,26 +138,26 @@ export function cellOf(kb: Kb, p: KbProduct, key: string, n: Needs): Cell {
   const ps = p.facts._ps?.doc ?? undefined
   const rs = p.facts._rs?.doc ?? undefined
   const fromPs = (text: string) => ({ text, source: sourceOf(kb, ps) })
-  const money = (x: number | null) => x == null ? '' : `${p.currencies[0] ?? ''} ${x.toLocaleString('en-SG')}`
+  const money = (x: number | null) => x == null ? '' : `${p.currencies[0] ?? ''} ${fmtNum(x)}`
   switch (key) {
     case '_insurer': return fromPs(p.insurer)
     case '_type': return fromPs(`${p.product_type} life${p.dpi ? ' (Direct Purchase Insurance)' : ''}`)
     case '_juris': return fromPs(p.jurisdiction)
     case '_cur': return fromPs(p.currencies.join(', '))
-    case '_age': return fromPs(`${p.entry_age_min} to ${p.entry_age_max} (age next birthday)`)
+    case '_age': return fromPs(`${plain(p.entry_age_min)} to ${plain(p.entry_age_max)} (age next birthday)`)
     case '_res': return fromPs(p.residency.join('; '))
     case '_sa': return fromPs(p.sa_min != null || p.sa_max != null ? `${money(p.sa_min) || 'Any'} to ${money(p.sa_max) || 'no stated maximum'}` : '')
     case '_prem': {
       const sa = n.mode === 'coverage' ? n.amount : coverFor(kb, p, n)
       const prem = sa ? premiumFor(kb, p, n, sa) : null
       if (prem == null) return { text: '', source: sourceOf(kb, rs) }
-      const who = `age ${n.age}, ${n.gender.toLowerCase()}, ${n.smoker ? 'smoker' : 'non-smoker'}`
-      return { text: `${n.currency} ${Math.round(prem).toLocaleString('en-SG')} a year for ${n.currency} ${sa!.toLocaleString('en-SG')} cover (${who}, paying to age 65${n.ci ? ', with critical illness rider' : ''}). Indicative only; the PI gives the actual premium.`, source: sourceOf(kb, rs) }
+      const who = `age ${plain(n.age)}, ${n.gender.toLowerCase()}, ${n.smoker ? 'smoker' : 'non-smoker'}`
+      return { text: `${n.currency} ${fmtNum(Math.round(prem))} a year for ${n.currency} ${fmtNum(sa)} cover (${who}, paying to age 65${n.ci ? ', with critical illness rider' : ''}). Indicative only; the PI gives the actual premium.`, source: sourceOf(kb, rs) }
     }
     default: {
       const f = p.facts[key]
       if (key === 'invest' && !f) return { text: `${NOT_AVAILABLE} (term plan)`, source: sourceOf(kb, ps) }
-      return { text: f?.v ?? '', source: f ? sourceOf(kb, f.doc, f.page) : '' }
+      return { text: groupMoneyInText(f?.v ?? ''), source: f ? sourceOf(kb, f.doc, f.page) : '' }
     }
   }
 }
