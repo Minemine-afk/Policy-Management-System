@@ -425,7 +425,8 @@ export function currenciesIn(s: string): string[] {
   if (/US\$|us dollars?|united states dollars?/i.test(s)) found.add('USD')
   if (/A\$|australian dollars?/i.test(s)) found.add('AUD')
   if (/£|pounds? sterling/i.test(s)) found.add('GBP')
-  if (/€|euros?\b/i.test(s)) found.add('EUR')
+  // Whole words only: "neurologist" and "Neuro-muscular" are not euros (FWD's summary).
+  if (/€|\beuros?\b/i.test(s)) found.add('EUR')
   if (/HK\$|hong kong dollars?/i.test(s)) found.add('HKD')
   return CURRENCY_CODES.filter((c) => found.has(c))
 }
@@ -646,10 +647,11 @@ function currencySentence(sentences: { s: string }[]): string[] {
   return []
 }
 
-/** Every amount in S$ (at least 3), no other currency named and the word "currency" not used at all. */
+/** Every amount in S$ (at least 3), no other currency named and the word "currency" not used at all (as a word:
+ *  "occurrence" does not count, FWD's summary uses it often). */
 function onlySgd(text: string): boolean {
   const n = (text.match(/S\$\s?\d|\bSGD\s?\d/g) ?? []).length
-  return n >= 3 && !/currenc/i.test(text) && JSON.stringify(currenciesIn(text)) === '["SGD"]' && !/(?<![A-Z])\$\s?\d/.test(text.replace(/S\$/g, ''))
+  return n >= 3 && !/\bcurrenc/i.test(text) && JSON.stringify(currenciesIn(text)) === '["SGD"]' && !/(?<![A-Z])\$\s?\d/.test(text.replace(/S\$/g, ''))
 }
 
 // ---------------------------------------------------------------------------------------------------------------

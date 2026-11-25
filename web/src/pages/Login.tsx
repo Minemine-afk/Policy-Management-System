@@ -42,9 +42,10 @@ export default function Login() {
   return (
     <div className="login">
       <div className="card">
-        <div>
-          <p className="eyebrow">PWS Service Hub</p>
+        <div className="login-head">
+          <div className="brand-mark"><span className="brand-logo" aria-hidden="true">P</span>PWS Service Hub</div>
           <h1>Sign in</h1>
+          <p className="muted small" style={{ margin: 0 }}>Use the email and password your admin gave you.</p>
         </div>
         <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <label className="field">Email

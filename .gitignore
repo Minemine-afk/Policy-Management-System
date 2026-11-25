@@ -14,3 +14,4 @@ tests/e2e/postgrest
 tests/e2e/gotrue
 tests/e2e/migrations
 tests/e2e/gateway.out
+tests/topbar/shots/

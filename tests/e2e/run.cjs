@@ -33,7 +33,7 @@ const SG_LABELS = {
     await p.getByLabel('Email').fill(email)
     await p.getByLabel('Password').fill(password)
     await p.getByRole('button', { name: 'Sign in', exact: true }).click()
-    await p.getByRole('button', { name: 'Sign out' }).waitFor()
+    await p.locator('.topbar .user-btn').waitFor()  // signed in: the user menu is in the top bar
     return p
   }
   const picker = (p) => p.getByRole('navigation', { name: 'Modules', exact: true }).waitFor()
@@ -429,7 +429,7 @@ const SG_LABELS = {
   await pat.locator('h1 .pill', { hasText: 'Removed' }).waitFor()
   ok('bsd removed a request with a reason')
   await check(pat.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Admin' }).count().then((n) => n === 0), 'bsd has no Admin menu any more')
-  await check(pat.locator('.who').textContent().then((t) => t.includes('Pat BSD · BSD')), 'bsd is shown as BSD, not Admin')
+  await check(pat.locator('.topbar .user-btn').getAttribute('title').then((t) => t === 'Pat BSD · BSD'), 'bsd is shown as BSD, not Admin')
   await pat.goto(BASE + '/admin/users')
   await picker(pat)
   ok('bsd is redirected away from the Admin pages')
@@ -693,7 +693,8 @@ const SG_LABELS = {
   await newbie.getByRole('link', { name: /PI Requests/ }).click()
   await newbie.getByRole('heading', { name: 'Board' }).waitFor()
   await check(newbie.locator('.cardlet').count().then((n) => n === 0), 'the new introducer sees no one else’s requests')
-  await newbie.getByRole('link', { name: 'Account', exact: true }).click()
+  await newbie.locator('.topbar .user-btn').click()
+  await newbie.getByRole('menuitem', { name: /Account/ }).click()
   await newbie.getByLabel('New password', { exact: true }).fill('Changed-Pass-1')
   await newbie.getByLabel('Repeat new password').fill('Changed-Pass-2')
   await newbie.getByRole('button', { name: 'Change password' }).click()
@@ -701,11 +702,12 @@ const SG_LABELS = {
   await newbie.getByLabel('Repeat new password').fill('Changed-Pass-1')
   await newbie.getByRole('button', { name: 'Change password' }).click()
   await newbie.getByText('Password changed.').waitFor()
-  await newbie.getByRole('button', { name: 'Sign out' }).click()
+  await newbie.locator('.topbar .user-btn').click()
+  await newbie.getByRole('menuitem', { name: 'Sign out' }).click()
   await newbie.getByLabel('Email').fill('new.introducer@example.com')
   await newbie.getByLabel('Password').fill('Changed-Pass-1')
   await newbie.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await newbie.getByRole('button', { name: 'Sign out' }).waitFor()
+  await newbie.locator('.topbar .user-btn').waitFor()
   ok('the new user changed their password and signed in with it')
 
   // 7. Non-bsd cannot open admin
@@ -1140,6 +1142,7 @@ const SG_LABELS = {
   await ups.getByRole('button', { name: 'Upload' }).click()
   await check(seen(olivia.getByText(/The product is in search now \(Compare products and the Product Comparison Matrix\), marked "Auto-read, not yet reviewed"/)), 'a bare Product Summary upload is in search straight away')
   await check(offeredNames().then((o) => o.some((x) => x.name === 'Orchard TermShield' && x.auto_read)), 'introducers see it, tagged auto-read')
+  await check(seen(olivia.locator('tr', { hasText: 'Orchard_TermShield_Product_Summary.pdf' }).getByLabel('In the matrix?').getByText('In the matrix', { exact: true })), 'the Documents tab says the upload is in the matrix')
   const orchard = (await db.query(`select id, facts, entry_age_max, currencies, has_ci, missing from kb_products where name = 'Orchard TermShield'`)).rows[0]
   await check(Promise.resolve(!!orchard && orchard.facts.freelook.v === '14 days' && orchard.facts.freelook.page === 2 && orchard.entry_age_max === 60 && orchard.currencies.join() === 'SGD,USD' && orchard.missing.length === 0),
     'what was read is saved with pages, entry ages and currencies')
@@ -1241,6 +1244,15 @@ const SG_LABELS = {
   await check(Promise.resolve(ul.category === 'Investment'), 'a universal life product is an investment product (group follows the category)')
   await sam.goto(BASE + '/matrix')
   await sam.getByRole('heading', { name: 'Find products to compare' }).waitFor()
+  // Kumar, 25 Nov 2026 ("none of my uploads show"): the page starts with no filter set, so every product in search shows,
+  // and a filter that hides products says how many and which.
+  const inSearch = (await db.query(`select count(*)::int n from kb_products p where kb_product_usable(p.id) and product_type <> 'Premium financing'`)).rows[0].n
+  await check(sam.getByRole('heading', { name: `${inSearch} matching products` }).waitFor().then(() => true, () => false), `the matrix page shows every product in search by default (${inSearch})`)
+  await check(seen(resultRows.filter({ hasText: 'Cedar Indexed UL' })), 'including a USD universal life product, with no currency chosen')
+  await sam.getByLabel('Currency').selectOption('SGD')
+  await check(seen(sam.getByRole('status', { name: 'Hidden by filters' }).filter({ hasText: /hidden by your filters: \d+ by Currency \(SGD\)/ })), 'a filter that hides products says how many it hides')
+  await sam.getByRole('button', { name: 'Show all products (clear filters)' }).click()
+  await check(sam.getByRole('heading', { name: `${inSearch} matching products` }).waitFor().then(() => true, () => false), 'and "Show all products" clears the filters')
   await sam.getByLabel('Currency').selectOption('USD')
   await check(seen(resultRows.filter({ hasText: 'Cedar Indexed UL' })), 'a universal life product is searchable')
   await check(seen(resultRows.filter({ hasText: 'Cedar Indexed UL' }).getByText('Universal life incl. indexed (inv)')), 'the results show its category with (inv)')

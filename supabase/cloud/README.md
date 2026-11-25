@@ -75,6 +75,9 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      cost-of-funds rates, and can be saved, edited and versioned like any record. Premium financing is not offered in
      Compare products for now. Product Financing documents filed under "All products" move to Premium financing).
      Run it after 1w. Until you run it, financing documents are kept as documents but make no product record.
+   - `check-why-not-in-matrix.sql` (read only, changes nothing): one row per product document with its product record,
+     whether it is in the Product Comparison Matrix, and why not (no record made, policy currency not found, out of date,
+     financing ...). The Documents tab shows the same reason under each document's status.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 

@@ -18,7 +18,7 @@ const check = (cond, what) => { if (cond) ok++; else { bad++; console.log('  WRO
 // Each fact: the words its value must start with (or contain, after "~"). Facts not listed must not be found.
 const WANT = {
   'FWD_Future_First_Term_Product_Summary.pdf': {
-    record: { name: 'FWD Future First', insurer: 'FWD', has_tpd: true, has_ci: true },
+    record: { name: 'FWD Future First', insurer: 'FWD', currencies: ['SGD'], has_tpd: true, has_ci: true },
     kind: '', planType: 'Term life',
     facts: {
       premTerm: 'Regular premiums are payable for the full coverage term', guaranteed: 'The premiums for FWD Future First are guaranteed',
