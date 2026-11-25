@@ -718,7 +718,8 @@ const SG_LABELS = {
       for (const [k, label] of Object.entries(labels)) {
         const got = (await olivia.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()).replace(/(\d),(?=\d{3})/g, '$1')   // shown with thousands commas
         // PI-00003's request form has a date of birth (set by the introducer above): it fills a PI that has none
-        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
+        // and its residency (also set above) fills a PI that states none
+        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : k === 'residency' && !expected[n][k] ? 'Foreigner living in Singapore' : expected[n][k]
         await check(Promise.resolve(got === want), `real sample ${n}: ${label} = ${got || '(blank)'}`)
       }
     }
@@ -746,7 +747,8 @@ const SG_LABELS = {
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
         const got = (await cmp.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()).replace(/(\d),(?=\d{3})/g, '$1')
-        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
+        // and its residency (also set above) fills a PI that states none
+        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : k === 'residency' && !expected[n][k] ? 'Foreigner living in Singapore' : expected[n][k]
         await check(Promise.resolve(got === want), `scanned ${n} (OCR): ${label} = ${got || '(blank)'}`)
       }
     }
@@ -977,7 +979,7 @@ const SG_LABELS = {
   // The record that was made: fill in what is missing and save; it is in search at once
   await olivia.getByRole('link', { name: 'Product records' }).click()
   const mapleRow = olivia.locator('tr', { hasText: 'Maple Term' })
-  await check(seen(mapleRow.getByText(/^Not searchable: no policy currency and entry ages$/)), 'the product records list says why a record is not searchable')
+  await check(seen(mapleRow.getByText(/^Not searchable: no policy currency$/)), 'the product records list says why a record is not searchable')
   await mapleRow.getByRole('link', { name: 'Open Maple Term' }).click()
   await olivia.waitForURL(/\/kb\/products\/[0-9a-f-]{36}$/)
   const mapleUrl = olivia.url()
@@ -1017,6 +1019,7 @@ const SG_LABELS = {
   const ups = olivia.getByRole('dialog', { name: 'Upload document' })
   await ups.getByLabel('File').setInputFiles(kbFile('Orchard_TermShield_Product_Summary.pdf', 'application/pdf'))
   await check(seen(ups.getByText(/^Read: product name, insurer, entry age/)), 'the upload form reads the Product Summary when it is picked')
+  await check(ups.getByRole('button', { name: /Ask the free AI helper/ }).count().then((n) => n === 0), 'no AI helper button when the reader left nothing it could ask about')
   await check(ups.getByLabel('Insurer').inputValue().then((v) => v === 'Marina Life Assurance'), 'and fills in the insurer read')
   await check(ups.getByLabel('Product name (new product record)').inputValue().then((v) => v === 'Orchard TermShield'), 'and the product name read')
   await ups.getByLabel('Effective from').fill('2026-01-01')
@@ -1113,6 +1116,33 @@ const SG_LABELS = {
   await check(olivia.getByRole('alert').filter({ hasText: /cannot change the products on|No PI request/ }).waitFor().then(() => true, () => false), 'ops cannot change a request that is not assigned to them')
   await alex.goto(BASE + '/admin/audit')
   await check(alex.locator('td', { hasText: new RegExp(`^Added .+ to request ${samRef} from the Product Comparison Matrix$`) }).first().waitFor().then(() => true, () => false), 'adding products is in the audit log in plain English')
+  // The free AI helper on a real Product Summary (KB_REAL=folder with FWD_Future_First_Term_Product_Summary.pdf).
+  // It runs the model in this browser (first time: downloads it from Hugging Face). The FWD summary states no entry
+  // ages, so they must stay blank and the product unsearchable; nothing the AI is given may leave the page.
+  if (process.env.KB_REAL) {
+    await olivia.goto(BASE + '/kb')
+    await olivia.getByRole('button', { name: 'Upload document' }).click()
+    const upa = olivia.getByRole('dialog', { name: 'Upload document' })
+    await upa.getByLabel('File').setInputFiles(process.env.KB_REAL + '/FWD_Future_First_Term_Product_Summary.pdf')
+    const aiBtn = upa.getByRole('button', { name: /^Ask the free AI helper about \d+ details? the reader missed$/ })
+    await check(seen(aiBtn), 'a real Product Summary with blanks offers the free AI helper')
+    const sent = []
+    olivia.on('request', (r) => { let d = ''; try { d = r.postData() ?? '' } catch { d = '' } if (!/^http:\/\/127\.0\.0\.1/.test(r.url()) && /Future First|sum insured/i.test(d + r.url())) sent.push(r.url()) })
+    await aiBtn.click()
+    const t0 = Date.now()
+    const tick = setInterval(async () => console.log('  (AI helper:', (await upa.getByRole('status').allInnerTexts().catch(() => [])).join(' | ').slice(0, 160), ')'), 60_000)
+    await upa.getByText(/^The AI helper found nothing more|^Read: .*by the AI helper|could not run/).waitFor({ timeout: 30 * 60_000 })
+      .finally(() => clearInterval(tick)).catch(async (e) => { await olivia.screenshot({ path: SHOTS + '/28-kb-ai-helper-timeout.png', fullPage: true }); throw e })
+    console.log(`  (AI helper ran in ${Math.round((Date.now() - t0) / 1000)} s)`)
+    await check(upa.getByText(/could not run/).count().then((n) => n === 0), 'the AI helper ran in the browser')
+    await check(Promise.resolve(sent.length === 0), 'no document text was sent out of the page' + (sent.length ? ': ' + sent[0] : ''))
+    await upa.getByLabel('Effective from').fill('2026-01-01')
+    await upa.getByRole('button', { name: 'Upload' }).click()
+    await check(seen(olivia.getByText(/^Uploaded FWD Future First Term Product Summary\./)), 'the summary is uploaded after the AI helper ran')
+    const fwd = (await db.query(`select missing, auto_fields from kb_products where name = 'FWD Future First'`)).rows[0]
+    await check(Promise.resolve(!!fwd && fwd.missing.includes('entry_age') && !fwd.auto_fields.some((x) => x === 'ai:entry_age')), 'entry ages the document does not state stay blank (none filled by the AI)')
+    await olivia.screenshot({ path: SHOTS + '/28-kb-ai-helper.png', fullPage: true })
+  }
   await db.end()
 
   await check(Promise.resolve(errors.length === 0), 'no uncaught page errors' + (errors.length ? ': ' + errors[0] : ''))

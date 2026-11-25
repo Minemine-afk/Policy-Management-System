@@ -1,6 +1,6 @@
 // One Knowledge Bank product record: its facts (each naming a document and page) and premium rates. No check step
 // (Kumar, 25 Nov 2026): saving puts it in search at once; changing it is optional. What the reader filled in is marked
-// "From document" until someone saves the record or marks it as reviewed.
+// "From document" (or "AI", when the free AI helper filled it) until someone saves the record or marks it as reviewed.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -16,6 +16,8 @@ import { DocDialog, KbHeader, type Created } from './KnowledgeHub'
 import { ratesCsv, readFile, readRates, readSummary, readableName } from '../lib/kbExtract'
 import { loadProducts } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
+import { aiAskCount, aiKeysOf, fillWithAi, type Reading } from '../lib/kbAuto'
+import { AI_MODELS } from '../lib/aiConfig'
 
 const HOW: Record<string, string> = { edit: 'saved', read: 'read from an upload', migrated: 'put live when checks were removed', checked: 'checked' }
 
@@ -43,6 +45,10 @@ export default function KbProduct() {
   const [reading, setReading] = useState('')
   const [fromDoc, setFromDoc] = useState<Set<string>>(new Set())   // fact keys and fields filled in by the reader
   const [readNotes, setReadNotes] = useState<string[]>([])
+  const [aiSet, setAiSet] = useState<Set<string>>(new Set())      // what the AI helper filled in
+  const [lastRead, setLastRead] = useState<Reading | null>(null)   // the last Product Summary read, for the AI helper
+  const [aiState, setAiState] = useState('')
+  useEffect(() => () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }, [])
   const [upload, setUpload] = useState<'Product Summary' | 'Rate sheet' | null>(null)
   const [products, setProducts] = useState<KbProductRow[]>([])
 
@@ -64,6 +70,7 @@ export default function KbProduct() {
       setRec({ ...base, facts: base.facts ?? {} }); setSaved(JSON.stringify({ ...base, rates: undefined }))
       setRatesText(ratesToCsv(lr)); setRatesTouched(false)
       setFromDoc(new Set(p.auto_read ? (p.auto_fields ?? []) : []))
+      setAiSet(new Set(p.auto_read ? aiKeysOf(p.auto_fields) : []))
     }
     setReady(true)
   }, [id])
@@ -114,6 +121,8 @@ export default function KbProduct() {
           return next
         })
         setFromDoc((x) => new Set([...x, ...keys]))
+        setAiSet((x) => new Set([...x].filter((k) => !keys.has(k) && !(k === 'entry_age' && keys.has('entry_age_min')))))
+        setLastRead({ kind: 'summary', summary: r, doc })
         setReadNotes(r.notes)
         setMsg(r.filled.length
           ? `Filled in from ${name}: ${r.filled.join(', ')}. Each is marked "From document". Fill in anything missed, then save: it is in search straight away.`
@@ -134,6 +143,44 @@ export default function KbProduct() {
       setReading('')
     }
   }
+
+  /** Asks the free AI helper about what the reader left blank in the last Product Summary read. Only blank facts
+   *  are filled (nothing typed is changed); nothing is saved until Save. */
+  async function askAi() {
+    if (!lastRead) return
+    setError(''); setMsg('')
+    setAiState('Starting the free AI helper…')
+    try {
+      const r = await fillWithAi(lastRead, setAiState)
+      setLastRead(r)
+      const docId = rec.facts._ps?.doc
+      const put = new Set<string>()
+      setRec((s) => {
+        const next: ProductRecord = { ...s, facts: { ...s.facts } }
+        for (const k of r.ai ?? []) {
+          const f = r.summary!.facts[k]
+          if (f) { if (!next.facts[k]?.v?.trim()) { next.facts[k] = { v: f.v, doc: docId, page: r.doc?.kind === 'pdf' ? f.page : undefined }; put.add(k) } continue }
+          const rv = r.summary!.record
+          if (k === 'sum_assured') continue
+          if (k === 'entry_age') { next.entry_age_min = rv.entry_age_min!; next.entry_age_max = rv.entry_age_max!; put.add(k) }
+          else if (k in rv) { (next as unknown as Record<string, unknown>)[k] = (rv as Record<string, unknown>)[k]; put.add(k) }
+        }
+        const rr = r.summary!.record
+        if (put.has('tpd') && rr.has_tpd != null) next.has_tpd = rr.has_tpd
+        if ((put.has('ci') || put.has('eci')) && rr.has_ci != null) next.has_ci = rr.has_ci
+        return next
+      })
+      setAiSet((x) => new Set([...x, ...put]))
+      setMsg(put.size ? `The AI helper filled ${plain(put.size)} more detail${put.size === 1 ? '' : 's'}, marked "AI". Each was checked against the document's own words, but check them before you save.`
+        : 'The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
+    } catch (e) {
+      setError(`The AI helper could not run in this browser: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setAiState('')
+    }
+  }
+  const aiCount = aiAskCount(lastRead)
+  const aiTag = (k: string) => aiSet.has(k) && <span className="pill warn tag" title="Filled by the free AI helper from the document's own words. Check it against the document.">AI</span>
 
   // "New record from it" on the Documents tab: read that document as soon as the documents are loaded.
   const [autoRead, setAutoRead] = useState(false)
@@ -217,7 +264,16 @@ export default function KbProduct() {
         searchable, but the age filter skips it and Compare products says the ages are not stated. The {plain(18)} and {plain(65)} in the entry age boxes are only
         a starting point: type the real entry ages before you save, because saving counts them as the product's ages.</div>}
       {reading && <div className="notice" role="status">{reading}</div>}
+      {aiState && <div className="notice" role="status">{aiState}</div>}
       {msg && <div className="notice ok" role="status">{msg}</div>}
+      {aiCount > 0 && !reading && !aiState && (
+        <div className="row small" style={{ gap: 8 }}>
+          <button type="button" className="btn small" onClick={askAi}
+            title={`A free, open AI model runs in this browser: the document never leaves this computer. It is asked only about what the reader missed, must quote the document for every answer, and anything it gives that is not in the document is dropped. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.small.mb / 1000, 1)}–${fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB) and keeps it.`}>
+            Ask the free AI helper about {plain(aiCount)} detail{aiCount === 1 ? '' : 's'} the reader missed</button>
+          <span className="muted">Optional. Runs in your browser, nothing is sent. Values it fills are marked "AI".</span>
+        </div>
+      )}
       {readNotes.map((n) => <div key={n} className="notice warn" role="status">{n}</div>)}
       {error && <div className="error" role="alert">{error}</div>}
 
@@ -265,16 +321,16 @@ export default function KbProduct() {
               <label className="field">Onshore / offshore
                 <select value={rec.jurisdiction} onChange={(e) => set('jurisdiction', e.target.value)}><option>Onshore</option><option>Offshore</option></select>
               </label>
-              <label className="field">Entry age from (next birthday)<input type="number" min={0} max={100} value={rec.entry_age_min} onChange={(e) => set('entry_age_min', e.target.value)} /></label>
-              <label className="field">Entry age to<input type="number" min={0} max={100} value={rec.entry_age_max} onChange={(e) => set('entry_age_max', e.target.value)} /></label>
-              <label className="field">Minimum sum assured (optional)<AmountInput value={rec.sa_min ?? ''} onValue={(v) => set('sa_min', (v || null) as ProductRecord['sa_min'])} /></label>
-              <label className="field">Maximum sum assured (optional)<AmountInput value={rec.sa_max ?? ''} onValue={(v) => set('sa_max', (v || null) as ProductRecord['sa_max'])} /></label>
+              <label className="field">Entry age from (next birthday){aiTag('entry_age')}<input type="number" min={0} max={100} value={rec.entry_age_min} onChange={(e) => set('entry_age_min', e.target.value)} /></label>
+              <label className="field">Entry age to{aiTag('entry_age')}<input type="number" min={0} max={100} value={rec.entry_age_max} onChange={(e) => set('entry_age_max', e.target.value)} /></label>
+              <label className="field">Minimum sum assured (optional){aiTag('sa_min')}<AmountInput value={rec.sa_min ?? ''} onValue={(v) => set('sa_min', (v || null) as ProductRecord['sa_min'])} /></label>
+              <label className="field">Maximum sum assured (optional){aiTag('sa_max')}<AmountInput value={rec.sa_max ?? ''} onValue={(v) => set('sa_max', (v || null) as ProductRecord['sa_max'])} /></label>
             </div>
-            <fieldset className="field"><legend>Policy currencies</legend>
+            <fieldset className="field"><legend>Policy currencies{aiTag('currencies')}</legend>
               <div className="row" style={{ gap: '6px 18px' }}>{CURRENCIES.map((c) => (
                 <label key={c} className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.currencies.includes(c)} onChange={(e) => toggle('currencies', c, e.target.checked)} /> {c}</label>))}</div>
             </fieldset>
-            <fieldset className="field"><legend>Who can apply</legend>
+            <fieldset className="field"><legend>Who can apply{aiTag('residency')}</legend>
               <div className="row" style={{ gap: '6px 18px' }}>{RESIDENCIES.map((c) => (
                 <label key={c} className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.residency.includes(c)} onChange={(e) => toggle('residency', c, e.target.checked)} /> {c}</label>))}</div>
             </fieldset>
@@ -299,7 +355,7 @@ export default function KbProduct() {
                     const f = rec.facts[r.key]
                     out.push(
                       <tr key={r.key}>
-                        <th scope="row">{r.label}{fromDoc.has(r.key) && <span className="pill info tag">From document</span>}</th>
+                        <th scope="row">{r.label}{aiSet.has(r.key) ? <span className="pill warn tag" title="Filled by the free AI helper from the document's own words. Check it against the document.">AI</span> : fromDoc.has(r.key) && <span className="pill info tag">From document</span>}</th>
                         <td><input type="text" aria-label={r.label} value={f?.v ?? ''} placeholder="Not available" onChange={(e) => setFact(r.key, { v: e.target.value })} /></td>
                         <td>{docSelect(f?.doc, (v) => setFact(r.key, { doc: v }), `Source for ${r.label}`, ps ? 'Product Summary' : 'Choose a document')}</td>
                         <td><input type="number" min={1} aria-label={`Page for ${r.label}`} value={f?.page ?? ''} onChange={(e) => setFact(r.key, { page: e.target.value ? Number(e.target.value) : undefined })} /></td>

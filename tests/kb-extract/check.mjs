@@ -36,6 +36,8 @@ for (const f of ['Orchard_TermShield_Product_Summary.pdf', 'Orchard_TermShield_P
   const r = s.record
   check(r.name === 'Orchard TermShield', `name ${r.name}`)
   check(r.insurer === 'Marina Life Assurance', `insurer ${r.insurer}`)
+  // A term plan whose conversion option names a whole life plan is still a term plan (it must stay searchable).
+  check(s.kind === '', `kind "${s.kind}" (a term plan)`)
   check(r.entry_age_min === 18 && r.entry_age_max === 60, `entry age ${r.entry_age_min}-${r.entry_age_max}`)
   check(r.sa_min === 100000 && r.sa_max === 5000000, `sum assured ${r.sa_min}-${r.sa_max}`)
   check(JSON.stringify(r.currencies) === '["SGD","USD"]', `currencies ${r.currencies}`)

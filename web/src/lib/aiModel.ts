@@ -1,5 +1,7 @@
-// The browser side of the AI helper: asks the model (in aiWorker.ts) about a PI's blank cells, then keeps only
-// the answers that pass piAi.ts's checks against the PI text.
+// The browser side of the AI helper, shared by every file reader that uses it: the PI comparison (piAi.ts) and the
+// Knowledge Bank's Product Summary reader (kbAi.ts). One worker and one model (aiConfig.ts) for all of them, so a
+// model change applies everywhere. Each reader writes its own prompt and checks its own answers against the
+// document's text; only answers that pass are used.
 import { buildMessages, checkAnswer, parseAnswer, type AiFill } from './piAi'
 import type { Page } from './piExtract'
 
@@ -30,18 +32,25 @@ function getWorker(): Worker {
   return worker
 }
 
-/** Asks the AI about `keys` (blank cells) of one PI; `known` holds the cells already filled, for cross-checks. Resolves with the values that passed the checks. */
-export function askAi(pages: Page[], keys: string[], known: Record<string, string>, progress?: AiProgress): Promise<AiFill> {
+/** Sends chat messages to the shared model and resolves with its raw answer text (check it before use!). */
+export function runAi(messages: { role: string; content: string }[], progress?: AiProgress, maxTokens?: number): Promise<string> {
   const id = ++nextId
   return new Promise((resolve, reject) => {
-    waiting.set(id, {
-      progress,
-      done: (r) => (r.error ? reject(new Error(r.error)) : resolve(checkAnswer(parseAnswer(r.text ?? ''), pages, keys, known))),
-    })
+    waiting.set(id, { progress, done: (r) => (r.error ? reject(new Error(r.error)) : resolve(r.text ?? '')) })
     // Tests (check-ai-browser.cjs) can pick the device and model file through globalThis.__AI_FORCE.
-    getWorker().postMessage({ id, messages: buildMessages(pages, keys), force: (globalThis as { __AI_FORCE?: object }).__AI_FORCE })
+    getWorker().postMessage({ id, messages, maxTokens, force: (globalThis as { __AI_FORCE?: object }).__AI_FORCE })
   })
 }
 
+/** Asks the AI about `keys` (blank cells) of one PI; `known` holds the cells already filled, for cross-checks. Resolves with the values that passed the checks. */
+export async function askAi(pages: Page[], keys: string[], known: Record<string, string>, progress?: AiProgress): Promise<AiFill> {
+  return checkAnswer(parseAnswer(await runAi(buildMessages(pages, keys), progress)), pages, keys, known)
+}
+
 /** Frees the model's memory (it is large) when the comparison is left. */
-export function releaseAi() { worker?.terminate(); worker = null; waiting.clear() }
+export function releaseAi() {
+  worker?.terminate(); worker = null
+  // Anything still waiting gets an answer (an error), so no button stays "busy" for ever.
+  for (const w of waiting.values()) w.done({ id: -1, error: 'the AI helper was stopped' })
+  waiting.clear()
+}

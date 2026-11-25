@@ -38,6 +38,10 @@ Knowledge Bank reader (fills product records from a Product Summary or rate shee
 (made-up documents from `tests/kb-extract/make-samples.mjs`). The walkthrough also uploads them and checks what is filled in.
 Real Singapore documents: `node tests/kb-extract/check-real.mjs [folder]` (5 real Product Summaries and the Great Eastern Cares rate
 sheet, kept in the project files under product-matrix/kb-real-summaries/; expected rates in `tests/kb-extract/expected-ge-cares-rates.json`).
+Free AI helper for Product Summaries (the same model as the PI helper; fills only what the rules left blank, every answer must
+quote the document): `node tests/kb-extract/check-kb-ai-checks.mjs [folder]` (its safety checks, no model, seconds) and
+`node tests/kb-extract/check-kb-ai.mjs [folder] --max-wrong 0` (the real model on the CPU, ~5 minutes; expected values in
+`expected-kb-ai.json`, unusual wordings in `kb-ai-variants.mjs`). Rate sheets have no AI step (see `web/src/lib/kbAi.ts`).
 
 Thousands commas (every number on screen, e.g. 1,000,000): `node tests/format/check.mjs` tests the shared formatter
 (`web/src/lib/num.ts`) and runs `web/scripts/check-number-format.mjs`, which also runs in `npm run build` and fails it
