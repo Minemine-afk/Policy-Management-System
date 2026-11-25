@@ -9,7 +9,7 @@ import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
 import { afterRead, aiAskCount, fillWithAi, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
-import { GROUPS, groupLabel, groupOf, planKey, planLabel, plansIn } from '../lib/families'
+import { GROUPS, PLAN_TYPES, groupLabel, groupOf, planKey, planLabel, plansIn } from '../lib/families'
 import {
   DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, hasProduct, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
   type KbDoc, type KbProductRow,
@@ -71,12 +71,13 @@ export function KbDocuments() {
   useEffect(() => { reload() }, [reload])
 
   const productOf = (d: KbDoc) => (d.product_id ? products.find((p) => p.id === d.product_id) : undefined)
-  const productName = (d: KbDoc) => (productOf(d)?.name ?? (d.product_id ? '—' : hasProduct(d.doc_type) ? 'All products' : '—'))
+  const planOfDoc = (d: KbDoc) => (productOf(d) ? planKey(productOf(d)!.product_type) : d.plan_type && hasProduct(d.doc_type) ? planKey(d.plan_type) : '')
+  const productName = (d: KbDoc) => (productOf(d)?.name ?? (d.product_id ? '—' : !hasProduct(d.doc_type) ? '—' : d.plan_type ? `All ${planLabel(d.plan_type)} products` : 'All products'))
   const ownNames = customTypeNames(docs)
   const typeMatch = (d: KbDoc) => !type || (type === ANY_OTHERS ? d.doc_type === OTHERS : docTypeName(d) === type)
-  // Insurance / investment and plan type filters keep only documents of a product of that kind.
-  const planMatch = (d: KbDoc) => (grp === 'All' && ptype === 'All') || (!!productOf(d) && (grp === 'All' || groupOf(productOf(d)!.product_type) === grp)
-    && (ptype === 'All' || planKey(productOf(d)!.product_type) === ptype))
+  // A document's category is its product's, or the category it was uploaded for ("All Universal life (inv) products").
+  const planMatch = (d: KbDoc) => (grp === 'All' && ptype === 'All') || (!!planOfDoc(d) && (grp === 'All' || groupOf(planOfDoc(d)) === grp)
+    && (ptype === 'All' || planOfDoc(d) === ptype))
   const shown = docs.filter((d) => (older || !d.replaced_by) && typeMatch(d) && planMatch(d)
     && (!q || `${d.title} ${d.insurer} ${productName(d)} ${docTypeName(d)} ${d.file_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
 
@@ -218,8 +219,10 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const [newName, setNewName] = useState('')        // the product name for a new product record
   // The plan type (product category): the chosen product's, else what the reader found, else what the person picks.
   const startProduct = products.find((p) => p.id === (doc?.product_id ?? preset?.product_id))
-  const [plan, setPlan] = useState(startProduct ? planKey(startProduct.product_type) : '')
+  const [plan, setPlan] = useState(startProduct ? planKey(startProduct.product_type) : doc?.plan_type ? planKey(doc.plan_type) : '')
   const [planTouched, setPlanTouched] = useState(false)
+  // Whether the person (or the page that opened this) chose the product, not the reader.
+  const [productTouched, setProductTouched] = useState(!!(doc?.product_id ?? preset?.product_id))
   const [reading, setReading] = useState<Reading | null>(null)
   const [progress, setProgress] = useState('')
   const [aiError, setAiError] = useState('')
@@ -231,8 +234,16 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const insurers = useMemo(() => [...new Set([...products.map((p) => p.insurer), ...docs.map((d) => d.insurer), ...STANDARD_INSURERS])], [products, docs])
   // The product field shows only for document types that belong to a product.
   const withProduct = hasProduct(f.doc_type)
-  const plans = products.filter((p) => (!f.insurer.trim() || p.insurer.toLowerCase() === f.insurer.trim().toLowerCase())
-    && (!plan || planKey(p.product_type) === plan || p.id === f.product_id))
+  // The Product field: the 12 categories as headings, each with that category's product records (of this insurer) under it.
+  const plans = products.filter((p) => !f.insurer.trim() || p.insurer.toLowerCase() === f.insurer.trim().toLowerCase() || p.id === f.product_id)
+  const productValue = f.product_id || (plan ? `cat:${plan}` : '')
+  function pickProduct(v: string) {
+    setProductTouched(true); setPlanTouched(true)
+    if (v.startsWith('cat:')) { set('product_id', ''); setPlan(v.slice(4)); return }
+    set('product_id', v)
+    const p = products.find((x) => x.id === v)
+    setPlan(p ? planKey(p.product_type) : '')
+  }
   const others = f.doc_type === OTHERS
   const ownNames = useMemo(() => customTypeNames(docs), [docs])
   const title = mode === 'new' ? 'Upload document' : mode === 'version' ? `New version of ${doc!.title}` : `Edit ${doc!.title}`
@@ -288,6 +299,12 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   }
   function setType(t: string) {
     set('doc_type', t)
+    // A category or product the reader guessed from the file does not carry over to a type that is not read
+    // (e.g. a bank's Product Financing rates): it starts at "All products" until the person picks.
+    if (file && !readsInto(t, file.name) && mode === 'new') {
+      if (!planTouched) setPlan('')
+      if (!productTouched) set('product_id', '')
+    }
     if (file) readPicked(file, t)
   }
 
@@ -296,10 +313,10 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
     if (mode !== 'edit' && !file) { setError('Choose a file'); return }
     if (others && !f.doc_type_name.trim()) { setError('Type a name for the document type'); return }
     if (needName && !newName.trim()) { setError('Fill in the product name (or choose the product record it belongs to)'); return }
-    if (needName && !plan) { setError('Choose the product category (plan type) for the new product record'); return }
+    if (needName && !plan) { setError('In the Product field, choose the category of the new product record (or the product record it belongs to)'); return }
     if (progress) { setError('Wait until the file has been read'); return }
     setBusy(true)
-    const p = { ...f, product_id: (withProduct && f.product_id) || null, valid_until: f.valid_until || null, doc_type_name: others ? f.doc_type_name.trim() : null }
+    const p = { ...f, product_id: (withProduct && f.product_id) || null, plan_type: (withProduct && !f.product_id && plan) || null, valid_until: f.valid_until || null, doc_type_name: others ? f.doc_type_name.trim() : null }
     if (mode === 'edit') {
       const { error } = await supabase.rpc('kb_update_document', { p_id: doc!.id, p })
       setBusy(false)
@@ -361,19 +378,20 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
             </label>
           )}
           {withProduct && <>
-            <label className="field">{needName ? 'Product category' : 'Product category (optional)'}
-              <select aria-label="Product category" value={plan} disabled={mode === 'version' && reads}
-                onChange={(e) => { setPlan(e.target.value); setPlanTouched(true); const cur = products.find((p) => p.id === f.product_id); if (cur && e.target.value && planKey(cur.product_type) !== e.target.value) set('product_id', '') }}>
-                <option value="">{needName ? 'Choose the plan type' : 'Any plan type'}</option>
-                {GROUPS.map((g) => <optgroup key={g} label={groupLabel(g)}>{plansIn(g).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}</optgroup>)}
+            <label className="field" style={{ gridColumn: '1 / -1' }}>Product
+              <select aria-label="Product" value={productValue} onChange={(e) => pickProduct(e.target.value)} disabled={mode === 'version' && reads}>
+                <option value="">{needName ? 'Choose the category of the new product record, or its product' : 'All products / not one product'}</option>
+                {PLAN_TYPES.map((t) => (
+                  <optgroup key={t.key} label={planLabel(t.key)}>
+                    <option value={`cat:${t.key}`}>{reads && mode === 'new' ? `New product record: ${planLabel(t.key)}` : `All ${planLabel(t.key)} products`}</option>
+                    {plans.filter((p) => planKey(p.product_type) === t.key).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </optgroup>
+                ))}
               </select>
-              {plan && <span className="small muted">{groupOf(plan)} product{reads && readName(reading) && reading?.summary?.planType === plan && !planTouched ? ', as the document says' : ''}</span>}
-            </label>
-            <label className="field">Product
-              <select aria-label="Product" value={f.product_id} onChange={(e) => { set('product_id', e.target.value); const p = products.find((x) => x.id === e.target.value); if (p) setPlan(planKey(p.product_type)) }} disabled={mode === 'version' && reads}>
-                <option value="">{reads && mode === 'new' ? 'New product record' : 'All products / not one product'}</option>
-                {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <span className="small muted">{f.product_id ? `${planLabel(plan)} product record.`
+                : plan && reads && mode === 'new' ? `A new ${planLabel(plan)} product record is made from the file${reading?.summary?.planType === plan && !planTouched ? ' (category as the document says; change it here if it is wrong)' : ''}.`
+                : plan ? `For every ${planLabel(plan)} product, not one product record.`
+                : 'Categories are the headings; pick a category for a document about all its products, or a product record under it.'}</span>
             </label>
             {needName && (
               <div className="field" style={{ gridColumn: '1 / -1' }}>

@@ -67,6 +67,9 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      not only term plans, is read from an upload into a searchable product; only Product Summary, Rate sheet, Brochure
      and Product Financing documents are linked to a product). Run it after 1u. Until you run it, uploads of other
      plan types are kept as documents but make no product record, and the category lists show but are not saved.
+   - `1w-upgrade.sql` (25 Nov: one Product field with the 12 categories under it; a document such as a bank's
+     premium financing rates can belong to a whole category, e.g. "All Universal life incl. indexed (inv) products").
+     Run it after 1v. Until you run it, uploads work but a category picked without a product is not saved.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 
