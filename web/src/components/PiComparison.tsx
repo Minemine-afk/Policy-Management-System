@@ -100,6 +100,9 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   const [teachReady, setTeachReady] = useState(true)
   // The optional AI helper: fills blank cells, in this browser (see lib/piAi.ts).
   const [aiState, setAiState] = useState<{ busy: boolean; text: string; error: string }>({ busy: false, text: '', error: '' })
+  // Whether the AI can use this computer's graphics chip: page pictures are read only then (see aiModel.aiOnGraphics).
+  const [graphics, setGraphics] = useState(false)
+  useEffect(() => { import('../lib/aiModel').then((m) => m.aiOnGraphics()).then(setGraphics).catch(() => {}) }, [])
   useEffect(() => () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }, [])
   useEffect(() => {
     let gone = false
@@ -192,7 +195,8 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   // Cells the AI may fill: left blank by the reader (and the request form) and not typed in by hand.
   const hasText = (c: Column) => !!c.pages?.some((p) => p.lines.length)
   // Page pictures help where the text is missing or poor: no text at all, reading stopped part-way, or scanned pages.
-  const canPicture = (c: Column) => !!c.docId && files.current.has(c.docId) && (!hasText(c) || !!c.partial)
+  const hasFile = (c: Column) => !!c.docId && files.current.has(c.docId)
+  const canPicture = (c: Column) => graphics && hasFile(c) && (!hasText(c) || !!c.partial)
   const blanks = (c: Column) => blankKeys(c.found).filter((k) => !(c.values[k] ?? '').trim())
   const aiTodo = (c: Column) => (hasText(c) ? blanks(c) : canPicture(c) ? pictureKeys(blanks(c)) : [])
   const aiCells = cols.reduce((n, c) => n + aiTodo(c).length, 0)
@@ -203,8 +207,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   async function fillWithAi() {
     setAiState({ busy: true, text: 'Starting the AI helper…', error: '' })
     try {
-      const { askAi, readOutPicture, aiOnGraphics } = await import('../lib/aiModel')
-      const slowAi = !(await aiOnGraphics())
+      const { askAi, readOutPicture } = await import('../lib/aiModel')
       const { pagePictures, picturePages } = await import('../lib/piPictures')
       let filled = 0, fromPictures = 0
       for (const [i, c] of cols.entries()) {
@@ -226,8 +229,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         if (rest.length && canPicture(c)) {
           const done = new Set((c.pages ?? []).filter((p) => p.lines.length).map((p) => p.page))
           setAiState({ busy: true, error: '', text: `Drawing the pages of PI${plain(i + 1)} for the AI…` })
-          // On a processor each page takes minutes, so only the first 2 there (the summary is near the front).
-          const pics = (await pagePictures(await files.current.get(c.docId!)!.arrayBuffer(), picturePages(99, text, done, slowAi ? 2 : undefined)))
+          const pics = (await pagePictures(await files.current.get(c.docId!)!.arrayBuffer(), picturePages(99, text, done, (globalThis as { __AI_FORCE?: { picturePages?: number } }).__AI_FORCE?.picturePages)))
           const read: Page[] = []
           for (const pic of pics) read.push(await readOutPicture(pic.images, pic.page, say(`reading the picture of page ${plain(pic.page)} (of ${plain(pics.length)})`)))
           if (read.some((p) => p.lines.length)) {
@@ -406,8 +408,10 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           {unread.map(({ c, i }) => (
             <div key={i} className="error" role="alert">
               {canPicture(c)
-                ? `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Its client details come from the request form. The free AI helper can look at its page pictures for the rest: press the AI helper button below, then check each value it fills against the PDF. This is quick on a laptop with a graphics chip (such as Intel Iris Xe in Chrome or Edge), but takes several minutes a page without one.`
-                : `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Only its client details come from the request form: the AI helper has nothing to look at either, as the PDF could not be downloaded. Press "Read the PIs again", or type its values from the PDF.`}
+                ? `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Its client details come from the request form. The free AI helper can look at its page pictures for the rest: press the AI helper button below, then check each value it fills against the PDF.`
+                : hasFile(c)
+                  ? `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Only its client details come from the request form. The free AI helper can read page pictures of a PI like this, but only on a computer whose graphics chip the browser can use (for example Intel Iris Xe in an up-to-date Chrome or Edge): on this one it would take over 10 minutes a page. Press "Read the PIs again", or type its values from the PDF.`
+                  : `PI${plain(i + 1)} (${c.fileName}) could not be read: ${c.error} Only its client details come from the request form: the AI helper has nothing to look at either, as the PDF could not be downloaded. Press "Read the PIs again", or type its values from the PDF.`}
             </div>
           ))}
           <div className="row between">
@@ -420,7 +424,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
               {aiCells === 0 && !aiState.busy && !aiState.text && (
                 <span className="small muted" role="note">
                   {cols.every((c) => !hasText(c) && !canPicture(c))
-                    ? 'Free AI helper: no PI could be read or downloaded, so it has nothing to look at.'
+                    ? 'Free AI helper: no PI could be read, so it has no text to work with.'
                     : `Free AI helper: nothing left for it to fill.${missing ? ' Check the PI for the blank cells left and type them, for example Included or NA.' : ''}`}
                 </span>
               )}

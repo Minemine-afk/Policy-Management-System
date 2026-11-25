@@ -827,7 +827,8 @@ const SG_LABELS = {
 
   // 8d. Optional (PI_SAMPLES): a scanned PI whose OCR fails (here the OCR engine is blocked) has no text at all. Its column
   // still gets the client details from the request form, and the free AI helper offers to look at its page pictures
-  // (Kumar, 26 Nov 2026). AI_PICTURES=1 also runs the AI on them (minutes on a processor) and checks what it fills.
+  // (Kumar, 26 Nov 2026), on computers with a graphics chip. AI_PICTURES=1 also runs the AI on the first page's pictures
+  // (40 minutes or more on a processor) and checks what it fills.
   if (process.env.PI_SAMPLES) {
     const SCAN = 'SG_FWD_FutureFirst_3.pdf'
     const truth = JSON.parse(fs.readFileSync(__dirname + '/../pi-extract/expected-pictures.json', 'utf8'))[SCAN]
@@ -840,17 +841,24 @@ const SG_LABELS = {
     await olivia.route('**/ocr/**', (route) => route.fulfill({ status: 404, body: 'blocked for the test' }))
     await olivia.getByLabel('Upload policy illustrations (pis)').setInputFiles([process.env.PI_SAMPLES + '/' + SCAN])
     const cmp = olivia.getByRole('region', { name: 'PI comparison' })
-    const alert = cmp.getByRole('alert').filter({ hasText: /^PI1 \(SG_FWD_FutureFirst_3\.pdf\) could not be read: .*The free AI helper can look at its page pictures/ })
-    await check(alert.first().waitFor({ timeout: 120000 }).then(() => true, () => false), 'a scanned PI with no text: the AI helper offers to look at its page pictures')
+    // This test browser has no graphics chip the AI can use, and page pictures are too slow on a processor.
+    const noChip = cmp.getByRole('alert').filter({ hasText: /^PI1 \(SG_FWD_FutureFirst_3\.pdf\) could not be read: .*can read page pictures of a PI like this, but only on a computer whose graphics chip/ })
+    await check(noChip.first().waitFor({ timeout: 120000 }).then(() => true, () => false), 'a scanned PI with no text, on a computer without a usable graphics chip: says the AI needs one to read page pictures')
     await check(olivia.getByLabel('Gender for PI 1', { exact: true }).inputValue().then((v) => v === 'Female'), 'its client details come from the request form')
     const aiBtn = cmp.getByRole('button', { name: /^Fill \d+ blank cells with the free AI helper$/ })
+    await check(aiBtn.count().then((n) => n === 0), 'and no AI helper button is offered for it there')
+    // With a graphics chip (pretended here), the AI helper offers to read the page pictures.
+    await olivia.addInitScript(() => { globalThis.__AI_FORCE = { pictures: true, picturePages: 1 } })
+    await olivia.reload()
+    const alert = cmp.getByRole('alert').filter({ hasText: /^PI1 \(SG_FWD_FutureFirst_3\.pdf\) could not be read: .*The free AI helper can look at its page pictures/ })
+    await check(alert.first().waitFor({ timeout: 120000 }).then(() => true, () => false), 'with a graphics chip: the AI helper offers to look at its page pictures')
     await check(aiBtn.isVisible(), 'the AI helper button is there for it')
     await olivia.unroute('**/ocr/**')
     if (process.env.AI_PICTURES) {
       const t0 = Date.now()
       await aiBtn.click()
       const tick = setInterval(async () => console.log('  (AI helper:', (await cmp.getByRole('status').allInnerTexts().catch(() => [])).join(' | ').slice(0, 160), ')'), 60_000)
-      await cmp.getByText(/^The AI filled|^The AI found nothing|could not run/).waitFor({ timeout: 40 * 60_000 })
+      await cmp.getByText(/^The AI filled|^The AI found nothing|could not run/).waitFor({ timeout: 90 * 60_000 })
       clearInterval(tick)
       console.log(`  (AI helper on page pictures: ${Math.round((Date.now() - t0) / 1000)} s)`)
       await check(cmp.getByText(/could not run/).count().then((n) => n === 0), 'the AI helper ran on the page pictures')
@@ -864,10 +872,10 @@ const SG_LABELS = {
         if (!(got === want || Number(got) === Number(want))) wrong.push(`${label} = ${got} (PI: ${want})`)
       }
       console.log(`  (filled from pictures: ${filled}; wrong: ${wrong.join(', ') || 'none'})`)
-      await check(Promise.resolve(filled >= 4), `the AI read at least 4 plan values from the page pictures (${filled})`)
+      await check(Promise.resolve(filled >= 3), `the AI read at least 3 plan values from the first page's pictures (${filled})`)
       await check(Promise.resolve(wrong.length === 0), `none of them wrong${wrong.length ? ': ' + wrong.join(', ') : ''}`)
-      await check(cmp.getByText(/^AI, from the picture of page \d+: no PI text to check it against$/).first().isVisible(), 'each says it was read from a page picture')
-      await check(cmp.getByLabel('Notes for PI 1').getByText(/read by the AI from page pictures, because this PI has no text/).isVisible(), 'and a note asks ops to check them against the PDF')
+      await check(cmp.getByText(/^AI, from the picture of page \d+: “/).first().isVisible(), 'each says it was read from a page picture')
+      await check(cmp.getByLabel('Notes for PI 1').getByText(/read by the AI from page pictures \(the reader got no text/).isVisible(), 'and a note asks ops to check them against the PDF')
       await olivia.screenshot({ path: SHOTS + '/25-ai-page-pictures.png', fullPage: true })
     }
   }

@@ -70,9 +70,11 @@ export async function readOutPicture(images: Blob[], page: number, progress?: Ai
   return { page, items: [], lines: lines.map((text) => ({ page, text })) }
 }
 
-/** True when the AI will run on the graphics chip (WebGPU with 16-bit maths, as the worker checks): page pictures are
- *  then quick; on the processor each takes minutes. */
+/** True when the AI will run on the graphics chip (WebGPU with 16-bit maths, as the worker checks). Page pictures
+ *  are read only then: on a processor one page takes over 10 minutes (measured 26 Nov 2026), which nobody would wait
+ *  for. Tests can allow the processor through globalThis.__AI_FORCE.pictures. */
 export async function aiOnGraphics(): Promise<boolean> {
+  if ((globalThis as { __AI_FORCE?: { pictures?: boolean } }).__AI_FORCE?.pictures) return true
   const gpu = (navigator as any).gpu
   const adapter = gpu ? await gpu.requestAdapter().catch(() => null) : null
   return !!adapter?.features?.has?.('shader-f16')

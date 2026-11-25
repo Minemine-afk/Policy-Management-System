@@ -51,7 +51,8 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
       await old?.model?.dispose?.()
     }
     gen ??= load((pct) => self.postMessage({ id, loading: pct }), force, false, vision).catch((err) => {
-      if (force?.device) throw err
+      // Page pictures are not read on the processor: far too slow there (over 10 minutes a page).
+      if (force?.device || vision) throw err
       // The graphics chip could not load it: the processor instead.
       return load((pct) => self.postMessage({ id, loading: pct }), force, true, vision)
     })
@@ -63,7 +64,7 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
       out = await generate(g, messages, pics, maxTokens ?? MAX_NEW_TOKENS)
     } catch (err) {
       // A graphics chip that loads the model but can't run it: once more on the processor.
-      if (device !== 'webgpu' || force?.device) throw err
+      if (device !== 'webgpu' || force?.device || vision) throw err
       gen = load((pct) => self.postMessage({ id, loading: pct }), force, true, vision)
       const g2 = await gen
       self.postMessage({ id, thinking: true, device, model: label })
