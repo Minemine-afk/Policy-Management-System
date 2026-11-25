@@ -1024,4 +1024,23 @@ reset role;
 select pg_temp.expect_error($$update kb_products set product_type = 'Term' where name = 'Cedar Term'$$, 'violates check constraint');
 set role authenticated;
 
+-- One Product field: a document can be for a whole category without a product record (1w)
+do $$
+declare p uuid := (select id from kb_products where name = 'Cedar Term'); f uuid; v uuid; c uuid; t uuid;
+begin
+  f := kb_add_document('{"title":"CIMB financing rates","insurer":"CIMB","doc_type":"Product Financing","plan_type":"Universal life","effective_from":"2026-01-01","storage_path":"f11/f.pdf"}');
+  if (select plan_type from kb_documents where id = f) is distinct from 'Universal life' then raise exception 'category not saved'; end if;
+  v := kb_add_document(jsonb_build_object('title', 'CIMB financing rates', 'insurer', 'CIMB', 'doc_type', 'Product Financing', 'effective_from', '2026-02-01', 'storage_path', 'f11/f2.pdf', 'replaces', f));
+  if (select plan_type from kb_documents where id = v) is distinct from 'Universal life' then raise exception 'new version lost the category'; end if;
+  c := kb_add_document(jsonb_build_object('title', 'Cedar brochure', 'insurer', 'Cedar Life', 'doc_type', 'Brochure', 'product_id', p, 'plan_type', 'Universal life', 'effective_from', '2026-01-01', 'storage_path', 'f11/b.pdf'));
+  if (select plan_type from kb_documents where id = c) is not null then raise exception 'a document of one product kept a category'; end if;
+  t := kb_add_document('{"title":"UL training","doc_type":"Training material","plan_type":"Universal life","effective_from":"2026-01-01","storage_path":"f11/t.pdf"}');
+  if (select plan_type from kb_documents where id = t) is not null then raise exception 'training material kept a category'; end if;
+  perform kb_update_document(v, '{"title":"CIMB financing rates","insurer":"CIMB","doc_type":"Product Financing","plan_type":"Term","effective_from":"2026-02-01"}');
+  if (select plan_type from kb_documents where id = v) is distinct from 'Term life' then raise exception 'category not changed on edit'; end if;
+  perform kb_update_document(v, '{"title":"CIMB financing rates","insurer":"CIMB","doc_type":"Product Financing","plan_type":"Lottery","effective_from":"2026-02-01"}');
+  if (select plan_type from kb_documents where id = v) is not null then raise exception 'an unknown category was kept'; end if;
+  raise notice 'ok: documents for a whole product category';
+end $$;
+
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

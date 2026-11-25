@@ -27,7 +27,10 @@ export const KB_MAX_MB = 20
 export const EXPIRY_WARN_DAYS = 40
 
 export interface KbDoc {
-  id: string; product_id: string | null; insurer: string; title: string; doc_type: string; doc_type_name: string | null; version: string
+  id: string; product_id: string | null
+  /** The product category for a document of a whole category (no product record); 1w-upgrade.sql. */
+  plan_type?: string | null
+  insurer: string; title: string; doc_type: string; doc_type_name: string | null; version: string
   effective_from: string | null; valid_until: string | null; storage_path: string | null; file_name: string | null
   file_size: number | null; status: 'new' | 'checked'; replaces: string | null; replaced_by: string | null
   uploaded_by: string | null; checked_by: string | null; checked_at: string | null; created_at: string; is_sample: boolean
