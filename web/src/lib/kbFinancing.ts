@@ -158,7 +158,7 @@ function sentences(lines: Line[]): { s: string; page: number }[] {
 }
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+const iso = (y: number, m: number, d: number) => `${String(y)}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 const lastDay = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate()
 /** "29-May-26", "30-June-26", "31 Oct 2026" as an ISO date; null when it is not a date. */
 export function dateOf(s: string): string | null {
@@ -234,7 +234,7 @@ function readRates(lines: Line[], month: { from: string } | null): { rates: FinR
     }
   }
   // The same currency, tenor and date twice can't be told apart: neither is kept.
-  const key = (r: FinRate) => `${r.kind}|${r.currency}|${r.tenor_months}|${r.as_of}`
+  const key = (r: FinRate) => `${r.kind}|${r.currency}|${String(r.tenor_months)}|${r.as_of}`
   const count = new Map<string, number>()
   for (const r of rates) count.set(key(r), (count.get(key(r)) ?? 0) + 1)
   return { rates: rates.filter((r) => count.get(key(r)) === 1), notes }
