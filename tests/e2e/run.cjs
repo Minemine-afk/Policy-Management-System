@@ -33,7 +33,7 @@ const SG_LABELS = {
     await p.getByLabel('Email').fill(email)
     await p.getByLabel('Password').fill(password)
     await p.getByRole('button', { name: 'Sign in', exact: true }).click()
-    await p.getByRole('button', { name: 'Sign out' }).waitFor()
+    await p.locator('.topbar .user-btn').waitFor()  // signed in: the user menu is in the top bar
     return p
   }
   const picker = (p) => p.getByRole('navigation', { name: 'Modules', exact: true }).waitFor()
@@ -418,7 +418,7 @@ const SG_LABELS = {
   await pat.locator('h1 .pill', { hasText: 'Removed' }).waitFor()
   ok('bsd removed a request with a reason')
   await check(pat.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Admin' }).count().then((n) => n === 0), 'bsd has no Admin menu any more')
-  await check(pat.locator('.who').textContent().then((t) => t.includes('Pat BSD · BSD')), 'bsd is shown as BSD, not Admin')
+  await check(pat.locator('.topbar .user-btn').getAttribute('title').then((t) => t === 'Pat BSD · BSD'), 'bsd is shown as BSD, not Admin')
   await pat.goto(BASE + '/admin/users')
   await picker(pat)
   ok('bsd is redirected away from the Admin pages')
@@ -682,7 +682,8 @@ const SG_LABELS = {
   await newbie.getByRole('link', { name: /PI Requests/ }).click()
   await newbie.getByRole('heading', { name: 'Board' }).waitFor()
   await check(newbie.locator('.cardlet').count().then((n) => n === 0), 'the new introducer sees no one else’s requests')
-  await newbie.getByRole('link', { name: 'Account', exact: true }).click()
+  await newbie.locator('.topbar .user-btn').click()
+  await newbie.getByRole('menuitem', { name: /Account/ }).click()
   await newbie.getByLabel('New password', { exact: true }).fill('Changed-Pass-1')
   await newbie.getByLabel('Repeat new password').fill('Changed-Pass-2')
   await newbie.getByRole('button', { name: 'Change password' }).click()
@@ -690,11 +691,12 @@ const SG_LABELS = {
   await newbie.getByLabel('Repeat new password').fill('Changed-Pass-1')
   await newbie.getByRole('button', { name: 'Change password' }).click()
   await newbie.getByText('Password changed.').waitFor()
-  await newbie.getByRole('button', { name: 'Sign out' }).click()
+  await newbie.locator('.topbar .user-btn').click()
+  await newbie.getByRole('menuitem', { name: 'Sign out' }).click()
   await newbie.getByLabel('Email').fill('new.introducer@example.com')
   await newbie.getByLabel('Password').fill('Changed-Pass-1')
   await newbie.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await newbie.getByRole('button', { name: 'Sign out' }).waitFor()
+  await newbie.locator('.topbar .user-btn').waitFor()
   ok('the new user changed their password and signed in with it')
 
   // 7. Non-bsd cannot open admin

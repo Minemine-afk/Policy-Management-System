@@ -48,3 +48,7 @@ quote the document): `node tests/kb-extract/check-kb-ai-checks.mjs [folder]` (it
 Thousands commas (every number on screen, e.g. 1,000,000): `node tests/format/check.mjs` tests the shared formatter
 (`web/src/lib/num.ts`) and runs `web/scripts/check-number-format.mjs`, which also runs in `npm run build` and fails it
 when a number is shown without `fmtNum` / `fmtMoney` (or `plain()` for years, ids, page numbers).
+
+Top bar layout (one row for every role, Menu button on narrow screens, sign-in page centred): `node tests/topbar/check.cjs [outDir]`.
+It needs no database (Supabase is faked in the browser) and checks every role and module mix on every page at 390, 1024,
+1280, 1366 and 1920 wide, saving screenshots to `tests/topbar/shots/`.

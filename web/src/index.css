@@ -15,15 +15,44 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0; }
 .muted { color: var(--muted); } .small { font-size: 13px; }
 
-.topbar { background: var(--nav); color: #fff; padding: 0 32px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 32px; min-height: 60px; }
-.topbar .brand { font-weight: 600; font-size: 16px; }
-.topbar nav { display: flex; flex-wrap: wrap; gap: 4px 24px; flex-grow: 1; font-size: 14px; }
-.topbar nav a { color: var(--nav-muted); text-decoration: none; padding: 4px 0; border-bottom: 2px solid transparent; }
-.topbar nav a.active { color: #fff; font-weight: 600; border-bottom-color: var(--accent); }
-.topbar .who { font-size: 13px; color: var(--nav-muted); display: flex; gap: 12px; align-items: center; }
-.topbar .who button { background: none; border: 1px solid #3A4A60; color: var(--nav-muted); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-.topbar .who a.acct { color: var(--nav-muted); text-decoration: none; }
-.topbar .who a.acct:hover, .topbar .who a.acct.active { color: #fff; text-decoration: underline; }
+/* Top bar: one row for every role. Brand, links, then bell + user menu on the right.
+   Below 1100px the links and user menu fold into the Menu button (see components/TopBar.tsx). */
+.topbar { position: relative; z-index: 5; /* above the page, below pop-ups (.overlay is 10) */ background: var(--nav); color: #fff; padding: 0 32px; display: flex; flex-wrap: nowrap; align-items: center; gap: 28px; height: 60px; }
+.topbar .brand { font-weight: 600; font-size: 16px; color: #fff; text-decoration: none; white-space: nowrap; flex: none; }
+.topbar .brand:hover { color: #fff; }
+.topbar nav.main-nav { display: flex; flex-wrap: nowrap; align-items: stretch; align-self: stretch; gap: 22px; flex: 1 1 auto; min-width: 0; font-size: 14px; }
+.topbar nav.main-nav a { display: flex; align-items: center; color: var(--nav-muted); text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent; border-top: 2px solid transparent; }
+.topbar nav.main-nav a:hover { color: #fff; }
+.topbar nav.main-nav a.active { color: #fff; font-weight: 600; border-bottom-color: var(--accent); }
+.topbar .who { font-size: 13px; color: var(--nav-muted); display: flex; gap: 10px; align-items: center; flex: none; margin-left: auto; }
+.user-menu { position: relative; }
+.user-btn { display: flex; align-items: center; gap: 10px; background: none; border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; color: var(--nav-muted); cursor: pointer; text-align: left; }
+.user-btn:hover, .user-btn[aria-expanded="true"] { border-color: #3A4A60; color: #fff; }
+.avatar { width: 30px; height: 30px; border-radius: 999px; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+.user-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.user-name { color: #fff; font-size: 13px; font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-role { font-size: 11px; color: var(--nav-muted); }
+.caret { font-size: 11px; }
+.dropdown { position: absolute; right: 0; top: calc(100% + 8px); min-width: 240px; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(15,27,45,.18); padding: 6px; display: flex; flex-direction: column; z-index: 30; }
+.dropdown-head { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; overflow-wrap: anywhere; }
+.dropdown a, .dropdown button { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; background: none; border: 0; cursor: pointer; font-size: 14px; }
+.dropdown a:hover, .dropdown button:hover { background: var(--line-soft); color: var(--ink); }
+.menu-btn { display: none; align-items: center; gap: 6px; background: none; border: 1px solid #3A4A60; color: #fff; border-radius: 6px; height: 36px; padding: 0 12px; cursor: pointer; font-size: 14px; }
+.mobile-menu { position: absolute; left: 0; right: 0; top: 100%; background: var(--nav); border-top: 1px solid #22324A; box-shadow: 0 10px 24px rgba(15,27,45,.3); padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.mobile-menu nav { display: flex; flex-direction: column; }
+.mobile-menu nav a { color: var(--nav-muted); text-decoration: none; padding: 12px 8px; border-radius: 6px; font-size: 15px; }
+.mobile-menu nav a.active { color: #fff; font-weight: 600; background: #1B2A40; box-shadow: inset 3px 0 0 var(--accent); }
+.mobile-user { border-top: 1px solid #22324A; padding-top: 10px; display: flex; flex-direction: column; gap: 4px; color: #fff; font-size: 14px; }
+.mobile-user > div { padding: 4px 8px; overflow-wrap: anywhere; }
+.muted-nav { color: var(--nav-muted); }
+.mobile-user a { color: var(--nav-muted); text-decoration: none; padding: 10px 8px; }
+.mobile-user a.active { color: #fff; }
+.mobile-user button { align-self: flex-start; margin: 4px 8px 0; background: none; border: 1px solid #3A4A60; color: #fff; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+@media (max-width: 1099px) {
+  .topbar nav.main-nav, .user-menu { display: none; }
+  .menu-btn { display: inline-flex; }
+}
+@media (min-width: 1100px) { .mobile-menu { display: none; } }
 
 main.page { padding: 32px; max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
@@ -89,7 +118,10 @@ td.num, th.num { text-align: right; }
 .empty { color: var(--muted); padding: 24px; text-align: center; }
 
 .login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
-.login .card { width: 100%; max-width: 440px; }
+.login .card { width: 100%; max-width: 420px; box-shadow: 0 4px 20px rgba(15,27,45,.08); }
+.login-head { display: flex; flex-direction: column; gap: 6px; }
+.brand-mark { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; color: var(--nav); margin-bottom: 10px; }
+.brand-logo { width: 32px; height: 32px; border-radius: 8px; background: var(--nav); color: var(--accent); display: grid; place-items: center; font-weight: 700; }
 
 @media (max-width: 640px) {
   .topbar, main.page { padding-left: 16px; padding-right: 16px; }
