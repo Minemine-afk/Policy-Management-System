@@ -137,6 +137,8 @@ export interface Found {
   check?: boolean
   /** Filled by the optional AI helper (piAi.ts) in a cell the rules left blank: ops should check it. */
   ai?: boolean
+  /** Filled by the AI from a page picture of a PI with no text, so it could not be checked against the text: check it. */
+  picture?: boolean
 }
 export interface Extracted {
   found: Record<string, Found>
@@ -974,7 +976,14 @@ const MIN_TEXT_ITEMS = 5
 /** Reads a PDF into positioned text and lines with pdf.js (loaded only when needed). Scanned pages are read
  *  with OCR (see ocr.ts). Gives up when nothing moves for `stallMs`, so a PDF the reader can't finish never
  *  leaves the screen waiting; a long scanned PI keeps going as long as pages keep being read. */
+/** The error readPdf gives up with: `pages` holds the pages read before it stopped (often enough for the AI helper). */
+export class ReadStopped extends Error {
+  pages: Page[]
+  constructor(message: string, pages: Page[]) { super(message); this.pages = pages }
+}
+
 export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs = 60_000, useOcr = true): Promise<Page[]> {
+  const sofar: Page[] = []
   let task: { destroy?: () => unknown } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let fail: (e: Error) => void = () => {}
@@ -983,7 +992,7 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs 
     clearTimeout(timer)
     timer = setTimeout(() => {
       task?.destroy?.()
-      fail(new Error(`nothing happened for ${fmtNum(Math.round(stallMs / 1000))} seconds. Reload the page and try again, or type the values in by hand`))
+      fail(new ReadStopped(`nothing happened for ${fmtNum(Math.round(stallMs / 1000))} seconds. Reload the page and try again, or type the values in by hand`, [...sofar]))
     }, stallMs)
   }
   arm()
@@ -994,10 +1003,14 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs 
     const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
     const ocr = useOcr ? (await import('./ocr')).ocrPage : undefined
-    return readWith(pdfjs, data, (d, t, o) => { arm(); onPage?.(d, t, o) }, (t) => { task = t }, ocr, allFound)
+    return readWith(pdfjs, data, (d, t, o) => { arm(); onPage?.(d, t, o) }, (t) => { task = t }, ocr, allFound, sofar)
   })()
   try {
     return await Promise.race([read, stalled])
+  } catch (e) {
+    // OCR failing on a page (its engine could not load, say) still leaves the pages read before it.
+    if (e instanceof ReadStopped) throw e
+    throw new ReadStopped((e as Error).message, [...sofar])
   } finally {
     clearTimeout(timer)
   }
@@ -1006,12 +1019,11 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs 
 /** Shared by the browser and the Node test scripts. OCR is slow (seconds a page), so once `enough` says the
  *  pages read so far hold everything, later scanned pages are skipped (marked `skipped`). */
 export async function readWith(pdfjs: { getDocument: (src: { data: Uint8Array }) => { promise: Promise<unknown> } }, data: ArrayBuffer,
-  onPage?: PageProgress, onTask?: (task: { destroy?: () => unknown }) => void, ocr?: OcrPage, enough?: (pages: Page[]) => boolean): Promise<Page[]> {
+  onPage?: PageProgress, onTask?: (task: { destroy?: () => unknown }) => void, ocr?: OcrPage, enough?: (pages: Page[]) => boolean, pages: Page[] = []): Promise<Page[]> {
   const task = pdfjs.getDocument({ data: new Uint8Array(data) })
   onTask?.(task as { destroy?: () => unknown })
   const doc = (await task.promise) as any
   onPage?.(0, doc.numPages, false)
-  const pages: Page[] = []
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
     const content = await page.getTextContent()

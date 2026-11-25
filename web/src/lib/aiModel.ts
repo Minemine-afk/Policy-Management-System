@@ -2,7 +2,8 @@
 // Knowledge Bank's Product Summary reader (kbAi.ts). One worker and one model (aiConfig.ts) for all of them, so a
 // model change applies everywhere. Each reader writes its own prompt and checks its own answers against the
 // document's text; only answers that pass are used.
-import { buildMessages, checkAnswer, parseAnswer, type AiFill } from './piAi'
+import { READ_OUT_TOKENS, aiGroups, buildMessages, checkAnswer, parseAnswer, readOutMessages, readOutPage, type AiFill } from './piAi'
+import type { ChatMsg } from './aiRun'
 import type { Page } from './piExtract'
 
 type Reply = { id: number; loading?: number; thinking?: boolean; device?: string; model?: string; text?: string; error?: string }
@@ -33,18 +34,50 @@ function getWorker(): Worker {
 }
 
 /** Sends chat messages to the shared model and resolves with its raw answer text (check it before use!). */
-export function runAi(messages: { role: string; content: string }[], progress?: AiProgress, maxTokens?: number): Promise<string> {
+export function runAi(messages: ChatMsg[], progress?: AiProgress, maxTokens?: number, images: Blob[] = []): Promise<string> {
   const id = ++nextId
   return new Promise((resolve, reject) => {
     waiting.set(id, { progress, done: (r) => (r.error ? reject(new Error(r.error)) : resolve(r.text ?? '')) })
     // Tests (check-ai-browser.cjs) can pick the device and model file through globalThis.__AI_FORCE.
-    getWorker().postMessage({ id, messages, maxTokens, force: (globalThis as { __AI_FORCE?: object }).__AI_FORCE })
+    getWorker().postMessage({ id, messages, images, maxTokens, force: (globalThis as { __AI_FORCE?: object }).__AI_FORCE })
   })
 }
 
 /** Asks the AI about `keys` (blank cells) of one PI; `known` holds the cells already filled, for cross-checks. Resolves with the values that passed the checks. */
 export async function askAi(pages: Page[], keys: string[], known: Record<string, string>, progress?: AiProgress): Promise<AiFill> {
-  return checkAnswer(parseAnswer(await runAi(buildMessages(pages, keys), progress)), pages, keys, known)
+  const out: AiFill = { found: {}, dropped: [] }
+  // One question per group (the plan's numbers, then the rest), each checked with what is known so far.
+  for (const group of aiGroups(keys)) {
+    const res = checkAnswer(parseAnswer(await runAi(buildMessages(pages, group), progress)), pages, group,
+      { ...known, ...Object.fromEntries(Object.entries(out.found).map(([k, v]) => [k, v.value])) })
+    Object.assign(out.found, res.found)
+    out.dropped.push(...res.dropped)
+  }
+  return out
+}
+
+/** The model's read-out of one page from its pictures (its top and bottom halves), as PI text (see piAi.ts
+ *  readOutPage). Lines read twice where the halves overlap are kept once. */
+export async function readOutPicture(images: Blob[], page: number, progress?: AiProgress): Promise<Page> {
+  const lines: string[] = []
+  for (const image of images) {
+    const part = readOutPage(await runAi(readOutMessages(), progress, READ_OUT_TOKENS, [image]), page).lines.map((l) => l.text)
+    // The overlap: the first lines of this half that repeat the last lines of the one before.
+    let skip = 0
+    while (skip < part.length && skip < 6 && lines.slice(-8).includes(part[skip])) skip++
+    lines.push(...part.slice(skip))
+  }
+  return { page, items: [], lines: lines.map((text) => ({ page, text })) }
+}
+
+/** True when the AI will run on the graphics chip (WebGPU with 16-bit maths, as the worker checks). Page pictures
+ *  are read only then: on a processor one page takes over 10 minutes (measured 26 Nov 2026), which nobody would wait
+ *  for. Tests can allow the processor through globalThis.__AI_FORCE.pictures. */
+export async function aiOnGraphics(): Promise<boolean> {
+  if ((globalThis as { __AI_FORCE?: { pictures?: boolean } }).__AI_FORCE?.pictures) return true
+  const gpu = (navigator as any).gpu
+  const adapter = gpu ? await gpu.requestAdapter().catch(() => null) : null
+  return !!adapter?.features?.has?.('shader-f16')
 }
 
 /** Frees the model's memory (it is large) when the comparison is left. */
