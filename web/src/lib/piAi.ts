@@ -213,7 +213,9 @@ function checkMore(kind: AiKind, key: string, raw: unknown, c: Ctx): { value: st
     const v = GENDER[str.toLowerCase()]
     if (!v) return null
     // The word itself next to a "Gender" / "Sex" label (its line or the column heading above it).
-    const l = lines.find((x) => new RegExp(`\\b${v}\\b`, 'i').test(x.text) && /gender|\bsex\b/i.test(near(lines, x)))
+    // Not a rates table for both ("Age  Male  Female") nor a worked example ("Mary; Female, Age 30").
+    const l = lines.find((x) => new RegExp(`\\b${v}\\b`, 'i').test(x.text) && !(/\bmale\b/i.test(x.text) && /\bfemale\b/i.test(x.text))
+      && /gender|\bsex\b/i.test(contextOf(lines, x).split(' \n ').slice(-7).join(' ')) && !/example|e\.g\.|for instance|illustration\s+only/i.test(near(lines, x)))
     return l ? { value: v, line: l } : null
   }
   if (kind === 'smoker') {
@@ -247,10 +249,11 @@ function checkMore(kind: AiKind, key: string, raw: unknown, c: Ctx): { value: st
       const i = flat(x.text).indexOf(words)
       if (label.test(flat(x.text).slice(0, Math.max(0, i)))) return true
       const k = lines.indexOf(x), up = lines[k - 1]
-      return !!up && up.page === x.page && up.text.length <= 60 && label.test(up.text) && !/\d/.test(up.text)
+      // Under a heading, the line holds the value alone.
+      return !!up && up.page === x.page && up.text.length <= 60 && label.test(up.text) && !/\d/.test(up.text) && flat(x.text) === words
     }
     const l = lines.find((x) => flat(x.text).includes(words) && at(x))
-    if (!l) return null
+    if (!l || NOT_A_NAME.test(words)) return null
     if (kind === 'person') {
       // A person's name, not the plan's or the insurer's.
       const others = [c.found.policy_name?.value, c.known.policy_name, c.found.insurer?.value, c.known.insurer].filter(Boolean).map((x) => flat(x!))
@@ -274,7 +277,8 @@ function checkMore(kind: AiKind, key: string, raw: unknown, c: Ctx): { value: st
     if (!YES.test(str)) return null
     const re = key === 'terminal_illness' ? /terminal\s+illness|\(TI\)|\bTI\b/i : /accident(?:al)?\s+death/i
     // Named as something the plan pays, not as an exclusion, an optional rider, or a rider you can add.
-    const l = lines.find((x) => re.test(x.text) && !/exclu|not\s+(?:be\s+)?(?:covered|payable|included)|\bno\b|rider|optional|additional|supplementary|add[\s-]?on/i.test(near(lines, x)))
+    // Not an item of a numbered list of illnesses ("39. Terminal Illness": a critical illness definition).
+    const l = lines.find((x) => re.test(x.text) && !/\b\d{1,2}\.\s/.test(x.text) && !/exclu|not\s+(?:be\s+)?(?:covered|payable|included)|\bno\b|rider|optional|additional|supplementary|add[\s-]?on/i.test(near(lines, x)))
     return l ? { value: 'Included', line: l } : null
   }
   if (kind === 'cash') {
@@ -348,7 +352,8 @@ export function checkAnswer(answer: Record<string, unknown> | null, pages: Page[
         const known = detectInsurer(v)
         // "Acme Life" is a company's name, "Life Term Protect Secure" a plan's.
         const lifeCo = /\blife\b/i.test(v) && v.split(/\s+/).length <= 3 && !PLAN_WORDS.test(v)
-        if (!known && !COMPANY.test(v) && !lifeCo) { dropped.push(f.key); continue }
+        // A bare "PTE LTD" is what is left of a blacked-out name, not an insurer.
+        if ((!known && !COMPANY.test(v) && !lifeCo) || /^(?:pte\.?\s*)?(?:ltd|limited|berhad|bhd|inc)\.?$/i.test(v)) { dropped.push(f.key); continue }
         put(f.key, known || v, lineWith(words))
         continue
       }
@@ -357,7 +362,8 @@ export function checkAnswer(answer: Record<string, unknown> | null, pages: Page[
       const heads = [ins.split(/\s+/)[0], ...KNOWN_INSURERS.flatMap((x) => [x.name, ...x.aliases])].filter(Boolean).sort((a, b) => b.length - a.length)
       const head = heads.find((h) => flat(v).startsWith(flat(h) + ' '))
       const name = head ? v.replace(new RegExp(`^\\s*${head.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\s+`, 'i'), '').replace(/^\s*(?:financial\s+group|life(?:\s+assurance|\s+insurance)?|insurance|assurance)?\s+/i, '').trim() : v
-      if (!flat(name) || GENERIC.test(flat(name))) { dropped.push(f.key); continue }
+      // A label ("Basic Sum Insured", "Premium Frequency") is not a plan's name.
+      if (!flat(name) || GENERIC.test(flat(name)) || /\b(?:sum|insured|assured|premium|amount|frequency|currency|date|summary|benefit)\b/i.test(name)) { dropped.push(f.key); continue }
       put(f.key, name, lineWith(words))
     } else if (f.kind === 'money') {
       const n = amountOf(raw)
@@ -431,9 +437,15 @@ export function checkAnswer(answer: Record<string, unknown> | null, pages: Page[
   // A premium is a small part of the cover: one at 20% or more of the death sum assured is a sum assured misread.
   if (kv('death_sa') !== null) for (const k of ['annual_premium', 'base_premium', 'tpd_premium', 'ci_premium']) if (nv(k) !== null && nv(k)! >= 0.2 * kv('death_sa')!) { delete found[k]; dropped.push(k) }
   // The base plan's premium equal to the total, where the PI says its amounts include riders: the total was copied.
+  // A premium the PI says includes riders' premiums is not the basic plan's alone.
+  if (found.base_premium) {
+    const l = lines.find((x) => x.page === found.base_premium.page && found.base_premium.line?.startsWith(x.text))
+    if (l && /includ\w*\s+(?:any\s+|the\s+)?(?:premiums?\s+(?:of|for)\s+)?(?:the\s+)?riders?/i.test(contextOf(lines, l))) { delete found.base_premium; dropped.push('base_premium') }
+  }
+  // So is one equal to the total where the PI has riders or a policy fee anywhere (the total holds them too).
   if (found.base_premium && nv('base_premium') === kv('annual_premium')) {
     const l = lines.find((x) => x.page === found.base_premium.page && found.base_premium.line?.startsWith(x.text))
-    if (!l || /rider|supplementary/i.test(contextOf(lines, l))) { delete found.base_premium; dropped.push('base_premium') }
+    if (!l || /rider|supplementary/i.test(contextOf(lines, l)) || /policy\s+fee|admin\w*\s+fee/i.test(text)) { delete found.base_premium; dropped.push('base_premium') }
   }
   if (nv('base_premium') !== null && kv('annual_premium') !== null && nv('base_premium')! > kv('annual_premium')!) { delete found.base_premium; dropped.push('base_premium') }
   return { found, dropped }
