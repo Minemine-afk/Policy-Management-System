@@ -73,11 +73,98 @@ export async function readFile(data: ArrayBuffer, name: string, onPage?: (done: 
 
 /** PDF lines split into cells where the gaps are wide (toLines puts two spaces there). */
 export function rowsFromPages(pages: Page[]): Row[] {
-  return pages.flatMap((p) => p.lines.map((l) => ({ page: p.page, cells: l.text.split(/\s{2,}/).map((x) => x.trim()).filter(Boolean) })))
+  // Numbers printed close together ("11.1981 13.5896") come out as one piece: each number is its own cell.
+  const split = (x: string) => (/^\d[\d.,]*(?:\s+\d[\d.,]*)+$/.test(x) ? x.split(/\s+/) : [x])
+  return pages.flatMap((p) => p.lines.map((l) => ({ page: p.page, cells: l.text.split(/\s{2,}/).map((x) => x.trim()).filter(Boolean).flatMap(split) })))
 }
 
 /** For tests: positioned text into a page. */
 export const pageOf = (page: number, items: TextItem[]): Page => ({ page, items, lines: toLines(page, items) })
+
+/** A page's lines with side-by-side text columns read one after the other (the left column, then the right), as a
+ *  person reads them. pdf.js gives a line across the whole page, so two columns would otherwise be mixed line by
+ *  line. Only real text columns are split: the left column's lines are long and end at about the same place (they
+ *  wrap), with a clear gap before the right column. A label | value table (short labels) is left as it is. */
+export function columnLines(p: Page): Line[] {
+  const items = p.items.filter((it) => it.str.trim())
+  if (items.length < 20) return p.lines
+  const rows: { y: number; items: TextItem[] }[] = []
+  for (const it of items) {
+    const row = rows.find((r) => Math.abs(r.y - it.y) <= 3)
+    if (row) row.items.push(it); else rows.push({ y: it.y, items: [it] })
+  }
+  rows.sort((a, b) => b.y - a.y)
+  const L = Math.min(...items.map((i) => i.x)), R = Math.max(...items.map((i) => i.x + i.w))
+  if (R - L < 200) return p.lines
+  const crossed = (r: { items: TextItem[] }, s: number) => r.items.some((i) => i.x < s - 2 && i.x + i.w > s + 2)
+  const sides = (r: { items: TextItem[] }, s: number) => {
+    const l = r.items.filter((i) => i.x + i.w <= s), rt = r.items.filter((i) => i.x >= s)
+    return { l, rt, lEnd: l.length ? Math.max(...l.map((i) => i.x + i.w)) : -1, rStart: rt.length ? Math.min(...rt.map((i) => i.x)) : -1 }
+  }
+  // Runs of rows that a gutter at x = s does not cross, with at least 4 rows of text on both sides.
+  type Run = { from: number; to: number }
+  let best: { s: number; runs: Run[]; n: number } | null = null
+  for (let s = L + (R - L) * 0.38; s <= L + (R - L) * 0.62; s += 2) {
+    const runs: Run[] = []
+    let n = 0, from = -1
+    const close = (to: number) => {
+      if (from < 0) return
+      const all = rows.slice(from, to).map((r) => sides(r, s))
+      const both = all.filter((x) => x.l.length && x.rt.length && x.rStart - x.lEnd >= 8)
+      const left = all.filter((x) => x.l.length && x.l.map((i) => i.str).join(' ').trim().length >= 12)
+      if (both.length >= 3 && left.length >= 4) {
+        const maxEnd = Math.max(...left.map((x) => x.lEnd))
+        const leftLen = both.map((x) => x.l.map((i) => i.str).join(' ').trim().length)
+        const wrapped = left.filter((x) => maxEnd - x.lEnd <= (maxEnd - L) * 0.12).length
+        if (leftLen.reduce((a, b) => a + b, 0) / both.length >= 25 && wrapped >= left.length * 0.5) { runs.push({ from, to }); n += both.length }
+      }
+      from = -1
+    }
+    // A crossing line, or a numbered heading ("2.4. Guaranteed Renewable Option"), ends a run of columns.
+    rows.forEach((r, i) => {
+      if (crossed(r, s) || HEADING.test(r.items.map((x) => x.str).join(' ').trim())) close(i)
+      else if (from < 0) from = i
+    })
+    close(rows.length)
+    if (n && (!best || n > best.n)) best = { s, runs, n }
+  }
+  if (!best) return p.lines
+  const out: Line[] = []
+  let i = 0
+  for (const run of best.runs) {
+    out.push(...toLines(p.page, rows.slice(i, run.from).flatMap((r) => r.items)))
+    const block = rows.slice(run.from, run.to).flatMap((r) => r.items)
+    const isLeft = (it: TextItem) => it.x + it.w / 2 < best!.s
+    out.push(...toLines(p.page, block.filter(isLeft)), ...toLines(p.page, block.filter((it) => !isLeft(it))))
+    i = run.to
+  }
+  out.push(...toLines(p.page, rows.slice(i).flatMap((r) => r.items)))
+  return out
+}
+
+/** What kind of plan the document describes, when it says it is not a term plan (whichever it names first). */
+const NOT_TERM: [RegExp, string][] = [
+  [/\bindexed universal life\b/i, 'Indexed Universal Life'],
+  [/\b(?:variable )?universal life\b/i, 'Universal Life'],
+  [/\binvestment[- ]linked\b/i, 'Investment-linked'],
+  [/\bwhole[- ]life (?:insurance )?(?:plan|policy|product)\b/i, 'Whole life'],
+  [/\bendowment (?:insurance )?(?:plan|policy|product)\b/i, 'Endowment'],
+  [/\bannuity (?:plan|policy|product)\b|\bretirement income (?:plan|policy)\b/i, 'Annuity / retirement income'],
+]
+const TERM = /\bterm (?:life )?(?:insurance |assurance )?(?:plan|policy|product|cover)\b|\bterm (?:life )?(?:insurance|assurance)\b/i
+
+/** Empty for a term plan (or when the document does not say); else the kind of plan it says it is. Only the first
+ *  pages are looked at, where the product is described (later pages talk about converting to other plans). */
+export function planKind(doc: ReadDoc): string {
+  const text = doc.pages.slice(0, 3).flatMap((p) => p.lines.map((l) => l.text)).join('\n')
+  const t = text.search(TERM)
+  let first: { at: number; kind: string } | null = null
+  for (const [re, kind] of NOT_TERM) {
+    const at = text.search(re)
+    if (at >= 0 && (!first || at < first.at)) first = { at, kind }
+  }
+  return first && (t < 0 || first.at < t) ? first.kind : ''
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Product Summary
@@ -86,19 +173,19 @@ export const pageOf = (page: number, items: TextItem[]): Page => ({ page, items,
 /** Labels that start a fact in a Product Summary (at the start of a line or a table cell). First match wins. */
 export const FACT_RULES: { key: string; re: RegExp }[] = [
   { key: 'uw', re: /^(?:type of )?underwriting(?: requirements?| type)?\b/i },
-  { key: 'premTerm', re: /^(?:premium (?:payment |paying )?term|premium payment period|premiums? (?:are )?payable (?:for|until))\b/i },
+  { key: 'premTerm', re: /^(?:premium (?:payment |paying )?term|premium payment (?:period|duration)|premiums? (?:are )?payable (?:for|until))\b/i },
   { key: 'guaranteed', re: /^(?:are (?:the )?premium rates? guaranteed\??|premium rates?(?: guarantee)?|guaranteed premiums?|premiums? guarantee)\b/i },
   { key: 'modes', re: /^(?:(?:premium )?payment (?:modes?|frequenc(?:y|ies))|premium (?:modes?|frequenc(?:y|ies))|modes? of payment)\b/i },
-  { key: 'coverTo', re: /^(?:policy term|coverage term|cover(?:age)? (?:until|up to|period)|term of (?:cover|policy)|expiry age|maturity age)\b/i },
+  { key: 'coverTo', re: /^(?:choice of (?:coverage|policy) terms?|(?:coverage|policy) term options?|policy term|coverage term|cover(?:age)? (?:until|up to|period)|term of (?:cover|policy)|expiry age|maturity age)\b/i },
   { key: 'eci', re: /^(?:early(?:[- ]stage)? critical illness|multi[- ]?stage critical illness|eci)\b/i },
   { key: 'ci', re: /^(?:critical illness|dread disease|ci)(?: benefit| cover| rider)?\b/i },
   { key: 'tpd', re: /^(?:total (?:and|&) permanent disability|tpd)(?: benefit| cover)?\b/i },
   { key: 'ti', re: /^terminal illness(?: benefit)?\b/i },
   { key: 'ad', re: /^accidental death(?: benefit)?\b/i },
   { key: 'death', re: /^death(?: benefit)?\b/i },
-  { key: 'conversion', re: /^(?:conversion (?:option|privilege|benefit)|option to convert)\b/i },
-  { key: 'renew', re: /^(?:renewa(?:l|bility)(?: option| privilege)?|guaranteed renewab)/i },
-  { key: 'inc', re: /^(?:guaranteed insurability(?: option)?|life (?:event|stage) (?:option|benefit)|increase (?:in )?cover)/i },
+  { key: 'conversion', re: /^(?:conversion (?:option|privilege|benefit)|option to convert|guaranteed convert(?:ibility|ible) option|(?:what is (?:the )?)?['‘’"]?guaranteed conversion['‘’"]?(?: option)?)/i },
+  { key: 'renew', re: /^(?:renewa(?:l|bility)(?: option| privilege)?|guaranteed renewab\w*(?: option)?|can i renew)/i },
+  { key: 'inc', re: /^(?:guaranteed (?:insurability|issuance) option(?: for life stage events?)?|guaranteed insurability|can i increase the sum (?:insured|assured)|life (?:event|stage) (?:option|benefit)|increase (?:in )?cover)/i },
   { key: 'invest', re: /^(?:investment (?:component|element|feature)s?|participating|is this a participating)/i },
   { key: 'cash', re: /^(?:cash value|surrender value|cash (?:and|&) surrender value)s?\b/i },
   { key: 'dist', re: /^(?:total )?distribution cost/i },
@@ -115,7 +202,7 @@ export const FACT_RULES: { key: string; re: RegExp }[] = [
 const REC = {
   name: /^(?:product|plan|policy) name\b/i,
   insurer: /^(?:name of )?(?:insurer|insurance company|life insurance company|issued by|underwritten by)\b/i,
-  age: /^(?:entry age|age at entry|issue age|entry age limits?|eligible entry age|minimum and maximum entry age)\b/i,
+  age: /^(?:entry age|age at entry|issue ages?|entry age limits?|eligible entry age|minimum and maximum entry age)\b/i,
   ageMin: /^(?:minimum|min\.?) (?:entry|issue) age\b/i,
   ageMax: /^(?:maximum|max\.?) (?:entry|issue) age\b/i,
   sa: /^(?:sum (?:assured|insured)(?: limits?| range)?|coverage amount)\b/i,
@@ -127,19 +214,30 @@ const REC = {
 const ALL_LABELS = [...FACT_RULES.map((r) => r.re), ...Object.values(REC)]
 
 /** A piece that is only a heading of the document ("Product Summary", "Benefits"), not a fact. */
-const NOISE = /^(?:product summary|benefits?|page \d+(?: of \d+)?|\d+)$/i
+const NOISE = /^(?:product summary|benefits?|page \d+(?: of \d+)?|\d+|note:?)$/i
+/** Sub-headings inside a benefit's box: skipped when looking for its text. */
+const SUBHEAD = /^(?:what we pay(?:\s+what we do not pay)?|what we do not pay|your (?:guaranteed )?benefits?\s*\*?)$/i
 const NEGATIVE = /^(?:no|nil|none|n\.?a\.?|not (?:applicable|available|covered|included|offered)|not provided)\b|\bnot (?:covered|included|available|offered)\b/i
 
 interface Hit { value: string; page: number }
 
-const LIST_MARK = /^\(?\d{1,2}[.)]\s+|^[a-z][.)]\s+|^[ivx]{1,4}[.)]\s+/i
+const LIST_MARK = /^\(?\d{1,2}[.)]\s+|^\d{1,2}\.\d{1,2}\.\s+|^[a-z][.)]\s+|^[ivx]{1,4}[.)]\s+/i
 function rawPieces(l: Line) { return l.text.split(/\s{2,}|\s+[|•]\s+/).map((x) => x.trim()).filter(Boolean) }
 const clean = (x: string) => x.replace(/^[\s•\-–*·]+/, '').replace(LIST_MARK, '').trim()
 function pieces(l: Line) { return rawPieces(l).map(clean).filter(Boolean) }
+const isLabel = (l: Line) => ALL_LABELS.some((r) => pieces(l).some((p) => r.test(p)))
+/** A question used as a heading ("Can I renew my policy?"). */
+const QUESTION = /^(?:can|what|is|are|will|how|when|do|does)\b/i
+const BULLET = /^[•·▪]/
+const ITEM = /^[-–]\s*/
+const HEADING = /^\d{1,2}(?:\.\d{1,2})*\.\s+\S/
+const ends = (s: string) => /[.!?;]["”’)]?$/.test(s)
+const joinText = (a: string, b: string) => (!a ? b : /[A-Za-z]-$/.test(a) && /^[a-z]/.test(b) ? a + b : `${a} ${b}`)
 
 /** The value after a label: the rest of the line, else the next line(s) up to the next label. A label counts
  *  only when it stands alone (a heading or a table cell) or is followed by a colon, so words in the middle of
- *  a paragraph ("contact the insurer directly") are not read as labels. */
+ *  a paragraph ("contact the insurer directly") are not read as labels. A value that wraps onto the next lines
+ *  (a sentence that has not ended, or a list after "...:") is read on to its end. */
 function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
   for (let i = 0; i < lines.length; i++) {
     if (used.has(i)) continue
@@ -149,31 +247,96 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
       const m = part.match(re)
       if (!m) continue
       const after = part.slice(m[0].length)
-      const alone = /^\s*(?:benefits?|\(s\)|\([^)]{1,40}\))?\s*[:?]?\s*$/i.test(after)
+      let alone = /^\s*(?:benefits?|\(s\)|\([^)]{1,40}\))?\s*[:?]?\s*$/i.test(after)
+      // A question heading, maybe running onto the next line: "Can I increase the sum insured ... a / life event?"
+      let skip = 0
+      if (!alone && QUESTION.test(part) && j === raw.length - 1) {
+        if (/\?\s*$/.test(part)) alone = true
+        else if (lines[i + 1] && lines[i + 1].page === lines[i].page && /\?\s*$/.test(lines[i + 1].text) && lines[i + 1].text.length < 60) { alone = true; skip = 1 }
+      }
       if (!alone && !/^\s*(?:\([^)]{1,40}\))?\s*[:–=]/.test(after)) continue
       // A numbered list of illnesses or benefits: the next piece is another item, not this one's value.
       if (alone && raw[j + 1] && LIST_MARK.test(raw[j + 1]) && clean(raw[j + 1]).length < 40) continue
       if (LIST_MARK.test(raw[j]) && raw.filter((x) => LIST_MARK.test(x)).length > 1) continue
       let rest = (alone ? raw.slice(j + 1).map(clean).join(' ') : after.replace(/^\s*(?:\([^)]{1,40}\))?\s*[:–=]/, '') + ' ' + raw.slice(j + 1).map(clean).join(' '))
         .replace(/^[\s:–\-=?]+/, '').trim()
-      let k = i + 1
-      while (!rest && k < lines.length && k <= i + 2 && lines[k].page === lines[i].page) {
-        if (ALL_LABELS.some((r) => pieces(lines[k]).some((p) => r.test(p)))) break
-        rest = clean(lines[k].text)
+      const cell = alone && j + 1 < raw.length   // label | value on one line (a table row)
+      const colon = /:\s*$/.test(part)
+      let k = i + 1 + skip
+      let list = false
+      const mine = [i]
+      for (let s = 0; s < skip; s++) mine.push(i + 1 + s)
+      while (!rest && k < lines.length && k <= i + 3 + skip && lines[k].page === lines[i].page) {
+        const t = lines[k].text.trim()
+        if (isLabel(lines[k])) break
         k++
+        if (SUBHEAD.test(t) || NOISE.test(clean(t)) || /^(?:for the full list|please refer|refer to)\b/i.test(t)) continue
+        // "Choice of coverage term:" then "- of 5 years ..." items: the items are the value.
+        if (colon && ITEM.test(t)) list = true
+        rest = clean(t).replace(/^what is it\?\s*/i, '')
+        mine.push(k - 1)
       }
+      if (!rest || NOISE.test(rest)) continue
       // A value that starts mid-sentence (lower case or punctuation) belongs to some other text.
-      if (!rest || NOISE.test(rest) || /^[a-z.,;)&/]/.test(rest)) continue
+      if (!list && /^[a-z.,;)&/]/.test(rest)) continue
+      if (list) rest = rest.replace(/^of\s+/i, '')
+      // Read on while the sentence (or the list) goes on.
+      for (let n = 0; n < 6 && k < lines.length && lines[k].page === lines[i].page && rest.length < 240; n++, k++) {
+        const t = lines[k].text.trim(), ps = rawPieces(lines[k])
+        // "(Applicable to Policy Term of 5 years and 10 years only)" then "What is it?  This option allows ...".
+        if (/^\(.*\)$/.test(rest) && /^what is it\?/i.test(t)) { rest = joinText(rest, t.replace(/^what is it\?\s*/i, '')); mine.push(k); continue }
+        if (isLabel(lines[k]) || HEADING.test(t) || SUBHEAD.test(t) || QUESTION.test(t) && /\?/.test(t)) break
+        if (list) {
+          if (BULLET.test(t)) break
+          if (ITEM.test(t)) { rest = joinText(rest, clean(t).replace(/^of\s+/i, '')); mine.push(k); continue }
+          if (ps.length > 1) break
+          rest = joinText(rest, t); mine.push(k); continue
+        }
+        if (ends(rest) || BULLET.test(t) || ITEM.test(t)) break
+        if (cell) {
+          // The label cell and the value cell both wrap: "Terminal Illness  100% ... terminal" / "benefit  illness and ...".
+          if (ps.length === 2 && ps[0].length <= 30 && /^[a-z]/.test(ps[1])) { rest = joinText(rest, ps[1]); mine.push(k); continue }
+          if (ps.length === 1 && /^[a-z]/.test(ps[0])) { rest = joinText(rest, ps[0]); mine.push(k); continue }
+          break
+        }
+        if (ps.length > 1) break
+        rest = joinText(rest, t); mine.push(k)
+      }
       // A long paragraph: keep its first sentence or two.
       if (rest.length > 240) rest = rest.slice(0, 240).replace(/\s+\S*$/, '') + '…'
-      used.add(i)
+      for (const x of mine) used.add(x)
       return { value: rest, page: lines[i].page }
     }
   }
   return null
 }
 
-const ints = (s: string) => [...s.matchAll(/\b(\d{1,3})\b/g)].map((m) => +m[1]).filter((n) => n <= 100)
+/** The document as running text, one paragraph per bullet or list item, for the facts said in a sentence. */
+function sentencesOf(lines: Line[]): { s: string; page: number }[] {
+  const out: { s: string; page: number }[] = []
+  let cur = '', page = 0
+  const flush = () => { if (cur) for (const s of cur.split(/(?<=[.!?])\s+(?=[A-Z(])/)) out.push({ s: s.trim(), page }); cur = '' }
+  for (const l of lines) {
+    const t = l.text.trim()
+    if (!t) continue
+    const ps = rawPieces({ ...l, text: t.replace(/^[•·▪\-–]\s*/, '') })
+    if (BULLET.test(t) || ITEM.test(t) || HEADING.test(t) || l.page !== page || ps.length > 1) flush()
+    if (!cur) page = l.page
+    cur = joinText(cur, ps.length > 1 ? ps.map(clean).join('  ') : clean(t))
+    if (ps.length > 1) flush()
+  }
+  flush()
+  return out
+}
+
+/** Facts a Product Summary often says in a sentence instead of under a label. Used only when no label was found. */
+const SENTENCE_RULES: { key: string; re: RegExp }[] = [
+  { key: 'guaranteed', re: /^(?:the )?premiums?(?: rates?)?\b[^.]{0,60}?\b(?:are|is|will be)\s+(?:level\s+(?:and|but)\s+)?(?:(?:are\s+)?not\s+)?guaranteed\b/i },
+  { key: 'modes', re: /\b(?:premiums?\b[^.]{0,40}\b(?:pay|paid|payable)|(?:choose|choice|option) to pay)\b[^.]{0,30}\b(?:monthly|quarterly|half[- ]yearly|yearly|annually)\b[^.]*\b(?:monthly|quarterly|half[- ]yearly|yearly|annually)\b/i },
+  { key: 'cash', re: /\b(?:no|not have any|does not have(?: any)?)\s+cash (?:surrender )?values?\b/i },
+]
+
+const ints = (s: string) => [...s.replace(/\b\d+\s*(?:days?|weeks?|months?)\b/gi, '0').matchAll(/\b(\d{1,3})\b/g)].map((m) => +m[1]).filter((n) => n <= 100)
 
 /** "S$50,000", "5 million", "$1.5m", "100k" -> numbers in the text. */
 export function amounts(s: string): number[] {
@@ -209,23 +372,98 @@ export interface SummaryResult {
   facts: Record<string, { v: string; page: number }>
   /** Plain-English names of what was filled in. */
   filled: string[]
+  /** Things to check about what was read. */
+  notes: string[]
+  /** Empty for a term plan; else the kind of plan the document says it is ("Indexed Universal Life"). */
+  kind: string
 }
 
+/** "(Regular Pay)" and the like after a plan's name: how it is paid, not part of the name. */
+const PAY_SUFFIX = /\s*\((?:regular|single|limited|annual|monthly)[^)]*(?:pay|premium)[^)]*\)\s*$/i
+const nameOf = (s: string) => s.replace(PAY_SUFFIX, '').replace(/\s{2,}/g, ' ').trim()
+const FOOTER_PAGE = /^page \d+ of \d+$/i
+
+/** The plan's name when the document has no "Product name" label: from a footer ("Genesis III | Product Summary",
+ *  "Singlife Elite Term II (Regular Pay)  Page 1 of 8") or the title above or below "Product Summary" on page 1,
+ *  but only a title that the document repeats (a name, not a slogan). */
+function nameFromLayout(doc: ReadDoc, text: string): string {
+  const lines = doc.pages.slice(0, 2).flatMap((p) => p.lines)
+  for (const l of lines) {
+    const m = l.text.match(/^(?:\d+\s*\|\s*)?(.{3,80}?)\s*\|\s*product summary\b/i)
+    if (m) return nameOf(m[1])
+  }
+  const p1 = doc.pages[0]?.lines ?? []
+  for (const l of p1) {
+    const ps = rawPieces(l)
+    const at = ps.findIndex((x) => FOOTER_PAGE.test(x))
+    if (at > 0 && ps[at - 1].length <= 80) return nameOf(ps[at - 1])
+  }
+  const ps = p1.slice(0, 15).map((l) => l.text.match(/^(?:product summary\s*(?:for|[:\-–])\s*(.+)|(.+?)\s*[:\-–]?\s*product summary)$/i)).find(Boolean)
+  const n = ps?.[1] ?? ps?.[2]
+  if (n && n.length < 80) return nameOf(n)
+  const at = p1.slice(0, 8).findIndex((l) => /^product summary$/i.test(l.text.trim()))
+  if (at < 0) return ''
+  const t = (i: number) => p1[i]?.text.trim() ?? ''
+  const cands = [[at - 2, at - 1], [at - 1], [at + 1, at + 2], [at + 1]]
+    .filter((ix) => ix.every((i) => i >= 0 && i < p1.length && i !== at && t(i).length <= 60 && !/www\.|\.com|^note/i.test(t(i))))
+    .map((ix) => ix.map(t).join(' '))
+  const times = (c: string) => text.toLowerCase().split(c.toLowerCase()).length - 1
+  const ok = cands.filter((c) => c.length >= 4 && times(nameOf(c)) >= 3)
+  return ok.length ? nameOf(ok.sort((a, b) => b.length - a.length)[0]) : ''
+}
+
+/** A Product Summary file often holds the base plan and then each rider's own summary. The name of the plan or
+ *  rider each page is about: its "Product name" label, its footer, or the page before's. */
+function sectionsOf(doc: ReadDoc): Map<number, string> {
+  const out = new Map<number, string>()
+  let cur = ''
+  for (const p of doc.pages) {
+    let name = ''
+    for (const l of p.lines) {
+      const ps = rawPieces(l)
+      const m = ps.length >= 2 && REC.name.test(clean(ps[0])) && clean(ps[0]).replace(REC.name, '').trim().length === 0 ? ps[1] : ''
+      if (m) { name = m; break }
+    }
+    if (!name) {
+      // The title just above or below "Product Summary" at the top of the page starts a new section.
+      const top = p.lines.slice(0, 4).map((l) => l.text.trim())
+      const at = top.findIndex((x) => /^product summary$/i.test(x))
+      if (at >= 0) {
+        const near = [top[at + 1], top[at - 1]].find((x) => x && x.length <= 60 && /[a-z]/i.test(x) && !/www\.|\.com|^note/i.test(x))
+        if (near) name = near
+      }
+    }
+    if (!name) for (const l of p.lines) {
+      const ps = rawPieces(l)
+      const at = ps.findIndex((x) => FOOTER_PAGE.test(x))
+      if (at > 0 && ps[at - 1].length <= 80) { name = ps[at - 1]; break }
+    }
+    if (name) cur = nameOf(name)
+    out.set(p.page, cur)
+  }
+  return out
+}
+const sameName = (a: string, b: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '') === b.toLowerCase().replace(/[^a-z0-9]/g, '')
+
 export function readSummary(doc: ReadDoc): SummaryResult {
-  const lines = doc.pages.flatMap((p) => p.lines)
+  // Two-column pages are read column by column (PDF pages with positions only).
+  const pages = doc.kind === 'pdf' ? doc.pages.map((p) => ({ ...p, lines: p.items.length ? columnLines(p) : p.lines })) : doc.pages
+  const cdoc: ReadDoc = { ...doc, pages }
+  const lines = pages.flatMap((p) => p.lines)
   const text = lines.map((l) => l.text).join('\n')
   const used = new Set<number>()
   const record: Partial<ProductRecord> = {}
   const filled: string[] = []
+  const notes: string[] = []
   const facts: SummaryResult['facts'] = {}
+  const kind = planKind(cdoc)
 
   // The plan's own fields come first, so their lines are not read as facts.
   const name = find(lines, REC.name, used)
-  if (name) record.name = name.value.replace(/\s*\(.*?\)\s*$/, '')
+  if (name) record.name = nameOf(name.value)
   else {
-    const ps = lines.slice(0, 15).map((l) => l.text.match(/^(?:product summary\s*(?:for|[:\-–])\s*(.+)|(.+?)\s*[:\-–]?\s*product summary)$/i)).find(Boolean)
-    const n = ps?.[1] ?? ps?.[2]
-    if (n && n.length < 80) record.name = n.trim()
+    const n = nameFromLayout(cdoc, text)
+    if (n) record.name = n
   }
   if (record.name) filled.push('product name')
   const ins = find(lines, REC.insurer, used)
@@ -247,8 +485,14 @@ export function readSummary(doc: ReadDoc): SummaryResult {
   if (lo != null) { record.sa_min = lo; filled.push('minimum sum assured') }
   if (hi != null && (lo == null || hi > lo)) { record.sa_max = hi; filled.push('maximum sum assured') }
 
+  const sentences = sentencesOf(lines)
   const cur = find(lines, REC.currency, used)
-  const curs = cur ? currenciesIn(cur.value) : []
+  let curs = cur ? currenciesIn(cur.value) : []
+  if (!curs.length) curs = currencySentence(sentences)
+  if (!curs.length && onlySgd(text)) {
+    curs = ['SGD']
+    notes.push('The document does not name the policy currency; every amount in it is in S$, so SGD was taken. Check this.')
+  }
   if (curs.length) { record.currencies = curs; filled.push('policy currencies') }
 
   const res = find(lines, REC.residency, used)
@@ -264,16 +508,56 @@ export function readSummary(doc: ReadDoc): SummaryResult {
   if (/direct purchase insurance/i.test(text)) { record.dpi = true; filled.push('Direct Purchase Insurance') }
   if (/\boffshore\b/i.test(text) && !/\bonshore\b/i.test(text)) { record.jurisdiction = 'Offshore'; filled.push('offshore') }
 
+  // Facts. A fact found in a rider's own summary (later in the same file) says which rider it is from.
+  const sections = sectionsOf(cdoc)
+  const base = sections.get(pages[0]?.page ?? 1) || record.name || ''
+  const from = (page: number, v: string) => {
+    const s = sections.get(page) ?? ''
+    return s && base && !sameName(s, base) && !sameName(s, record.name ?? '') ? `Rider (${s}): ${v}` : v
+  }
   for (const r of FACT_RULES) {
     const h = find(lines, r.re, used)
-    if (h) facts[r.key] = { v: h.value, page: h.page }
+    if (h) facts[r.key] = { v: from(h.page, h.value), page: h.page }
   }
-  const yes = (k: string) => !!facts[k] && !NEGATIVE.test(facts[k].v)
+  for (const r of SENTENCE_RULES) {
+    if (facts[r.key]) continue
+    const h = sentences.find((x) => r.re.test(x.s) && x.s.length <= 300)
+    if (h) facts[r.key] = { v: from(h.page, h.s), page: h.page }
+  }
+  const yes = (k: string) => !!facts[k] && !NEGATIVE.test(facts[k].v.replace(/^Rider \([^)]*\):\s*/, ''))
   if (facts.tpd) record.has_tpd = yes('tpd')
   if (facts.ci || facts.eci) record.has_ci = yes('ci') || yes('eci')
   const n = Object.keys(facts).length
   if (n) filled.push(`${fmtNum(n)} fact${n === 1 ? '' : 's'}`)
-  return { record, facts, filled }
+  if (kind) notes.push(`This Product Summary is for ${kind}, not a term plan.`)
+  return { record, facts, filled, notes, kind }
+}
+
+const CUR_WORD = String.raw`(?:SGD|USD|AUD|GBP|EUR|HKD|S\$|US\$|singapore dollars?|us dollars?|united states dollars?|australian dollars?|pounds? sterling|euros?|hong kong dollars?)`
+const NUM_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 }
+/** "6 currency options are available: SGD, USD, GBP, EUR, AUD and HKD", "denominated in US currency",
+ *  "available in SGD and USD". A stated number of currencies must match the list. */
+function currencySentence(sentences: { s: string }[]): string[] {
+  for (const { s } of sentences) {
+    const m = s.match(/\b(\d|one|two|three|four|five|six|seven)?\s*(?:policy )?currency options? (?:are |is )?(?:available|offered)\s*(?:[:\-–]|in|for)?\s*(.+)$/i)
+    if (m) {
+      const c = currenciesIn(m[2].split(/[.;]/)[0])
+      const want = m[1] ? Number(m[1]) || NUM_WORDS[m[1].toLowerCase()] : 0
+      if (c.length && (!want || want === c.length)) return c
+      continue
+    }
+    const d = s.match(/\b(?:denominated|issued) in (?:the )?(US|Singapore|SG|Australian|Hong Kong) (?:dollar )?currency\b/i)
+    if (d) return [{ us: 'USD', singapore: 'SGD', sg: 'SGD', australian: 'AUD', 'hong kong': 'HKD' }[d[1].toLowerCase()]!]
+    const a = s.match(new RegExp(String.raw`\b(?:policy|plan|product) (?:is )?(?:available|offered|denominated) (?:only )?in\s+(${CUR_WORD}(?:\s*(?:,|and|or)\s*${CUR_WORD})*)`, 'i'))
+    if (a) return currenciesIn(a[1])
+  }
+  return []
+}
+
+/** Every amount in S$ (at least 3), no other currency named and the word "currency" not used at all. */
+function onlySgd(text: string): boolean {
+  const n = (text.match(/S\$\s?\d|\bSGD\s?\d/g) ?? []).length
+  return n >= 3 && !/currenc/i.test(text) && JSON.stringify(currenciesIn(text)) === '["SGD"]' && !/(?<![A-Z])\$\s?\d/.test(text.replace(/S\$/g, ''))
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -344,30 +628,49 @@ export function readRates(doc: ReadDoc): RatesResult {
       const first = dataStart(rows, i)
       if (first < 0) break
       const ageCol = rows[first].cells.findIndex((c) => ageOf(c) != null)
-      const width = rows[first].cells.length - ageCol - 1
-      const labels = headerLabels(rows, first, ageCol, width, doc.kind, text)
+      let width = rows[first].cells.length - ageCol - 1
       let end = first
       while (end < rows.length && ageOf(rows[end].cells[ageCol]) != null && rows[end].page === rows[first].page) end++
+      // Two tables side by side ("17 ... | 47 ..."): an age again halfway along the row. Read the left one, then the right.
+      const half = (width - 1) / 2
+      const block = rows.slice(first, end)
+      const sideBySide = Number.isInteger(half) && half >= 2 &&
+        block.filter((r) => ageOf(r.cells[ageCol + 1 + half]) != null).length >= block.length * 0.6
+      if (sideBySide) width = half
+      const labels = headerLabels(rows, first, ageCol, width, doc.kind, text, sideBySide)
       if (labels) {
-        for (const row of rows.slice(first, end)) {
-          const age = ageOf(row.cells[ageCol])!
-          const vals = row.cells.slice(ageCol + 1)
+        const parts = sideBySide
+          ? [...block.map((r) => r.cells.slice(ageCol, ageCol + 1 + half)), ...block.map((r) => r.cells.slice(ageCol + 1 + half, ageCol + 2 + 2 * half))]
+          : block.map((r) => r.cells.slice(ageCol))
+        const got: Rate[] = []
+        for (const cells of parts) {
+          const age = ageOf(cells[0])
+          if (age == null) continue
+          const vals = cells.slice(1)
           labels.forEach((l, k) => {
             if (!l.g || l.s == null || l.ci) return
             const rate = num(vals[k])
             if (!(rate > 0)) return
             const ciK = labels.findIndex((x) => x.ci && x.g === l.g && x.s === l.s)
             const c = ciK >= 0 ? num(vals[ciK]) : NaN
-            add({ age, gender: l.g, smoker: l.s, rate: round(rate), ci_rate: c > 0 ? round(c) : null })
+            got.push({ age, gender: l.g, smoker: l.s, rate: round(rate), ci_rate: c > 0 ? round(c) : null })
           })
         }
+        // A later table for ages already read (another policy term): left out as a whole, never mixed in.
+        if (got.some((r) => out.has(`${plain(r.age)}|${r.gender}|${r.smoker}`))) dup = true
+        else got.forEach(add)
       }
       i = Math.max(end, first + 1)
     }
   }
 
   const rates = [...out.values()].sort((a, b) => a.age - b.age || a.gender.localeCompare(b.gender) || Number(a.smoker) - Number(b.smoker))
-  if (dup) notes.push('The sheet has more than one table for the same ages (for example one per policy term). The first table was used; check it is the one for cover to age 65.')
+  if (dup) {
+    const titles = [...new Set([...text.matchAll(/(?:policy|coverage|cover) term (?:to|until|of) (?:age )?\d{1,3}(?: years)?/gi)].map((m) => m[0].replace(/\s+/g, ' ')))]
+    notes.push(titles.length > 1
+      ? `The sheet has ${fmtNum(titles.length)} tables for the same ages, one per policy term (${titles.join('; ')}). Only the first, ${titles[0]}, was used; the others were left out.`
+      : 'The sheet has more than one table for the same ages (for example one per policy term). Only the first table was used; the others were left out. Check it is the one you want.')
+  }
   if (!rates.length) return { rates, notes, error: "Couldn't find a premium rates table (ages down the side, with columns for male/female and smoker/non-smoker). Paste the rates in by hand." }
   return { rates, notes, error: '' }
 }
@@ -386,7 +689,7 @@ function dataStart(rows: Row[], from: number): number {
 interface Col { g: Rate['gender'] | ''; s: boolean | null; ci: boolean }
 
 /** What each rate column is, from the 1 to 3 heading rows above the data. */
-function headerLabels(rows: Row[], first: number, ageCol: number, width: number, kind: ReadDoc['kind'], text: string): Col[] | null {
+function headerLabels(rows: Row[], first: number, ageCol: number, width: number, kind: ReadDoc['kind'], text: string, sideBySide = false): Col[] | null {
   const heads: string[][] = []
   for (let k = first - 1; k >= 0 && k >= first - 3; k--) {
     const r = rows[k]
@@ -398,8 +701,10 @@ function headerLabels(rows: Row[], first: number, ageCol: number, width: number,
       // Merged heading cells come out blank after the first: carry the heading across.
       for (let j = 1; j < cells.length; j++) if (!cells[j] && cells[j - 1] && j < width) cells[j] = cells[j - 1]
     } else {
-      const c = r.cells.filter((x) => !/^age\b|next birthday|^anb$|^alb$/i.test(x))
+      let c = r.cells.filter((x) => !/^age\b|next birthday|last birthday|^(?:next|last|birthday|anb|alb)$/i.test(x))
       if (!c.length) continue
+      // Side-by-side tables repeat their headings: one copy is enough.
+      if (sideBySide && c.length % 2 === 0 && c.slice(0, c.length / 2).join('|') === c.slice(c.length / 2).join('|')) c = c.slice(0, c.length / 2)
       // A top heading with fewer cells ("Male  Female" over four columns) spans the columns evenly.
       if (c.length < width && width % c.length === 0) cells = c.flatMap((x) => Array(width / c.length).fill(x))
       else if (c.length <= width) cells = [...Array(width - c.length).fill(''), ...c]
