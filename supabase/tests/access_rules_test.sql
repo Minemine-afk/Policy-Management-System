@@ -794,7 +794,7 @@ select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Maple Li
 -- A bare upload: what the reader found becomes a searchable product, tagged auto-read
 insert into storage.objects (bucket_id, name) values ('kb-docs', 'f3/oak-ps.pdf'), ('kb-docs', 'f3/oak-rates.csv'), ('kb-docs', 'f3/junk.pdf');
 do $$
-declare d uuid; r uuid; j uuid; p uuid; p2 uuid; pj uuid;
+declare d uuid; r uuid; j uuid; p uuid; p2 uuid; pj uuid; na uuid; pn uuid;
 begin
   d := kb_add_document('{"insurer":"Oak Life","title":"Oak Term PS","doc_type":"Product Summary","effective_from":"2026-01-01","storage_path":"f3/oak-ps.pdf"}');
   p := kb_auto_product(d, '{"insurer":"Oak Life","name":"Oak Term","record":{"currencies":["SGD","XYZ"],"entry_age_min":18,"entry_age_max":"60","sa_min":100000,"has_tpd":true},"facts":{"freelook":{"v":"14 days","page":2},"grace":{"v":"  "}},"found":["currencies","entry_age","sa_min","freelook"]}');
@@ -815,6 +815,15 @@ begin
   if not exists (select 1 from kb_products where id = pj and missing @> '{currencies,entry_age}') or exists (select 1 from kb_checked_products where id = pj) then
     raise exception 'a record missing currency and entry age should not be searchable';
   end if;
+  -- Currency read but no entry ages (real SG Product Summaries do not state them): searchable, ages_stated false
+  -- (Kumar, 25 Nov 2026: "They should still be searchable").
+  na := kb_add_document('{"insurer":"Elm Life","title":"Elm Term PS","doc_type":"Product Summary","effective_from":"2026-01-01","storage_path":"f3/elm.pdf"}');
+  pn := kb_auto_product(na, '{"insurer":"Elm Life","name":"Elm Term","record":{"currencies":["SGD"]},"found":["currencies"]}');
+  if not exists (select 1 from kb_checked_products where id = pn and ages_stated = false)
+     or not exists (select 1 from kb_products where id = pn and missing = '{entry_age}') then
+    raise exception 'a record with currency but no entry ages should be searchable, with ages_stated false';
+  end if;
+  if not (select ages_stated from kb_checked_products where id = p) then raise exception 'ages_stated should be true when the ages were read'; end if;
   insert into kbt values ('oak', p), ('junk', pj), ('junkdoc', j);
   perform kb_mark_reviewed(p);
   if (select auto_read from kb_products where id = p) then raise exception 'reviewed tag not cleared'; end if;

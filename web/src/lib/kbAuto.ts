@@ -84,7 +84,8 @@ export function readingLine(r: Reading): string {
 
 /** After a reading is saved: is the product in search, and if not, why. */
 export function afterRead(r: { missing: string[]; searchable: boolean }) {
-  if (r.searchable) return 'The product is in search now (Compare products and the Product Comparison Matrix), marked "Auto-read, not yet reviewed".'
+  const noAges = r.missing.includes('entry_age') ? ' The document does not state the entry ages, so it is marked "Entry ages not stated in the document" and the age filter skips it; open the record to type them in.' : ''
+  if (r.searchable) return `The product is in search now (Compare products and the Product Comparison Matrix), marked "Auto-read, not yet reviewed".${noAges}`
   if (r.missing.length) return `The product record is made but is not searchable yet: the ${missingText(r.missing)} ${r.missing.length > 1 ? 'were' : 'was'} not found in the document.`
   return 'The product record is not searchable (withdrawn, or a source document is out of date).'
 }

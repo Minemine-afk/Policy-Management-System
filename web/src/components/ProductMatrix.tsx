@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CLIENT_TYPES, CURRENCIES, RESIDENCIES } from '../lib/formOptions'
 import {
-  AUTO_NOTE, AUTO_TAG, DISCLAIMER, blankText, comparisonRows, withoutSamples, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
+  AGES_NOT_STATED, AGES_NOTE, AUTO_NOTE, AUTO_TAG, DISCLAIMER, blankText, comparisonRows, withoutSamples, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
 } from '../lib/kb'
 import { buildComparisonPdf } from '../lib/kbPdf'
 import { AmountInput } from './ui'
@@ -184,7 +184,8 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
                           aria-label={`Select ${productLabel(p)}`} onChange={(e) => toggle(p.id, e.target.checked)} /></td>
                         <td>{p.insurer}</td>
                         <td><strong>{p.name}</strong>{p.id === mainId && <span className="pill info" style={{ marginLeft: 6 }}>On your form (9)</span>}
-                          {p.auto_read && <span className="pill warn" style={{ marginLeft: 6 }} title="Read from the insurer's documents by the system; no one has checked the values yet">{AUTO_TAG}</span>}</td>
+                          {p.auto_read && <span className="pill warn" style={{ marginLeft: 6 }} title="Read from the insurer's documents by the system; no one has checked the values yet">{AUTO_TAG}</span>}
+                          {p.ages_stated === false && <span className="pill warn" style={{ marginLeft: 6 }} title="The age filter skips this product: check the entry ages with the insurer">{AGES_NOT_STATED}</span>}</td>
                         <td className="small">{p.category} · {p.product_type}{p.dpi ? ' (DPI)' : ''}</td>
                         <td className="small">{p.jurisdiction}</td>
                         <td className="num">{n.mode === 'coverage'
@@ -224,7 +225,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
               <input type="checkbox" checked={diffOnly} onChange={(e) => setDiffOnly(e.target.checked)} /> Show only rows that differ</label>
           </div>
           <CompareTable kb={kb} products={ordered} needs={n} diffOnly={diffOnly} />
-          <div className="disclaimer small">{DISCLAIMER}{ordered.some((p) => p.auto_read) && <><br /><strong>{AUTO_NOTE}</strong></>}</div>
+          <div className="disclaimer small">{DISCLAIMER}{ordered.some((p) => p.auto_read) && <><br /><strong>{AUTO_NOTE}</strong></>}{ordered.some((p) => p.ages_stated === false) && <><br /><strong>{AGES_NOTE}</strong></>}</div>
           {error && <div className="error" role="alert">{error}</div>}
           <div className="matrix-foot row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" onClick={download} disabled={busy}>{busy ? 'Making the PDF…' : 'Download summary (PDF)'}</button>
@@ -252,7 +253,8 @@ function CompareTable({ kb, products, needs, diffOnly }: { kb: Kb; products: KbP
       <table className="compare-table">
         <thead><tr><th scope="col" className="lbl">Category</th>
           {products.map((p, i) => <th key={p.id} scope="col"><span className="small muted">{COL_HEAD[i]} · {p.insurer}</span><br />{p.name}
-            {p.auto_read && <><br /><span className="pill warn">{AUTO_TAG}</span></>}</th>)}
+            {p.auto_read && <><br /><span className="pill warn">{AUTO_TAG}</span></>}
+            {p.ages_stated === false && <><br /><span className="pill warn">{AGES_NOT_STATED}</span></>}</th>)}
         </tr></thead>
         <tbody>
           {rows.flatMap((r, i) => {
