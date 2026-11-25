@@ -36,6 +36,8 @@ On a normal machine, use `supabase start` instead and you don't need any of this
 
 Knowledge Bank reader (fills product records from a Product Summary or rate sheet, PDF/Excel/CSV): `node tests/kb-extract/check.mjs`
 (made-up documents from `tests/kb-extract/make-samples.mjs`). The walkthrough also uploads them and checks what is filled in.
+Real Singapore documents: `node tests/kb-extract/check-real.mjs [folder]` (5 real Product Summaries and the Great Eastern Cares rate
+sheet, kept in the project files under product-matrix/kb-real-summaries/; expected rates in `tests/kb-extract/expected-ge-cares-rates.json`).
 
 Thousands commas (every number on screen, e.g. 1,000,000): `node tests/format/check.mjs` tests the shared formatter
 (`web/src/lib/num.ts`) and runs `web/scripts/check-number-format.mjs`, which also runs in `npm run build` and fails it

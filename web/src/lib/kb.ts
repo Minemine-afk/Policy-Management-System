@@ -12,6 +12,8 @@ export interface KbProduct {
   facts: Record<string, KbFact | undefined>; version: number; is_sample: boolean
   /** Read from an uploaded document by the reader; nobody has reviewed the values yet. */
   auto_read?: boolean
+  /** False when the documents do not state the entry ages (the age filter then skips the product). Missing before 1u-upgrade.sql. */
+  ages_stated?: boolean
 }
 export interface KbDocument { id: string; product_id: string; title: string; doc_type: string; version: string; effective_from: string | null; valid_until: string | null }
 export interface KbRate { product_id: string; age: number; gender: string; smoker: boolean; rate: number; ci_rate: number | null }
@@ -71,7 +73,7 @@ export function coverFor(kb: Kb, p: KbProduct, n: Needs): number | null {
 export function whyNot(kb: Kb, p: KbProduct, n: Needs): string[] {
   const why: string[] = []
   const money = (x: number) => `${p.currencies[0] ?? ''} ${fmtNum(x)}`
-  if (n.age != null && (n.age < p.entry_age_min || n.age > p.entry_age_max)) why.push(`entry age ${plain(p.entry_age_min)} to ${plain(p.entry_age_max)}`)
+  if (n.age != null && p.ages_stated !== false && (n.age < p.entry_age_min || n.age > p.entry_age_max)) why.push(`entry age ${plain(p.entry_age_min)} to ${plain(p.entry_age_max)}`)
   if (n.residency && p.residency.length && !p.residency.includes(n.residency)) why.push(`not open to: ${n.residency.toLowerCase()}`)
   if (n.currency && !p.currencies.includes(n.currency)) why.push(`no ${n.currency} policies`)
   if (n.ci && !p.has_ci) why.push('no critical illness cover')
@@ -128,6 +130,9 @@ export const NOT_AVAILABLE = 'Not available'
 /** A fact an auto-read product's document reader did not find: it may still be in the document. */
 export const NOT_READ = 'Not found by the reader. See the Product Summary'
 export const AUTO_TAG = 'Auto-read, not yet reviewed'
+/** A product whose documents do not state its entry ages: searchable, but the client's age was not checked. */
+export const AGES_NOT_STATED = 'Entry ages not stated in the document'
+export const AGES_NOTE = 'Products marked "Entry ages not stated in the document" were not checked against the client\'s age: confirm the entry ages with the insurer.'
 /** Products the "Exclude sample products" switch leaves out (the made-up "(sample)" products from 3c-sample-products.sql). */
 export const withoutSamples = (kb: Kb, exclude: boolean): Kb => (exclude ? { ...kb, products: kb.products.filter((p) => !p.is_sample) } : kb)
 /** What a blank cell says for this product. */
@@ -153,7 +158,7 @@ export function cellOf(kb: Kb, p: KbProduct, key: string, n: Needs): Cell {
     case '_type': return fromPs(`${p.product_type} life${p.dpi ? ' (Direct Purchase Insurance)' : ''}`)
     case '_juris': return fromPs(p.jurisdiction)
     case '_cur': return fromPs(p.currencies.join(', '))
-    case '_age': return fromPs(`${plain(p.entry_age_min)} to ${plain(p.entry_age_max)} (age next birthday)`)
+    case '_age': return fromPs(p.ages_stated === false ? AGES_NOT_STATED : `${plain(p.entry_age_min)} to ${plain(p.entry_age_max)} (age next birthday)`)
     case '_res': return fromPs(p.residency.join('; '))
     case '_sa': return fromPs(p.sa_min != null || p.sa_max != null ? `${money(p.sa_min) || 'Any'} to ${money(p.sa_max) || 'no stated maximum'}` : '')
     case '_prem': {

@@ -59,6 +59,10 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      record puts it in search at once; it is searchable only once its policy currency and entry ages are known).
      Changes and documents that were waiting for a check go live when you run it. Run it after 1s. Until you run it,
      uploads still work but products wait for a check as before.
+   - `1u-upgrade.sql` (25 Nov: products are searchable without entry ages. Real Product Summaries often do not state
+     them; such a product is marked "Entry ages not stated in the document" and the age filter skips it instead of
+     leaving it out. Only the policy currency is still needed). Run it after 1t. Until you run it, those products stay
+     out of search.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 

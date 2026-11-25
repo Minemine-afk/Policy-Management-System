@@ -6,6 +6,7 @@ import { dueInfo, introGroup } from '../lib/options'
 import { useSettings } from '../lib/settings'
 import { MODULE_HOME, useModules, type ModuleKey } from '../lib/modules'
 import { fmtNum } from '../lib/num'
+import { blocking } from '../lib/kbAdmin'
 
 /** Simple stroke icons, one per module and admin tool. */
 const ICON: Record<string, ReactNode> = {
@@ -71,7 +72,7 @@ function useKbBadges(on: boolean): Badge[] {
       const docs = (d.data ?? []) as { valid_until: string | null; replaced_by: string | null }[]
       const prods = (p.data ?? []) as { auto_read: boolean; missing: string[] | null; status: string }[]
       const auto = prods.filter((x) => x.auto_read && x.status === 'verified').length
-      const stuck = prods.filter((x) => x.status !== 'withdrawn' && (x.missing?.length ?? 0) > 0).length
+      const stuck = prods.filter((x) => x.status !== 'withdrawn' && blocking(x.missing).length > 0).length
       const expiring = docs.filter((x) => !x.replaced_by && x.valid_until && x.valid_until <= soon).length
       const out: Badge[] = []
       if (auto) out.push({ text: `${fmtNum(auto)} not yet reviewed`, tone: 'info' })
