@@ -939,7 +939,7 @@ const SG_LABELS = {
   // Product categories (Kumar, 25 Nov 2026): 12 plan types, each "(ins)" or "(inv)"; a new record needs one
   // One Product field (Kumar, 25 Nov 2026): the categories are its headings, with product records under them
   await check(up.getByLabel('Product category').count().then((n) => n === 0), 'there is no separate product category field')
-  await check(up.getByLabel('Product', { exact: true }).locator('optgroup').evaluateAll((gs) => gs.map((g) => g.label)).then((t) => t.includes('Term life (ins)') && t.includes('Universal life incl. indexed (inv)') && t.includes('Health: hospital / Integrated Shield (ins)') && t.filter((x) => / \((ins|inv)\)$/.test(x)).length === 12), 'the product field has the 12 categories as headings, each marked (ins) or (inv)')
+  await check(up.getByLabel('Product', { exact: true }).locator('optgroup').evaluateAll((gs) => gs.map((g) => g.label)).then((t) => t.includes('Term life (ins)') && t.includes('Universal life incl. indexed (inv)') && t.includes('Health: hospital / Integrated Shield (ins)') && t.filter((x) => / \((ins|inv)\)$/.test(x)).length === 13 && t.includes('Premium financing (ins)')), 'the product field has the 13 categories (incl. Premium financing) as headings, each marked (ins) or (inv)')
   await check(up.getByLabel('Product', { exact: true }).locator('optgroup[label="Term life (ins)"] option').allTextContents().then((t) => t[0] === 'New product record: Term life (ins)'), 'under a category: first a new record of that category')
   await up.getByLabel('Effective from').fill('2026-01-01')
   await up.getByRole('button', { name: 'Upload' }).click()
@@ -1001,10 +1001,13 @@ const SG_LABELS = {
   await upf.getByLabel('File').setInputFiles(pdfFile('CIMB_Premium_Financing_rates.pdf'))
   await upf.getByLabel('Document type').selectOption('Product Financing')
   await upf.getByLabel('Insurer (optional)').fill('CIMB')
-  await check(upf.getByLabel('Product name (new product record)').count().then((n) => n === 0), 'a financing document makes no product record from its file name')
-  await check(upf.getByLabel('Product', { exact: true }).inputValue().then((v) => v === ''), 'a financing document starts at All products')
-  await check(upf.getByLabel('Product', { exact: true }).locator('optgroup[label="Universal life incl. indexed (inv)"] option').first().textContent().then((t) => t === 'All Universal life incl. indexed (inv) products'), 'a whole category can be chosen without a product')
-  await upf.getByLabel('Product', { exact: true }).selectOption({ label: 'All Universal life incl. indexed (inv) products' })
+  // (1x) A Product Financing document starts under Premium financing and is read into a new financing record
+  await check(upf.getByLabel('Product', { exact: true }).inputValue().then((v) => v === 'cat:Premium financing'), 'a financing document starts under Premium financing')
+  await check(seen(upf.getByLabel('Product name (new product record)')), 'and is read into a new Premium financing record')
+  await check(upf.getByLabel('Product', { exact: true }).locator('optgroup[label="Universal life incl. indexed (inv)"] option').first().textContent().then((t) => t === 'New product record: Universal life incl. indexed (inv)'), 'a whole category can be chosen without a product')
+  await upf.getByLabel('Product', { exact: true }).selectOption({ label: 'New product record: Universal life incl. indexed (inv)' })
+  await check(upf.getByLabel('Product name (new product record)').count().then((n) => n === 0), 'filed under a policy category, a financing document is not read into a record')
+  await check(seen(upf.getByText(/This financing document is filed with the policy record or category chosen and is not read/)), 'and the form says so')
   await upf.getByLabel('Document name').fill('CIMB Premium Financing rates')
   await upf.getByLabel('Effective from').fill('2026-01-01')
   await upf.getByRole('button', { name: 'Upload' }).click()
@@ -1263,6 +1266,46 @@ const SG_LABELS = {
     await upu.getByRole('button', { name: 'Upload' }).click()
     await check(seen(olivia.getByText(/The product is in search now/)), 'and is in search straight away')
     await check(q1(`select product_type, category, facts ? 'minRate' m from kb_products where name = 'Signature Indexed Universal Life Select (III)'`).then((r) => r[0]?.product_type === 'Universal life' && r[0].category === 'Investment' && r[0].m), 'saved as an investment product with its crediting rate')
+  }
+  // Premium financing (1x): the real CIMB factsheet and iFAST monthly cost-of-funds sheet are read into Premium
+  // financing records and saved; they are kept out of Compare products.
+  if (process.env.KB_REAL) {
+    for (const [file, name] of [['CIMB_Premium_Financing_Factsheet_Nov2026.pdf', 'CIMB Premium Financing'], ['iFAST_Global_Bank_Premium_Financing_COF_Nov2026.pdf', 'iFAST Global Bank Premium Financing']]) {
+      await olivia.goto(BASE + '/kb')
+      await olivia.getByRole('button', { name: 'Upload document' }).click()
+      const upn = olivia.getByRole('dialog', { name: 'Upload document' })
+      await upn.getByLabel('Document type').selectOption('Product Financing')
+      await upn.getByLabel('File').setInputFiles(process.env.KB_REAL + '/' + file)
+      await check(upn.getByLabel('Product name (new product record)').evaluate((el, want) => new Promise((ok) => { const t = Date.now(); const f = () => (el.value === want || Date.now() - t > 60000 ? ok(el.value === want) : setTimeout(f, 300)); f() }), name), `${name}: name read from the document`)
+      await check(upn.getByLabel('Insurer (optional)').inputValue().then((v) => v === (file.startsWith('CIMB') ? 'CIMB Bank' : 'iFAST Global Bank')), `${name}: the bank is read as the lender`)
+      if (file.startsWith('iFAST')) {
+        await check(upn.getByLabel('Valid until (optional)').inputValue().then((v) => v === '2026-11-30'), 'a monthly cost-of-funds sheet is valid until the end of its month')
+        await check(upn.getByLabel('Effective from').inputValue().then((v) => v === '2026-11-01'), 'and effective from the start of it')
+      } else await upn.getByLabel('Effective from').fill('2026-11-01')
+      await upn.getByRole('button', { name: 'Upload' }).click()
+      await check(seen(olivia.getByText(/It is saved as a Premium financing product record/)), `${name}: saved as a Premium financing record`)
+    }
+    await check(q1(`select product_type, category, currencies, jsonb_array_length(fin_rates) n, facts ? 'finTenor' t, facts ? 'finSpread' s, missing from kb_products where name = 'CIMB Premium Financing'`).then((r) => r[0]?.product_type === 'Premium financing' && r[0].category === 'Insurance' && r[0].currencies.join() === 'SGD,USD' && r[0].n === 24 && r[0].t && !r[0].s && !r[0].missing.length), 'CIMB: currencies, 24 cost-of-funds rates and its facts saved')
+    await check(q1(`select jsonb_array_length(fin_rates) n, facts ? 'finSpread' s, facts ? '_cof' c from kb_products where name = 'iFAST Global Bank Premium Financing'`).then((r) => r[0]?.n === 24 && r[0].s && r[0].c), 'iFAST: 16 cost-of-funds and 8 drawdown rates, the spread tiers, filed as the cost-of-funds sheet')
+    await check(q1(`select count(*)::int n from kb_checked_products where product_type = 'Premium financing'`).then((r) => r[0].n === 0), 'Premium financing is not offered in Compare products')
+    await olivia.getByRole('link', { name: 'Product records' }).click()
+    await olivia.waitForURL(/\/kb\/products$/)
+    await olivia.locator('tr', { hasText: 'Maple Term' }).first().waitFor()
+    await olivia.getByLabel('Plan type').selectOption('Premium financing')
+    await check(seen(olivia.locator('tr', { hasText: 'iFAST Global Bank Premium Financing' })).then(() => olivia.locator('table[aria-label="Product records"] tbody tr').count()).then((n) => n === 2), 'the category filter lists the 2 financing records')
+    await check(seen(olivia.locator('tr', { hasText: 'CIMB Premium Financing' }).getByText('Saved · auto-read, not yet reviewed')), 'listed as saved, not as unsearchable')
+    await olivia.locator('tr', { hasText: 'iFAST Global Bank Premium Financing' }).getByRole('link', { name: /^Open/ }).click()
+    await olivia.waitForURL(/\/kb\/products\/[0-9a-f-]{36}$/)
+    await check(seen(olivia.getByText(/Premium financing is a loan from a bank, not an insurance policy/)), 'a financing record says it is a loan, not advice')
+    await check(olivia.getByLabel('Entry age to').count().then((n) => n === 0), 'and has no entry ages or sum assured')
+    await check(olivia.getByLabel('Financing rate table (CSV)').inputValue().then((v) => v.includes('SGD,1,1.77,2026-11-01,cof') && v.includes('EUR,0,3.2,2026-11-01,drawdown')), 'the rate table shows the cost-of-funds and drawdown rates')
+    await check(olivia.getByLabel('Spread', { exact: true }).inputValue().then((v) => v.includes('IGB COF + 1.15%') && v.includes('IGB COF + 0.95%')), 'the spread tiers are a fact')
+    await olivia.screenshot({ path: SHOTS + '/31-premium-financing-record.png', fullPage: true })
+    // Edit and save: a new version, rates kept
+    await olivia.getByLabel('Financing tenors', { exact: true }).fill('1 or 3 months')
+    await olivia.getByRole('button', { name: 'Save', exact: true }).click()
+    await check(seen(olivia.getByText('Saved as a new version.')), 'a financing record saves as a new version')
+    await check(q1(`select version, jsonb_array_length(fin_rates) n, facts -> 'finTenor' ->> 'v' t, auto_read from kb_products where name = 'iFAST Global Bank Premium Financing'`).then((r) => r[0]?.version === 2 && r[0].n === 24 && r[0].t === '1 or 3 months' && !r[0].auto_read), 'saved: version 2, the edit and the rates kept')
   }
   if (process.env.KB_REAL && !process.env.NO_AI) {
     await olivia.goto(BASE + '/kb')

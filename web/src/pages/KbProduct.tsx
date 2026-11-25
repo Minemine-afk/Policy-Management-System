@@ -8,7 +8,7 @@ import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, fmtDateTime, says } from '../lib/options'
 import { CURRENCIES, RESIDENCIES, STANDARD_INSURERS } from '../lib/formOptions'
 import {
-  FACT_FIELDS, RATES_HEADER, blankRecord, blocking, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
+  FACT_FIELDS, RATES_HEADER, finOutOfDate, blankRecord, blocking, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
   whyNotSearchable, type Fact, type HistoryRow, type KbDoc, type KbProductRow, type ProductRecord, type Rate,
 } from '../lib/kbAdmin'
 import { AmountInput, ReasonDialog } from '../components/ui'
@@ -18,7 +18,8 @@ import { loadProducts } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
 import { aiAskCount, aiKeysOf, fillWithAi, type Reading } from '../lib/kbAuto'
 import { AI_MODELS } from '../lib/aiConfig'
-import { GROUPS, groupLabel, groupOf, planLabel, plansIn } from '../lib/families'
+import { FINANCING_NOTE, GROUPS, groupLabel, groupOf, isFinancing, planLabel, plansIn } from '../lib/families'
+import { FIN_CURRENCIES, FIN_RATES_HEADER, finRatesCsv, parseFinRates, readFinancing } from '../lib/kbFinancing'
 import { rowApplies } from '../lib/kb'
 
 const HOW: Record<string, string> = { edit: 'saved', read: 'read from an upload', migrated: 'put live when checks were removed', checked: 'checked' }
@@ -37,6 +38,9 @@ export default function KbProduct() {
   const [saved, setSaved] = useState('')            // the record as last saved, to spot unsaved changes
   const [ratesText, setRatesText] = useState('')
   const [ratesTouched, setRatesTouched] = useState(false)
+  // Premium financing: the cost-of-funds and drawdown rates, as CSV.
+  const [finText, setFinText] = useState('')
+  const [finTouched, setFinTouched] = useState(false)
   const [ready, setReady] = useState(isNew)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
@@ -51,7 +55,8 @@ export default function KbProduct() {
   const [lastRead, setLastRead] = useState<Reading | null>(null)   // the last Product Summary read, for the AI helper
   const [aiState, setAiState] = useState('')
   useEffect(() => () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }, [])
-  const [upload, setUpload] = useState<'Product Summary' | 'Rate sheet' | null>(null)
+  const [upload, setUpload] = useState<'Product Summary' | 'Rate sheet' | 'Product Financing' | null>(null)
+  const [uploadKey, setUploadKey] = useState<'_ps' | '_cof'>('_ps')
   const [products, setProducts] = useState<KbProductRow[]>([])
 
   const load = useCallback(async () => {
@@ -71,6 +76,7 @@ export default function KbProduct() {
       const base = liveRecord(p)
       setRec({ ...base, facts: base.facts ?? {} }); setSaved(JSON.stringify({ ...base, rates: undefined }))
       setRatesText(ratesToCsv(lr)); setRatesTouched(false)
+      setFinText(finRatesCsv(p.fin_rates ?? [])); setFinTouched(false)
       setFromDoc(new Set(p.auto_read ? (p.auto_fields ?? []) : []))
       setAiSet(new Set(p.auto_read ? aiKeysOf(p.auto_fields) : []))
     }
@@ -82,7 +88,9 @@ export default function KbProduct() {
   const setFact = (key: string, patch: Partial<Fact>) => setRec((s) => ({ ...s, facts: { ...s.facts, [key]: { ...s.facts[key], ...patch } } }))
   const toggle = (k: 'currencies' | 'residency', v: string, on: boolean) => set(k, on ? [...rec[k], v] : rec[k].filter((x) => x !== v))
   const parsed = useMemo(() => parseRates(ratesText), [ratesText])
-  const dirty = JSON.stringify({ ...rec, rates: undefined }) !== saved || ratesTouched
+  const finParsed = useMemo(() => parseFinRates(finText), [finText])
+  const fin = isFinancing(rec.product_type)
+  const dirty = JSON.stringify({ ...rec, rates: undefined }) !== saved || ratesTouched || finTouched
   const insurers = useMemo(() => [...new Set([...docs.map((d) => d.insurer), ...STANDARD_INSURERS])], [docs])
   // Documents to pick from: this insurer's current versions, plus any the record already names.
   const named = new Set(Object.values(rec.facts).map((f) => f?.doc).filter(Boolean))
@@ -92,7 +100,7 @@ export default function KbProduct() {
 
   /** Reads a Product Summary or rate sheet (an uploaded document, or the file just uploaded) into the draft.
    *  Nothing is saved until Save: check what was filled in if you wish, then save. */
-  async function fillFrom(docId: string, kind: 'summary' | 'rates', file?: File, all = docs) {
+  async function fillFrom(docId: string, kind: 'summary' | 'rates' | 'financing', file?: File, all = docs, slot?: '_ps' | '_cof') {
     const d = all.find((x) => x.id === docId)
     const name = file?.name ?? d?.file_name ?? ''
     setError(''); setMsg('')
@@ -108,7 +116,30 @@ export default function KbProduct() {
         data = await dl.data.arrayBuffer()
       }
       const doc = await readFile(data, name, (done, total, ocr) => setReading(`Reading ${name}: page ${plain(Math.min(total, Math.floor(done) + 1))} of ${plain(total)}${ocr ? ' (scanned, reading the picture)' : ''}…`))
-      if (kind === 'summary') {
+      if (kind === 'financing') {
+        // A bank's financing document: the record's fields, facts and cost-of-funds rates. The slot clicked (or the
+        // reader's own view: factsheet or monthly rate sheet) says which source it is.
+        const r = readFinancing(doc)
+        const key = slot ?? r.source
+        const keys = new Set<string>()
+        setRec((s) => {
+          const next: ProductRecord = { ...s, product_type: r.planType, category: groupOf(r.planType), facts: { ...s.facts, [key]: { doc: docId } } }
+          if (r.record.insurer && !s.insurer.trim()) { next.insurer = r.record.insurer; keys.add('insurer') }
+          if (r.record.name && !s.name.trim()) { next.name = r.record.name; keys.add('name') }
+          if (r.record.currencies?.length) { next.currencies = r.record.currencies; keys.add('currencies') }
+          for (const [k, f] of Object.entries(r.facts)) { next.facts[k] = { v: f.v, doc: docId, page: doc.kind === 'pdf' ? f.page : undefined }; keys.add(k) }
+          if (s.product_type !== r.planType) keys.add('product_type')
+          return next
+        })
+        if (r.finRates.length) { setFinText(finRatesCsv(r.finRates)); setFinTouched(true); keys.add('_fin_rates') }
+        setFromDoc((x) => new Set([...x, ...keys]))
+        setAiSet((x) => new Set([...x].filter((k) => !keys.has(k))))
+        setLastRead({ kind: 'financing', financing: r, summary: r, doc })
+        setReadNotes(r.notes)
+        setMsg(r.filled.length > 1
+          ? `Filled in from ${name}: ${r.filled.join(', ')}. Each is marked "From document". Fill in anything missed, then save.`
+          : `Couldn't find the details in ${name}. Fill them in by hand.`)
+      } else if (kind === 'summary') {
         const r = readSummary(doc)
         const keys = new Set<string>()
         setRec((s) => {
@@ -157,7 +188,7 @@ export default function KbProduct() {
     try {
       const r = await fillWithAi(lastRead, setAiState)
       setLastRead(r)
-      const docId = rec.facts._ps?.doc
+      const docId = r.financing ? (rec.facts[r.financing.source]?.doc ?? rec.facts._ps?.doc ?? rec.facts._cof?.doc) : rec.facts._ps?.doc
       const put = new Set<string>()
       setRec((s) => {
         const next: ProductRecord = { ...s, facts: { ...s.facts } }
@@ -204,28 +235,29 @@ export default function KbProduct() {
     const d = await loadDocs()
     setDocs(d)
     if (!c) { setMsg(m); return }
-    await fillFrom(c.id, c.doc_type === 'Rate sheet' ? 'rates' : 'summary', c.file, d)
+    await fillFrom(c.id, c.doc_type === 'Rate sheet' ? 'rates' : c.doc_type === 'Product Financing' ? 'financing' : 'summary', c.file, d, c.doc_type === 'Product Financing' ? uploadKey : undefined)
   }
 
   async function save() {
     setError(''); setMsg('')
-    if (parsed.error) { setError(parsed.error); return }
+    if (parsed.error && !fin) { setError(parsed.error); return }
+    if (fin && finParsed.error) { setError(finParsed.error); return }
     if (!rec.product_type) { setError('Choose the product category (plan type)'); return }
     // A fact typed without a source names the Product Summary.
     const facts: Record<string, Fact> = {}
     for (const [k, f] of Object.entries(rec.facts)) {
       if (k.startsWith('_')) { if (f?.doc) facts[k] = { doc: f.doc }; continue }
       if (!f?.v?.trim()) continue
-      facts[k] = { v: f.v.trim(), doc: f.doc || ps, page: f.page ? Number(f.page) : undefined }
+      facts[k] = { v: f.v.trim(), doc: f.doc || ps || rec.facts._cof?.doc, page: f.page ? Number(f.page) : undefined }
     }
-    const keepRates = ratesTouched ? parsed.rates : undefined
-    const p = { ...rec, facts, ...(keepRates ? { rates: keepRates } : {}) }
+    const keepRates = ratesTouched && !fin ? parsed.rates : undefined
+    const p = { ...rec, facts, ...(keepRates ? { rates: keepRates } : {}), ...(fin ? { fin_rates: finTouched ? finParsed.rates : rec.fin_rates ?? finParsed.rates } : { fin_rates: undefined }) }
     setBusy(true)
     const { data, error } = await supabase.rpc('kb_save_product', { p_id: id ?? null, p })
     setBusy(false)
     if (error) { setError(says(error.message)); return }
     if (isNew) { nav(`/kb/products/${data}`, { replace: true }); return }
-    setMsg(row?.status === 'withdrawn' ? 'Saved. It stays withdrawn until you put it back.' : 'Saved. Compare products uses this version now.')
+    setMsg(row?.status === 'withdrawn' ? 'Saved. It stays withdrawn until you put it back.' : fin ? 'Saved as a new version.' : 'Saved. Compare products uses this version now.')
     setFromDoc(new Set())
     load()
   }
@@ -242,7 +274,9 @@ export default function KbProduct() {
   if (!ready) return <div className="empty">Loading…</div>
   if (!isNew && !row) return <main className="page"><div className="card">Product record not found. <Link to="/kb/products">Back to product records</Link></div></main>
 
-  const st = row ? productState(row, usable.has(row.id)) : { text: 'New record', tone: 'info' as const }
+  const st = row ? productState(row, usable.has(row.id), docs) : { text: 'New record', tone: 'info' as const }
+  // Financing rates go out of date with their document (a monthly cost-of-funds sheet's valid-until date).
+  const finStale = fin && row ? finOutOfDate({ facts: rec.facts }, docs) : false
   const why = row ? whyNotSearchable(row, usable.has(row.id)) : ''
   const title = rec.name || 'New product record'
   // The facts this plan type has (and any that hold a value); every fact while no plan type is chosen.
@@ -265,8 +299,9 @@ export default function KbProduct() {
         <span className={`pill ${st.tone}`}>{st.text}</span>
       </div>
       {why && row?.status !== 'withdrawn' && <div className="notice warn" role="status">{why}.</div>}
-      {row?.auto_read && <div className="notice warn" role="status"><strong>Auto-read, not yet reviewed.</strong> The values marked "From document" were read by the system
-        and are shown in Compare products as they are. Reviewing them is optional: change anything wrong and save, or mark it as reviewed.{row.read_note ? ` ${row.read_note}` : ''}</div>}
+      {fin && <div className="notice" role="note"><strong>Premium financing.</strong> {FINANCING_NOTE} This record is kept in the Knowledge Bank and is not offered in Compare products for now.</div>}
+      {finStale && <div className="notice warn" role="status"><strong>Rates out of date.</strong> A source document of this record has passed its valid-until date. Upload the bank's latest sheet as a new version of it.</div>}
+      {row?.auto_read && <div className="notice warn" role="status"><strong>Auto-read, not yet reviewed.</strong> The values marked "From document" were read by the system{fin ? '' : ' and are shown in Compare products as they are'}. Reviewing them is optional: change anything wrong and save, or mark it as reviewed.{row.read_note ? ` ${row.read_note}` : ''}</div>}
       {row?.missing?.includes('entry_age') && <div className="notice warn" role="status"><strong>Entry ages not stated in the document.</strong> The product is
         searchable, but the age filter skips it and Compare products says the ages are not stated. The {plain(18)} and {plain(65)} in the entry age boxes are only
         a starting point: type the real entry ages before you save, because saving counts them as the product's ages.</div>}
@@ -289,11 +324,27 @@ export default function KbProduct() {
           <section className="card" aria-labelledby="kb-src">
             <h3 id="kb-src" className="eyebrow">Source documents</h3>
             <p className="small muted" style={{ margin: 0 }}>
-              Upload the insurer's Product Summary and rate sheet (PDF or Excel), or pick ones already in the Knowledge Bank, and the details below are
-              read from them for you. The reader can miss or misread things, so check each value against the document before you save.
+              {fin ? "Upload the bank's financing factsheet and its monthly cost-of-funds sheet (PDF or Excel), or pick ones already in the Knowledge Bank, and the details below are read from them for you."
+                : "Upload the insurer's Product Summary and rate sheet (PDF or Excel), or pick ones already in the Knowledge Bank, and the details below are read from them for you."} The reader can miss or misread things, so check each value against the document before you save.
             </p>
             <div className="form-grid">
-              {(['Product Summary', 'Rate sheet'] as const).map((t) => {
+              {fin && ([['Financing factsheet', '_ps'], ['Cost-of-funds sheet (monthly)', '_cof']] as const).map(([t, key]) => {
+                const cur = docs.find((d) => d.id === rec.facts[key]?.doc)
+                return (
+                  <div key={key} className="field">
+                    <label htmlFor={`kb-${key}`}>{t}</label>
+                    {docSelect(rec.facts[key]?.doc, (v) => setFact(key, { doc: v }), t, 'None', `kb-${key}`)}
+                    <div className="row small" style={{ gap: 8 }}>
+                      <button type="button" className="btn small" disabled={!!reading || !cur || !readableName(cur.file_name)}
+                        title={cur && !readableName(cur.file_name) ? 'Only PDF, Excel or CSV files can be read' : undefined}
+                        onClick={() => fillFrom(cur!.id, 'financing', undefined, docs, key)}>Fill in from it</button>
+                      <button type="button" className="btn small" disabled={!!reading}
+                        onClick={async () => { if (!products.length) setProducts(await loadProducts()); setUploadKey(key); setUpload('Product Financing') }}>Upload a new Product Financing document</button>
+                    </div>
+                  </div>
+                )
+              })}
+              {!fin && (['Product Summary', 'Rate sheet'] as const).map((t) => {
                 const key = t === 'Rate sheet' ? '_rs' : '_ps'
                 const cur = docs.find((d) => d.id === rec.facts[key]?.doc)
                 return (
@@ -311,13 +362,13 @@ export default function KbProduct() {
                 )
               })}
             </div>
-            <p className="small muted" style={{ margin: 0 }}>When a document it names passes its valid-until date, the product drops out of Compare products. Uploads are listed on the <Link to="/kb">Documents</Link> tab.</p>
+            <p className="small muted" style={{ margin: 0 }}>{fin ? "When a document it names passes its valid-until date (a monthly cost-of-funds sheet's is the end of its month), the rates show as out of date." : 'When a document it names passes its valid-until date, the product drops out of Compare products.'} Uploads are listed on the <Link to="/kb">Documents</Link> tab.</p>
           </section>
 
           <section className="card" aria-labelledby="kb-info">
             <h3 id="kb-info" className="eyebrow">Product information and eligibility</h3>
             <div className="form-grid">
-              <label className="field">Insurer
+              <label className="field">{fin ? 'Lender (bank)' : 'Insurer'}
                 <input type="text" list="kb-ins" value={rec.insurer} onChange={(e) => set('insurer', e.target.value)} />
                 <datalist id="kb-ins">{insurers.map((x) => <option key={x} value={x} />)}</datalist>
               </label>
@@ -332,16 +383,18 @@ export default function KbProduct() {
               <label className="field">Onshore / offshore
                 <select value={rec.jurisdiction} onChange={(e) => set('jurisdiction', e.target.value)}><option>Onshore</option><option>Offshore</option></select>
               </label>
+              {!fin && <>
               <label className="field">Entry age from (next birthday){aiTag('entry_age')}<input type="number" min={0} max={100} value={rec.entry_age_min} onChange={(e) => set('entry_age_min', e.target.value)} /></label>
               <label className="field">Entry age to{aiTag('entry_age')}<input type="number" min={0} max={100} value={rec.entry_age_max} onChange={(e) => set('entry_age_max', e.target.value)} /></label>
               <label className="field">Minimum sum assured (optional){aiTag('sa_min')}<AmountInput value={rec.sa_min ?? ''} onValue={(v) => set('sa_min', (v || null) as ProductRecord['sa_min'])} /></label>
               <label className="field">Maximum sum assured (optional){aiTag('sa_max')}<AmountInput value={rec.sa_max ?? ''} onValue={(v) => set('sa_max', (v || null) as ProductRecord['sa_max'])} /></label>
+              </>}
             </div>
-            <fieldset className="field"><legend>Policy currencies{aiTag('currencies')}</legend>
-              <div className="row" style={{ gap: '6px 18px' }}>{CURRENCIES.map((c) => (
+            <fieldset className="field"><legend>{fin ? 'Loan currencies' : 'Policy currencies'}{aiTag('currencies')}{fin && fromDoc.has('currencies') && <span className="pill info tag">From document</span>}</legend>
+              <div className="row" style={{ gap: '6px 18px' }}>{(fin ? [...new Set([...FIN_CURRENCIES, ...rec.currencies])] : CURRENCIES).map((c) => (
                 <label key={c} className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.currencies.includes(c)} onChange={(e) => toggle('currencies', c, e.target.checked)} /> {c}</label>))}</div>
             </fieldset>
-            <fieldset className="field"><legend>Who can apply{aiTag('residency')}</legend>
+            {!fin && <><fieldset className="field"><legend>Who can apply{aiTag('residency')}</legend>
               <div className="row" style={{ gap: '6px 18px' }}>{RESIDENCIES.map((c) => (
                 <label key={c} className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.residency.includes(c)} onChange={(e) => toggle('residency', c, e.target.checked)} /> {c}</label>))}</div>
             </fieldset>
@@ -350,7 +403,8 @@ export default function KbProduct() {
               <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.has_tpd} onChange={(e) => set('has_tpd', e.target.checked)} /> Has TPD cover</label>
               <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.has_ci} onChange={(e) => set('has_ci', e.target.checked)} /> Has critical illness cover (built in or rider)</label>
             </div>
-            <p className="small muted" style={{ margin: 0 }}>These fields are taken from the Product Summary named below. Compare products uses them to decide which plans fit a client.</p>
+            </>}
+            <p className="small muted" style={{ margin: 0 }}>{fin ? 'A loan has no entry ages, sum assured or "who can apply": those are left out.' : 'These fields are taken from the Product Summary named below. Compare products uses them to decide which plans fit a client.'}</p>
           </section>
 
           <section className="card" aria-labelledby="kb-facts">
@@ -380,7 +434,22 @@ export default function KbProduct() {
             </div>
           </section>
 
-          <section className="card" aria-labelledby="kb-rates">
+          {fin && (
+            <section className="card" aria-labelledby="kb-fin-rates">
+              <h3 id="kb-fin-rates" className="eyebrow">Cost-of-funds and drawdown rates{fromDoc.has('_fin_rates') && <span className="pill info tag">From document</span>}{finStale && <span className="pill bad tag">Out of date</span>}</h3>
+              <p className="small muted" style={{ margin: 0 }}>
+                The bank's cost of funds (COF) by currency and tenor, in % a year, with the date it is for; the loan rate is the COF plus the spread above.
+                Kind <code>drawdown</code> is an all-in rate with no fixed tenor (tenor 0). One line each, as <code>{FIN_RATES_HEADER}</code>. You can paste from Excel.
+              </p>
+              <textarea aria-label="Financing rate table (CSV)" rows={8} value={finText} spellCheck={false} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}
+                onChange={(e) => { setFinText(e.target.value); setFinTouched(true) }} />
+              <div className="row small" style={{ gap: 12 }}>
+                {finParsed.error ? <span className="error">{finParsed.error}</span>
+                  : <span className="muted">{fmtNum(finParsed.rates.length)} rate{finParsed.rates.length === 1 ? '' : 's'}{finTouched ? ' (changed, saved when you save)' : ''}</span>}
+              </div>
+            </section>
+          )}
+          {!fin && <section className="card" aria-labelledby="kb-rates">
             <h3 id="kb-rates" className="eyebrow">Premium rates (from the rate sheet){fromDoc.has('_rates') && <span className="pill info tag">From document</span>}</h3>
             <p className="small muted" style={{ margin: 0 }}>
               Annual premium per 1,000 of sum assured, paying to age 65, by age next birthday, gender and smoker status; ci_rate is the extra for a
@@ -395,16 +464,16 @@ export default function KbProduct() {
               {parsed.error ? <span className="error">{parsed.error}</span>
                 : <span className="muted">{fmtNum(parsed.rates.length)} rate{parsed.rates.length === 1 ? '' : 's'}{ratesTouched ? ' (changed, saved when you save)' : liveRates.length ? ' (in use)' : ''}</span>}
             </div>
-          </section>
+          </section>}
         </div>
 
         <aside className="kb-side">
           <section className="card" aria-label="Save">
             <h3 className="eyebrow">Save</h3>
             <button className="btn primary" onClick={save} disabled={busy || (!dirty && !isNew)}>{busy ? 'Saving…' : 'Save'}</button>
-            <span className="small muted">{row?.status === 'withdrawn' ? 'Saved changes apply when the product is put back.' : 'Saving puts the record in Compare products straight away. No check is needed.'}</span>
+            <span className="small muted">{row?.status === 'withdrawn' ? 'Saved changes apply when the product is put back.' : fin ? 'Saving keeps the record as a new version (earlier versions stay in the history). Premium financing is not offered in Compare products for now.' : 'Saving puts the record in Compare products straight away. No check is needed.'}</span>
             {row?.auto_read && <button className="btn" onClick={() => call('kb_mark_reviewed', { p_id: row.id }, 'Marked as reviewed. The "Auto-read, not yet reviewed" tag is gone.')} disabled={busy || dirty}>Mark as reviewed (no changes)</button>}
-            {row?.status === 'verified' && <button className="linkbtn danger" onClick={() => setDialog('withdraw')} disabled={busy}>Withdraw from Compare products</button>}
+            {row?.status === 'verified' && <button className="linkbtn danger" onClick={() => setDialog('withdraw')} disabled={busy}>{fin ? 'Withdraw this record' : 'Withdraw from Compare products'}</button>}
             {row && row.status !== 'verified' && !blocking(row.missing).length && <button className="btn" onClick={() => call('kb_restore_product', { p_id: row.id }, 'Put back. It is in Compare products again.')} disabled={busy}>Put back in Compare products</button>}
             {row && <button className="linkbtn danger" onClick={() => setDialog('delete')} disabled={busy}>Delete this product record</button>}
           </section>

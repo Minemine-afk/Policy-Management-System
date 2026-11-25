@@ -991,7 +991,7 @@ declare d uuid; p uuid; b uuid; tr uuid; x uuid; old uuid; pf uuid;
 begin
   if exists (select 1 from kb_products where product_type not in (select k ->> 'key' from jsonb_array_elements(kb_plan_types()) k)) then raise exception 'old plan type left'; end if;
   if exists (select 1 from kb_products where category <> kb_plan_group(product_type)) then raise exception 'category does not follow the plan type'; end if;
-  if jsonb_array_length(kb_plan_types()) <> 12 then raise exception 'not 12 plan types'; end if;
+  if jsonb_array_length(kb_plan_types()) <> 13 then raise exception 'not 13 plan types'; end if;
   -- an upload read as universal life becomes a searchable Investment product
   d := kb_add_document('{"insurer":"Cedar Life","title":"Cedar IUL PS","doc_type":"Product Summary","effective_from":"2026-01-01","storage_path":"f10/iul.pdf"}');
   p := kb_auto_product(d, '{"insurer":"Cedar Life","name":"Cedar Indexed UL","product_type":"Universal life","record":{"currencies":["USD"]},"facts":{"minRate":{"v":"The minimum guaranteed crediting rate is 2.00% per annum.","page":3}},"found":["currencies","minRate"]}');
@@ -1039,8 +1039,59 @@ begin
   perform kb_update_document(v, '{"title":"CIMB financing rates","insurer":"CIMB","doc_type":"Product Financing","plan_type":"Term","effective_from":"2026-02-01"}');
   if (select plan_type from kb_documents where id = v) is distinct from 'Term life' then raise exception 'category not changed on edit'; end if;
   perform kb_update_document(v, '{"title":"CIMB financing rates","insurer":"CIMB","doc_type":"Product Financing","plan_type":"Lottery","effective_from":"2026-02-01"}');
-  if (select plan_type from kb_documents where id = v) is not null then raise exception 'an unknown category was kept'; end if;
+  -- an unknown category is not kept: a Product Financing document then goes under Premium financing (1x)
+  if (select plan_type from kb_documents where id = v) is distinct from 'Premium financing' then raise exception 'an unknown category was kept'; end if;
   raise notice 'ok: documents for a whole product category';
 end $$;
+
+-- Premium financing records: read from a Product Financing document, saved, versions, kept out of search (1x)
+do $$
+declare d uuid; d2 uuid; p uuid; ul uuid := (select id from kb_products where name = 'Cedar Indexed UL'); r jsonb; nv int;
+begin
+  if kb_plan_group('Premium financing') <> 'Insurance' or kb_plan_key('Premium financing') is null then raise exception 'financing category wrong'; end if;
+  d := kb_add_document('{"title":"CIMB Premium Financing Factsheet","doc_type":"Product Financing","effective_from":"2026-11-01","storage_path":"f12/c.pdf"}');
+  if (select plan_type from kb_documents where id = d) <> 'Premium financing' then raise exception 'financing document not filed under Premium financing'; end if;
+  p := kb_auto_product(d, '{"insurer":"CIMB Bank","name":"CIMB Premium Financing","product_type":"Term life","source":"_ps",
+        "record":{"currencies":["SGD","USD","CHF"],"entry_age_min":18,"entry_age_max":60},
+        "facts":{"finTenor":{"v":"1 or 3 months with revolving options","page":1},"finQuantum":{"v":"Up to 90% on Day 1 Cash Value","page":1}},
+        "fin_rates":[{"currency":"SGD","tenor_months":1,"rate":1.44,"as_of":"2026-05-29","kind":"cof"},{"currency":"usd","tenor_months":3,"rate":"4.00","as_of":"2026-05-29"}],
+        "found":["currencies","finTenor","finQuantum"]}');
+  select * into r from (select to_jsonb(x) from kb_products x where id = p) t;
+  if r ->> 'product_type' <> 'Premium financing' or r ->> 'category' <> 'Insurance' then raise exception 'financing record type wrong: %', r ->> 'product_type'; end if;
+  if r -> 'currencies' <> '["SGD","USD","CHF"]' then raise exception 'loan currencies wrong: %', r -> 'currencies'; end if;
+  if (r ->> 'entry_age_min')::int <> 0 or (r ->> 'entry_age_max')::int <> 100 or cardinality(array(select jsonb_array_elements_text(r -> 'missing'))) <> 0 then raise exception 'financing ages or missing wrong: %', r -> 'missing'; end if;
+  if jsonb_array_length(r -> 'fin_rates') <> 2 or r -> 'fin_rates' -> 1 ->> 'currency' <> 'USD' or (r -> 'fin_rates' -> 1 ->> 'rate')::numeric <> 4 or r -> 'fin_rates' -> 1 ->> 'kind' <> 'cof' then raise exception 'financing rates wrong: %', r -> 'fin_rates'; end if;
+  if r -> 'facts' -> '_ps' ->> 'doc' <> d::text or r -> 'facts' -> 'finTenor' ->> 'v' <> '1 or 3 months with revolving options' then raise exception 'financing facts wrong'; end if;
+  if (select product_id from kb_documents where id = d) <> p then raise exception 'financing document not linked'; end if;
+  -- kept out of Compare products, though nothing is missing
+  if not kb_product_usable(p) then raise exception 'financing record not live'; end if;
+  if exists (select 1 from kb_checked_products where id = p) then raise exception 'financing record offered in Compare products'; end if;
+  -- a monthly cost-of-funds sheet goes on the same record as its rate sheet (_cof), and replaces the rates
+  d2 := kb_add_document('{"title":"CIMB COF November","doc_type":"Product Financing","insurer":"CIMB Bank","effective_from":"2026-11-01","valid_until":"2026-11-30","storage_path":"f12/m.pdf"}');
+  perform kb_auto_product(d2, jsonb_build_object('product_id', p, 'insurer', 'CIMB Bank', 'name', 'CIMB Premium Financing', 'source', '_cof', 'record', '{}'::jsonb,
+        'fin_rates', '[{"currency":"SGD","tenor_months":1,"rate":1.77,"as_of":"2026-11-01"},{"currency":"SGD","tenor_months":0,"rate":3.75,"as_of":"2026-11-01","kind":"drawdown"}]'::jsonb, 'found', '[]'::jsonb));
+  select to_jsonb(x) into r from kb_products x where id = p;
+  if r -> 'facts' -> '_cof' ->> 'doc' <> d2::text or r -> 'facts' -> '_ps' ->> 'doc' <> d::text then raise exception 'cof sheet not named: %', r -> 'facts'; end if;
+  if jsonb_array_length(r -> 'fin_rates') <> 2 or r -> 'fin_rates' -> 1 ->> 'kind' <> 'drawdown' then raise exception 'cof sheet rates not taken: %', r -> 'fin_rates'; end if;
+  -- saved by hand: no entry ages or "who can apply" needed; rates and facts kept; the history has the rates
+  nv := (select version from kb_products where id = p);
+  perform kb_save_product(p, kb_record(p) || '{"residency":[],"entry_age_min":"","entry_age_max":""}'::jsonb);
+  if (select version from kb_products where id = p) <> nv + 1 then raise exception 'financing save made no new version'; end if;
+  if (select jsonb_array_length(fin_rates) from kb_products where id = p) <> 2 then raise exception 'save lost the financing rates'; end if;
+  if (select jsonb_array_length(record -> 'fin_rates') from kb_product_history where product_id = p order by version desc limit 1) <> 2 then raise exception 'history lacks the rates'; end if;
+  perform kb_save_product(p, kb_record(p) || '{"fin_rates":[{"currency":"SGD","tenor_months":3,"rate":1.8}]}'::jsonb);
+  if (select fin_rates -> 0 ->> 'tenor_months' from kb_products where id = p) <> '3' then raise exception 'rates not changed on save'; end if;
+  -- a financing document never turns a policy's record into a loan
+  begin
+    perform kb_auto_product(d2, jsonb_build_object('product_id', ul, 'record', '{}'::jsonb, 'found', '[]'::jsonb));
+    raise exception 'financing read into a UL record';
+  exception when others then
+    if sqlerrm not like 'A Product Financing document can only be read into a Premium financing%' then raise; end if;
+  end;
+  if (select product_type from kb_products where id = ul) <> 'Universal life' then raise exception 'UL record changed'; end if;
+  raise notice 'ok: premium financing records';
+end $$;
+select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"CIMB Bank","name":"Bad loan","product_type":"Premium financing","jurisdiction":"Onshore","currencies":["SGD"],"fin_rates":[{"currency":"SGD","tenor_months":1,"rate":"x"}]}')$$, 'Check the financing rates');
+select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"CIMB Bank","name":"Bad loan","product_type":"Premium financing","jurisdiction":"Onshore","currencies":[]}')$$, 'Choose at least one loan currency');
 
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;

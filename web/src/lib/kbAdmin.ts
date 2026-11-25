@@ -4,7 +4,8 @@
 import { supabase } from './supabase'
 import { FACT_ROWS } from './kb'
 import { fmtNum, plain } from './num.ts'
-import { groupOf, planKey } from './families.ts'
+import { groupOf, isFinancing, planKey } from './families.ts'
+import type { FinRate } from './kbFinancing.ts'
 
 export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Training material', 'Product Financing',
   'Circulars', 'Campaign', 'Regulatory', 'Others']
@@ -44,6 +45,8 @@ export interface ProductRecord {
   entry_age_min: number | string; entry_age_max: number | string; residency: string[]
   sa_min: number | string | null; sa_max: number | string | null; has_tpd: boolean; has_ci: boolean
   facts: Record<string, Fact>; rates?: Rate[]
+  /** Premium financing: cost-of-funds and drawdown rates (1x-upgrade.sql). */
+  fin_rates?: FinRate[]
 }
 export interface KbProductRow extends ProductRecord {
   id: string; status: 'draft' | 'check' | 'verified' | 'withdrawn'; version: number; is_sample: boolean
@@ -62,7 +65,7 @@ export const missingText = (m: string[]) => m.map((x) => MISSING_LABEL[x] ?? x).
 export const blocking = (m: string[] | null | undefined) => (m ?? []).filter((x) => x !== 'entry_age')
 /** Why a product is not in Compare products (empty = it is). */
 export function whyNotSearchable(p: KbProductRow, usable: boolean): string {
-  if (usable) return ''
+  if (usable || isFinancing(p.product_type)) return ''
   if (p.status === 'withdrawn') return 'Withdrawn'
   const m = blocking(p.missing)
   if (m.length) return `Not searchable: the ${missingText(m)} ${m.length > 1 ? 'were' : 'was'} not found in the documents. Open the record and fill ${m.length > 1 ? 'them' : 'it'} in`
@@ -84,6 +87,7 @@ export const liveRecord = (p: KbProductRow): ProductRecord => ({
   entry_age_min: p.entry_age_min, entry_age_max: p.entry_age_max, residency: p.residency,
   sa_min: p.sa_min == null ? null : Number(p.sa_min), sa_max: p.sa_max == null ? null : Number(p.sa_max),
   has_tpd: p.has_tpd, has_ci: p.has_ci, facts: p.facts ?? {},
+  ...(isFinancing(p.product_type) ? { fin_rates: p.fin_rates ?? [] } : {}),
 })
 
 export const today = () => new Date().toISOString().slice(0, 10)
@@ -99,13 +103,23 @@ export function docState(d: KbDoc): { text: string; tone: 'ok' | 'warn' | 'bad' 
 }
 
 /** Where a product record stands. */
-export function productState(p: KbProductRow, usable: boolean): { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info' | 'purple' } {
+export function productState(p: KbProductRow, usable: boolean, docs?: KbDoc[]): { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info' | 'purple' } {
   if (p.status === 'withdrawn') return { text: 'Withdrawn', tone: 'grey' }
+  // Premium financing records are kept, not offered in Compare products (Kumar, 25 Nov 2026).
+  if (isFinancing(p.product_type)) {
+    if (p.status === 'draft') return { text: 'Not saved yet', tone: 'info' }
+    if (docs && finOutOfDate(p, docs)) return { text: 'Saved · rates out of date', tone: 'bad' }
+    return p.auto_read ? { text: 'Saved · auto-read, not yet reviewed', tone: 'warn' } : { text: 'Saved', tone: 'ok' }
+  }
   if (p.status === 'draft' && !blocking(p.missing).length) return { text: 'Not saved yet', tone: 'info' }
   if (!usable) return { text: blocking(p.missing).length ? `Not searchable: no ${missingText(blocking(p.missing))}` : 'A source document is out of date', tone: 'bad' }
   if (p.auto_read) return { text: 'In search · auto-read, not yet reviewed', tone: 'warn' }
   return { text: 'In search', tone: 'ok' }
 }
+
+/** A financing record whose documents (its monthly cost-of-funds sheet) have passed their valid-until date. */
+export const finOutOfDate = (p: { facts: Record<string, Fact | undefined> }, docs: KbDoc[]) =>
+  Object.values(p.facts ?? {}).some((f) => { const left = daysLeft(docs.find((d) => d.id === f?.doc && !d.replaced_by)?.valid_until ?? null); return left != null && left < 0 })
 
 export async function loadDocs(): Promise<KbDoc[]> {
   const { data } = await supabase.from('kb_documents').select('*').order('insurer').order('title').order('created_at', { ascending: false })
