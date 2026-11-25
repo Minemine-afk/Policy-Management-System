@@ -979,7 +979,7 @@ const SG_LABELS = {
   // The record that was made: fill in what is missing and save; it is in search at once
   await olivia.getByRole('link', { name: 'Product records' }).click()
   const mapleRow = olivia.locator('tr', { hasText: 'Maple Term' })
-  await check(seen(mapleRow.getByText(/^Not searchable: no policy currency and entry ages$/)), 'the product records list says why a record is not searchable')
+  await check(seen(mapleRow.getByText(/^Not searchable: no policy currency$/)), 'the product records list says why a record is not searchable')
   await mapleRow.getByRole('link', { name: 'Open Maple Term' }).click()
   await olivia.waitForURL(/\/kb\/products\/[0-9a-f-]{36}$/)
   const mapleUrl = olivia.url()
