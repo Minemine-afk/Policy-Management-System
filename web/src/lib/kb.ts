@@ -1,4 +1,4 @@
-// The Knowledge Bank as the PI request form uses it: checked term products, their documents and premium rates,
+// The Knowledge Bank as the PI request form uses it: the term products in search, their documents and premium rates,
 // the client-needs filters (wireframe 4) and the side-by-side comparison rows (wireframe 5).
 // Facts only: nothing here ranks products or says which suits the client (no advice, MAS).
 import { supabase } from './supabase'
@@ -10,6 +10,8 @@ export interface KbProduct {
   currencies: string[]; entry_age_min: number; entry_age_max: number; residency: string[]
   sa_min: number | null; sa_max: number | null; has_tpd: boolean; has_ci: boolean
   facts: Record<string, KbFact | undefined>; version: number; is_sample: boolean
+  /** Read from an uploaded document by the reader; nobody has reviewed the values yet. */
+  auto_read?: boolean
 }
 export interface KbDocument { id: string; product_id: string; title: string; doc_type: string; version: string; effective_from: string | null; valid_until: string | null }
 export interface KbRate { product_id: string; age: number; gender: string; smoker: boolean; rate: number; ci_rate: number | null }
@@ -123,6 +125,13 @@ export const FACT_ROWS: { cat: string; label: string; key: string }[] = [
   { cat: 'Important considerations', label: 'Important considerations', key: 'consider' },
 ]
 export const NOT_AVAILABLE = 'Not available'
+/** A fact an auto-read product's document reader did not find: it may still be in the document. */
+export const NOT_READ = 'Not found by the reader. See the Product Summary'
+export const AUTO_TAG = 'Auto-read, not yet reviewed'
+/** Products the "Exclude sample products" switch leaves out (the made-up "(sample)" products from 3c-sample-products.sql). */
+export const withoutSamples = (kb: Kb, exclude: boolean): Kb => (exclude ? { ...kb, products: kb.products.filter((p) => !p.is_sample) } : kb)
+/** What a blank cell says for this product. */
+export const blankText = (p: KbProduct) => (p.auto_read ? NOT_READ : NOT_AVAILABLE)
 
 export interface Cell { text: string; source: string }
 
@@ -174,3 +183,6 @@ export function comparisonRows(kb: Kb, products: KbProduct[], n: Needs) {
 export const DISCLAIMER = 'Factual comparison only. Product features are taken from each insurer\'s documents in the Knowledge Bank. ' +
   'It is not a recommendation and does not consider the client\'s financial situation or needs. Read the Product Summary and ' +
   'Policy Illustration before deciding. Premiums are indicative; the PI gives the actual premium.'
+/** Added under the disclaimer when an auto-read product is compared. */
+export const AUTO_NOTE = 'Products marked "Auto-read, not yet reviewed" were read from the insurer\'s documents by the system and no one has ' +
+  'checked the values yet. They may be incomplete or wrong: confirm them in the Product Summary before relying on them.'

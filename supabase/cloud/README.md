@@ -54,6 +54,11 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      and Others, where the uploader types the name shown as the type; the insurer is optional for these four).
      Existing "Other" documents become "Others" named "Other". Until you run it, uploading still works with the old types
      only (the new ones are refused).
+   - `1t-upgrade.sql` (25 Nov: no BSD check in the Knowledge Bank. A Product Summary or rate sheet you upload is read
+     into a product record that Compare products finds straight away, tagged "Auto-read, not yet reviewed"; saving a
+     record puts it in search at once; it is searchable only once its policy currency and entry ages are known).
+     Changes and documents that were waiting for a check go live when you run it. Run it after 1s. Until you run it,
+     uploads still work but products wait for a check as before.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 

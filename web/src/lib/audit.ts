@@ -30,7 +30,11 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'kb.document_changed': 'Knowledge Bank document details changed',
   'kb.document_checked': 'Knowledge Bank document checked',
   'kb.document_removed': 'Knowledge Bank document removed',
-  'kb.product_saved': 'Product record draft saved',
+  'kb.product_saved': 'Product record saved',
+  'kb.product_auto_read': 'Product record read from an upload',
+  'kb.product_reviewed': 'Product record reviewed',
+  'kb.product_restored': 'Product put back in Compare products',
+  'kb.product_deleted': 'Product record deleted',
   'kb.product_sent_for_check': 'Product record sent for check',
   'kb.product_checked': 'Product record checked',
   'kb.product_sent_back': 'Product record sent back',
@@ -64,7 +68,11 @@ function describe(r: AuditRow, people: Record<string, Profile>): string {
     case 'kb.document_changed': return `Changed the details of “${kbName}”`
     case 'kb.document_checked': return `Checked the document “${kbName}”`
     case 'kb.document_removed': return `Removed the document “${kbName}”`
-    case 'kb.product_saved': return `Saved a draft of the product record ${kbName}`
+    case 'kb.product_saved': return d.live ? `Saved the product record ${kbName}${d.version ? ` (version ${d.version})` : ''}` : `Saved a draft of the product record ${kbName}`
+    case 'kb.product_auto_read': return `${d.created ? 'Made the product record' : 'Updated the product record'} ${kbName} from “${d.title}”${d.version ? ` (version ${d.version})` : ''}${d.searchable ? '' : ', not searchable yet'}`
+    case 'kb.product_reviewed': return `Reviewed the product record ${kbName}`
+    case 'kb.product_restored': return `Put ${kbName} back in Compare products`
+    case 'kb.product_deleted': return `Deleted the product record ${kbName}`
     case 'kb.product_sent_for_check': return `Sent the product record ${kbName} for check`
     case 'kb.product_checked': return `Checked the product record ${kbName}${d.version ? ` (version ${d.version})` : ''}`
     case 'kb.product_sent_back': return withReason(`Sent the product record ${kbName} back`, d.reason)

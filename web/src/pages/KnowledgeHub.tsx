@@ -1,6 +1,6 @@
 // Knowledge Hub module: the Knowledge Bank's documents and product records.
-// Ops and BSD keep it (upload, edit); a BSD person who did not make a change checks it. Introducers given the module
-// see the checked, current documents only.
+// Ops and BSD keep it (upload, edit). No check step: an upload is in use at once, and a Product Summary or rate sheet
+// is read into a product record that is searchable straight away. Introducers given the module see current documents.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -8,9 +8,9 @@ import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
-import { readableName } from '../lib/kbExtract'
+import { afterRead, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
 import {
-  DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState,
+  DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
   type KbDoc, type KbProductRow,
 } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
@@ -26,7 +26,8 @@ export function KbHeader({ tab, actions }: { tab: 'documents' | 'products'; acti
           <h1>Knowledge Bank</h1>
           <p className="muted" style={{ margin: '6px 0 0', maxWidth: 760 }}>
             Insurer documents, training material, circulars and other files, and the product facts taken from them.
-            Compare products on the PI request form reads checked products from here.
+            A Product Summary or rate sheet you upload is read into a product record that Compare products and the
+            Product Comparison Matrix can find straight away.
           </p>
         </div>
         {actions}
@@ -56,7 +57,7 @@ export function KbDocuments() {
   const [type, setType] = useState('')
   const [older, setOlder] = useState(false)
   const [dialog, setDialog] = useState<{ mode: 'new' | 'version' | 'edit'; doc?: KbDoc } | null>(null)
-  const [made, setMade] = useState<{ id: string; doc_type: string } | null>(null)
+  const [made, setMade] = useState<{ id: string; searchable: boolean } | null>(null)
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const reload = useCallback(async () => {
@@ -70,12 +71,20 @@ export function KbDocuments() {
   const typeMatch = (d: KbDoc) => !type || (type === ANY_OTHERS ? d.doc_type === OTHERS : docTypeName(d) === type)
   const shown = docs.filter((d) => (older || !d.replaced_by) && typeMatch(d)
     && (!q || `${d.title} ${d.insurer} ${productName(d)} ${docTypeName(d)} ${d.file_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
-  const toCheck = docs.filter((d) => d.status === 'new').length
 
-  async function act(fn: () => PromiseLike<{ error: { message: string } | null }>, ok: string) {
-    setError(''); setMsg(''); setMade(null)
-    const { error } = await fn()
-    if (error) setError(says(error.message)); else { setMsg(ok); reload() }
+  const [busyRead, setBusyRead] = useState('')
+  /** Reads a listed Product Summary or rate sheet again into its product record. */
+  async function reread(d: KbDoc) {
+    setError(''); setMsg(''); setMade(null); setBusyRead(d.id)
+    const dl = d.storage_path ? await supabase.storage.from('kb-docs').download(d.storage_path) : null
+    if (!dl?.data) { setBusyRead(''); setError(dl?.error?.message ?? 'This document has no file.'); return }
+    const r = await readUpload(await dl.data.arrayBuffer(), d.file_name ?? '', d.doc_type)
+    const name = products.find((p) => p.id === d.product_id)?.name || readName(r) || d.title
+    const res = await saveReading(d.id, r, { product_id: d.product_id, insurer: d.insurer, name })
+    setBusyRead('')
+    if ('error' in res && res.error) { setError(says(res.error)); return }
+    const ok = res as { id: string; missing: string[]; searchable: boolean }
+    setMsg(`${readingLine(r)} ${afterRead(ok)}`); setMade({ id: ok.id, searchable: ok.searchable }); reload()
   }
   async function remove(d: KbDoc) {
     setError(''); setMsg(''); setMade(null)
@@ -100,9 +109,8 @@ export function KbDocuments() {
           </select>
           {member && <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={older} onChange={(e) => setOlder(e.target.checked)} /> Show older versions</label>}
         </div>
-        {member && toCheck > 0 && <div className="notice" role="status">{fmtNum(toCheck)} document{toCheck === 1 ? ' is' : 's are'} waiting for a BSD person to check {toCheck === 1 ? 'it' : 'them'}{checker ? '' : ' (someone other than the uploader)'}.</div>}
-        {msg && <div className="notice ok" role="status">{msg}
-          {made && <> <Link to={`/kb/products/new?${made.doc_type === 'Rate sheet' ? 'rates' : 'summary'}=${made.id}`}>Make a product record from it</Link> (the details are read from the file for you to check).</>}</div>}
+        {msg && <div className={`notice ${made && !made.searchable ? 'warn' : 'ok'}`} role="status">{msg}
+          {made && <> <Link to={`/kb/products/${made.id}`}>Open the product record</Link>{made.searchable ? ' to review or change it (optional).' : ' to fill in what is missing.'}</>}</div>}
         {error && <div className="error" role="alert">{error}</div>}
         <div className="tablewrap">
           <table aria-label="Knowledge Bank documents">
@@ -120,19 +128,15 @@ export function KbDocuments() {
                     <td className="small">{docTypeName(d)}</td>
                     <td className="small">{fmtDate(d.effective_from)}</td>
                     <td className="small">{d.valid_until ? fmtDate(d.valid_until) : 'No end date'}</td>
-                    <td><span className={`pill ${st.tone}`}>{st.text}</span>
-                      {d.status === 'checked' && d.checked_by && <div className="small muted">by {nameOf(people, d.checked_by)}</div>}</td>
+                    <td><span className={`pill ${st.tone}`}>{st.text}</span></td>
                     {member && <td className="small">{d.uploaded_by ? nameOf(people, d.uploaded_by) : 'Sample'}</td>}
                     {member && (
                       <td><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                        {checker && d.status === 'new' && !mine && <button className="btn small primary" onClick={() => act(() => supabase.rpc('kb_check_document', { p_id: d.id }), `${d.title} is checked.`)}>Check</button>}
-                        {checker && d.status === 'new' && mine && <span className="small muted">Someone else checks it</span>}
                         {!d.replaced_by && <button className="btn small" onClick={() => setDialog({ mode: 'version', doc: d })}>New version</button>}
                         {!d.replaced_by && <button className="btn small" onClick={() => setDialog({ mode: 'edit', doc: d })}>Edit</button>}
-                        {!d.replaced_by && FILLS.includes(d.doc_type) && readableName(d.file_name) && (
-                          <Link className="btn small" to={`/kb/products/new?${d.doc_type === 'Rate sheet' ? 'rates' : 'summary'}=${d.id}`}
-                            title="Start a product record with the details read from this document">New record from it</Link>)}
-                        {(d.status === 'new' || checker) && <button className="linkbtn danger" onClick={() => remove(d)}>Remove</button>}
+                        {!d.replaced_by && readsInto(d.doc_type, d.file_name) && <button className="btn small" disabled={!!busyRead}
+                          title="Read this document again into its product record" onClick={() => reread(d)}>{busyRead === d.id ? 'Reading…' : 'Read again'}</button>}
+                        {(mine || checker) && <button className="linkbtn danger" onClick={() => remove(d)}>Remove</button>}
                       </div></td>
                     )}
                   </tr>
@@ -143,12 +147,12 @@ export function KbDocuments() {
           </table>
         </div>
         <p className="small muted" style={{ margin: 0 }}>
-          {member ? 'A new version replaces the earlier one once it is checked; product records that named the earlier one get a draft to re-check. When a document passes its valid-until date, products that rely on it drop out of Compare products.'
-            : 'Checked, current insurer documents. Open one to read it.'}
+          {member ? 'Uploads are in use at once. A new version replaces the earlier one straight away and is read into the product records that named it. When a document passes its valid-until date, products that rely on it drop out of Compare products.'
+            : 'Current insurer documents. Open one to read it.'}
         </p>
       </section>
       {dialog && <DocDialog mode={dialog.mode} doc={dialog.doc} docs={docs} products={products}
-        onClose={() => setDialog(null)} onDone={(m, c) => { setDialog(null); setMsg(m); setMade(c && FILLS.includes(c.doc_type) && readableName(c.file.name) ? c : null); setError(''); reload() }} />}
+        onClose={() => setDialog(null)} onDone={(m, c) => { setDialog(null); setMsg(m); setMade(c?.product ? { id: c.product, searchable: !!c.searchable } : null); setError(''); reload() }} />}
     </main>
   )
 }
@@ -166,13 +170,17 @@ export function customTypeNames(docs: KbDoc[]) {
 }
 
 /** Document types the reader can fill a product record from. */
-export const FILLS = ['Product Summary', 'Rate sheet']
-export interface Created { id: string; doc_type: string; file: File }
+export const FILLS = READ_TYPES
+/** An upload: the document, and the product record it was read into (if it is a Product Summary or rate sheet). */
+export interface Created { id: string; doc_type: string; file: File; product?: string; searchable?: boolean }
 
-export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }: {
+
+export function DocDialog({ mode, doc, docs, products, preset, read = true, onClose, onDone }: {
   mode: 'new' | 'version' | 'edit'; doc?: KbDoc; docs: KbDoc[]; products: KbProductRow[]
   /** For an upload started from a product record: the type and insurer to start with. */
   preset?: { doc_type?: string; insurer?: string; product_id?: string }
+  /** Read a Product Summary or rate sheet into its product record on upload (the record page reads it into its form instead). */
+  read?: boolean
   onClose: () => void; onDone: (msg: string, created?: Created) => void
 }) {
   const [file, setFile] = useState<File | null>(null)
@@ -182,6 +190,9 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
     version: mode === 'edit' ? doc?.version ?? '' : '', effective_from: mode === 'edit' ? doc?.effective_from ?? '' : '',
     valid_until: mode === 'edit' ? doc?.valid_until ?? '' : '',
   })
+  const [newName, setNewName] = useState('')        // the product name for a new product record
+  const [reading, setReading] = useState<Reading | null>(null)
+  const [progress, setProgress] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }))
@@ -190,6 +201,28 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
   const others = f.doc_type === OTHERS
   const ownNames = useMemo(() => customTypeNames(docs), [docs])
   const title = mode === 'new' ? 'Upload document' : mode === 'version' ? `New version of ${doc!.title}` : `Edit ${doc!.title}`
+  // A Product Summary or rate sheet is read into a product record on upload: an existing one, or a new one by name.
+  const reads = read && mode !== 'edit' && !!file && readsInto(f.doc_type, file.name)
+  const target = mode === 'version' ? (doc?.product_id ?? '') : f.product_id
+  const needName = reads && mode === 'new' && !target
+
+  async function readPicked(x: File, type: string) {
+    setReading(null)
+    if (!read || mode === 'edit' || !readsInto(type, x.name)) return
+    setProgress(`Reading ${x.name}…`)
+    const r = await readUpload(await x.arrayBuffer(), x.name, type, setProgress)
+    setProgress(''); setReading(r)
+    const ins = readInsurer(r), nm = readName(r)
+    setF((s) => {
+      const next = { ...s }
+      if (!next.insurer.trim() && ins) next.insurer = ins
+      // An existing record with the name read is picked for you.
+      const match = nm && products.find((p) => p.insurer.toLowerCase() === next.insurer.trim().toLowerCase() && p.name.toLowerCase() === nm.toLowerCase())
+      if (match && !next.product_id) next.product_id = match.id
+      return next
+    })
+    setNewName((n) => n || nm || x.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').replace(/\s*(product summary|rates?|rate sheet)\s*$/i, '').trim())
+  }
 
   function pick(list: FileList | null) {
     const x = list?.[0]
@@ -200,29 +233,49 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
     if (x.size > KB_MAX_MB * 1024 * 1024) { setError(`The file is over ${fmtNum(KB_MAX_MB)} MB`); return }
     setFile(x)
     if (!f.title) set('title', x.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '))
+    readPicked(x, f.doc_type)
+  }
+  function setType(t: string) {
+    set('doc_type', t)
+    if (file) readPicked(file, t)
   }
 
   async function save() {
     setError('')
     if (mode !== 'edit' && !file) { setError('Choose a file'); return }
     if (others && !f.doc_type_name.trim()) { setError('Type a name for the document type'); return }
+    if (needName && !newName.trim()) { setError('Fill in the product name (or choose the product record it belongs to)'); return }
+    if (progress) { setError('Wait until the file has been read'); return }
     setBusy(true)
     const p = { ...f, product_id: f.product_id || null, valid_until: f.valid_until || null, doc_type_name: others ? f.doc_type_name.trim() : null }
     if (mode === 'edit') {
       const { error } = await supabase.rpc('kb_update_document', { p_id: doc!.id, p })
       setBusy(false)
       if (error) { setError(says(error.message)); return }
-      onDone(`Saved. ${f.title} must be checked again.`)
+      onDone(`Saved ${f.title}.`)
       return
     }
     const path = `${crypto.randomUUID()}/${file!.name.replace(/[^\w.-]+/g, '_')}`
     const up = await supabase.storage.from('kb-docs').upload(path, file!, { contentType: file!.type || 'application/octet-stream' })
     if (up.error) { setBusy(false); setError(says(up.error.message)); return }
     const { data, error } = await supabase.rpc('kb_add_document', { p: { ...p, storage_path: path, file_name: file!.name, file_size: file!.size, replaces: mode === 'version' ? doc!.id : null } })
+    if (error) { setBusy(false); await supabase.storage.from('kb-docs').remove([path]); setError(says(error.message)); return }
+    const id = data as string
+    const created: Created = { id, doc_type: f.doc_type, file: file! }
+    let msg = mode === 'version' ? `Uploaded the new version of ${doc!.title}. It is in use now.` : `Uploaded ${f.title}.`
+    if (reads) {
+      const r = reading ?? await readUpload(await file!.arrayBuffer(), file!.name, f.doc_type)
+      const name = products.find((x) => x.id === target)?.name || newName.trim() || readName(r) || f.title
+      const res = await saveReading(id, r, { product_id: target || null, insurer: f.insurer || doc?.insurer || '', name })
+      if ('error' in res && res.error) msg += ` It could not be read into a product record: ${says(res.error)}`
+      else {
+        const ok = res as { id: string; missing: string[]; searchable: boolean }
+        created.product = ok.id; created.searchable = ok.searchable
+        msg += ` ${readingLine(r)} ${afterRead(ok)}`
+      }
+    }
     setBusy(false)
-    if (error) { await supabase.storage.from('kb-docs').remove([path]); setError(says(error.message)); return }
-    onDone(mode === 'version' ? `Uploaded the new version. It replaces the earlier one once a BSD person checks it.` : `Uploaded ${f.title}. A BSD person (not you) checks it next.`,
-      { id: data as string, doc_type: f.doc_type, file: file! })
+    onDone(msg, created)
   }
 
   return (
@@ -241,16 +294,23 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
             <datalist id="kb-insurers">{insurers.map((x) => <option key={x} value={x} />)}</datalist>
           </label>
           <label className="field">Product
-            <select value={f.product_id} onChange={(e) => set('product_id', e.target.value)}>
-              <option value="">All products / not one product</option>
+            <select aria-label="Product" value={f.product_id} onChange={(e) => set('product_id', e.target.value)} disabled={mode === 'version' && reads}>
+              <option value="">{reads && mode === 'new' ? 'New product record' : 'All products / not one product'}</option>
               {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </label>
+          {needName && (
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label htmlFor="kb-new-name">Product name (new product record)</label>
+              <input id="kb-new-name" type="text" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <span className="small muted">Read from the file where it says so. A record with the same insurer and name is updated instead of making a second one.</span>
+            </div>
+          )}
           <label className="field">Document name
             <input type="text" value={f.title} onChange={(e) => set('title', e.target.value)} />
           </label>
           <label className="field">Document type
-            <select value={f.doc_type} onChange={(e) => set('doc_type', e.target.value)}>
+            <select value={f.doc_type} onChange={(e) => setType(e.target.value)}>
               {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
             </select>
           </label>
@@ -273,15 +333,18 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
             <input type="date" value={f.valid_until} onChange={(e) => set('valid_until', e.target.value)} />
           </label>
         </div>
+        {progress && <div className="notice" role="status">{progress}</div>}
+        {reads && reading && !progress && <div className="notice" role="status">{readingLine(reading)}</div>}
         <p className="small muted" style={{ margin: 0 }}>
-          {mode === 'version' ? 'The earlier version stays in use until this one is checked. Product records that name it then get a draft to re-check against the new version.'
-            : mode === 'edit' ? 'Changing the details means the document must be checked again.'
-            : 'A BSD person who did not upload it checks the details against the file.'}
+          {reads ? 'On upload, what was read goes on the product record and the product can be found in Compare products straight away, marked "Auto-read, not yet reviewed". Reviewing or changing the record afterwards is optional.'
+            : mode === 'version' ? 'The new version replaces this one as soon as it is uploaded.'
+            : mode === 'edit' ? 'The changes apply at once.'
+            : 'The document is in use as soon as it is uploaded.'}
         </p>
         {error && <div className="error" role="alert">{error}</div>}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : mode === 'edit' ? 'Save' : 'Upload'}</button>
+          <button className="btn primary" onClick={save} disabled={busy || !!progress}>{busy ? 'Saving…' : mode === 'edit' ? 'Save' : 'Upload'}</button>
         </div>
       </div>
     </div>
@@ -301,9 +364,9 @@ export function KbProducts() {
   useEffect(() => {
     Promise.all([loadProducts(), loadDocs(), loadUsable()]).then(([p, d, u]) => { setProducts(p); setDocs(d); setUsable(u); setLoaded(true) })
   }, [])
-  const waiting = products.filter((p) => p.pending_state === 'check').length
-  const drafts = products.filter((p) => p.pending_state === 'draft' || (p.status === 'draft' && !p.pending_state)).length
   const offered = products.filter((p) => usable.has(p.id)).length
+  const auto = products.filter((p) => usable.has(p.id) && p.auto_read).length
+  const notIn = products.filter((p) => !usable.has(p.id) && p.status !== 'withdrawn').length
   const soon = products.filter((p) => usable.has(p.id) && Object.values(p.facts ?? {}).some((f) => {
     const d = docs.find((x) => x.id === f?.doc); const left = daysLeft(d?.valid_until ?? null); return left != null && left <= 40
   })).length
@@ -313,39 +376,38 @@ export function KbProducts() {
     <main className="page">
       <KbHeader tab="products" actions={<button className="btn primary" onClick={() => nav('/kb/products/new')}>New product record</button>} />
       <div className="stats">
-        <div className="card stat"><strong>{fmtNum(offered)}</strong><span className="pill ok">Checked, in Compare products</span></div>
-        <div className="card stat"><strong>{fmtNum(waiting)}</strong><span className="pill purple">Waiting for check</span></div>
-        <div className="card stat"><strong>{fmtNum(drafts)}</strong><span className="pill info">Drafts</span></div>
+        <div className="card stat"><strong>{fmtNum(offered)}</strong><span className="pill ok">In search (Compare products)</span></div>
+        <div className="card stat"><strong>{fmtNum(auto)}</strong><span className="pill warn">Auto-read, not yet reviewed</span></div>
+        <div className="card stat"><strong>{fmtNum(notIn)}</strong><span className="pill bad">Not searchable</span></div>
         <div className="card stat"><strong>{fmtNum(soon)}</strong><span className="pill warn">Source document expires within 40 days</span></div>
       </div>
       <section className="card" aria-label="Product records">
         <div className="tablewrap">
           <table aria-label="Product records">
-            <thead><tr><th>Insurer</th><th>Product</th><th>Status</th><th className="num">Version</th><th>Facts taken from</th><th>Checked by</th><th>In Compare products</th><th><span className="sr-only">Open</span></th></tr></thead>
+            <thead><tr><th>Insurer</th><th>Product</th><th>Status</th><th className="num">Version</th><th>Facts taken from</th><th>Last saved by</th><th><span className="sr-only">Open</span></th></tr></thead>
             <tbody>
               {products.map((p) => {
                 const st = productState(p, usable.has(p.id))
-                const name = p.status === 'draft' && p.pending ? p.pending.name : p.name
+                const why = whyNotSearchable(p, usable.has(p.id))
                 return (
                   <tr key={p.id}>
-                    <td>{p.status === 'draft' && p.pending ? p.pending.insurer : p.insurer}</td>
-                    <td><strong>{name}</strong>{p.is_sample && <span className="small muted"> (sample)</span>}</td>
-                    <td><span className={`pill ${st.tone}`}>{st.text}</span></td>
+                    <td>{p.insurer}</td>
+                    <td><strong>{p.name}</strong>{p.is_sample && <span className="small muted"> (sample)</span>}</td>
+                    <td><span className={`pill ${st.tone}`}>{st.text}</span>{why && p.status !== 'withdrawn' && <div className="small muted" style={{ maxWidth: 320 }}>{why}</div>}</td>
                     <td className="num">{p.verified_at ? `v${plain(p.version)}` : '—'}</td>
                     <td className="small">{docName(p.facts?._ps?.doc)}<br />{docName(p.facts?._rs?.doc)}</td>
-                    <td className="small">{p.verified_by ? <>{nameOf(people, p.verified_by)}<br />{fmtDate(p.verified_at)}</> : p.verified_at ? fmtDate(p.verified_at) : <span className="muted">Not checked</span>}</td>
-                    <td className="small">{usable.has(p.id) ? 'Yes' : <span className="muted">No</span>}</td>
-                    <td><Link className="btn small" to={`/kb/products/${p.id}`} aria-label={`Open ${name}`}>Open</Link></td>
+                    <td className="small">{p.verified_by ? <>{nameOf(people, p.verified_by)}<br />{fmtDate(p.verified_at)}</> : p.auto_read ? <>Read from the document<br />{fmtDate(p.verified_at)}</> : p.verified_at ? fmtDate(p.verified_at) : <span className="muted">—</span>}</td>
+                    <td><Link className="btn small" to={`/kb/products/${p.id}`} aria-label={`Open ${p.name}`}>Open</Link></td>
                   </tr>
                 )
               })}
-              {loaded && !products.length && <tr><td colSpan={8} className="muted">No product records yet. Upload the product's documents first, then add its record.</td></tr>}
+              {loaded && !products.length && <tr><td colSpan={7} className="muted">No product records yet. Upload a Product Summary on the Documents tab: it is read into a product record for you.</td></tr>}
             </tbody>
           </table>
         </div>
         <p className="small muted" style={{ margin: 0 }}>
-          Changes to a checked product are kept as a draft; the checked version stays in Compare products until a BSD person
-          who did not make the change checks it.
+          A product is in search as soon as its Product Summary (or rate sheet) is uploaded and its policy currency and entry ages are known.
+          Reviewing or changing the record is optional; saving a change puts it in search at once and keeps the earlier version in the history.
         </p>
       </section>
     </main>
