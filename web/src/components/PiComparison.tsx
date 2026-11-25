@@ -173,7 +173,9 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
   const aiCells = cols.reduce((n, c) => n + aiTodo(c).length, 0)
   // Blank cells the AI helper never fills (covers, riders, client details…), named so ops know why there is no button for them.
   const aiKeys = new Set(AI_FIELDS.map((f) => f.key))
-  const otherBlanks = [...new Set(cols.flatMap((c) => FIELDS.filter((f) => f.section !== 'meta' && !aiKeys.has(f.key) && !(c.values[f.key] ?? '').trim()).map((f) => f.label)))]
+  // PIs that could not be read at all: neither the rules nor the AI helper have any text from them.
+  const unread = cols.map((c, i) => ({ c, i })).filter(({ c }) => c.error)
+  const otherBlanks = [...new Set(cols.filter((c) => !c.error).flatMap((c) => FIELDS.filter((f) => f.section !== 'meta' && !aiKeys.has(f.key) && !(c.values[f.key] ?? '').trim()).map((f) => f.label)))]
   const noWasm = typeof WebAssembly === 'undefined'
 
   async function fillWithAi() {
@@ -340,6 +342,12 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
 
       {!progress && cols.length > 0 && (
         <>
+          {unread.map(({ c, i }) => (
+            <div key={i} className="error" role="alert">
+              PI{plain(i + 1)} ({c.fileName}) could not be read: {c.error} Nothing in its column comes from the PDF, and the AI helper can't help with it either,
+              because it only works from text it can check in the PI. Press "Read the PIs again", or type its values from the PDF.
+            </div>
+          ))}
           <div className="row between">
             <h3 className="small" style={{ margin: 0 }}>Check the values</h3>
             <span className="small muted">{missing ? `${fmtNum(missing)} empty ${missing === 1 ? 'cell' : 'cells'} (shaded) to fill or leave blank` : 'Every field has a value'}</span>
@@ -347,7 +355,10 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           {(missing > 0 || aiState.text || aiState.error) && (
             <div className="row" style={{ gap: 10, flexWrap: 'wrap' }} aria-label="AI helper">
               {aiCells > 0 && noWasm && <span className="error small" role="note">The free AI helper can't run in this browser (no WebAssembly). Please use an up-to-date Chrome or Edge.</span>}
-              {aiCells === 0 && !aiState.busy && !aiState.text && (
+              {aiCells === 0 && !aiState.busy && !aiState.text && unread.length > 0 && unread.length === cols.length && (
+                <span className="small muted" role="note">Free AI helper: no PI could be read, so it has no text to work with.</span>
+              )}
+              {aiCells === 0 && !aiState.busy && !aiState.text && unread.length < cols.length && (
                 <span className="small muted" role="note">
                   Free AI helper: nothing for it to fill here. It only fills the {fmtNum(AI_FIELDS.length)} plan fields (insurer, plan name, terms, cover age, sums assured, premiums).
                   {otherBlanks.length > 0 && ` The blank ${otherBlanks.length === 1 ? 'cell' : 'cells'} left (${otherBlanks.slice(0, 4).join(', ')}${otherBlanks.length > 4 ? ` and ${fmtNum(otherBlanks.length - 4)} more` : ''}) ${otherBlanks.length === 1 ? 'is' : 'are'} not something it fills: usually the PI doesn't mention ${otherBlanks.length === 1 ? 'it' : 'them'}. Check the PI and type the value, for example Included or NA.`}
@@ -421,7 +432,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                                 {conf && <div className={`pill ${conf.level === 'Sure' ? 'ok' : 'info'}`} style={{ margin: '4px 0 2px', fontSize: 12 }} title={conf.why}>{conf.level}</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
-                                  {edited ? 'Changed by hand' : fd?.ai ? `AI${fd.page ? `, page ${plain(fd.page)}` : ''}: “${(fd.line ?? '').slice(0, 44)}${(fd.line ?? '').length > 44 ? '…' : ''}”` : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${plain(fd.page)}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : aiKeys.has(f.key) ? 'Not found' : 'Not found: check the PI and type it (the AI helper does not fill this)'}
+                                  {edited ? 'Changed by hand' : c.error ? 'This PI could not be read (see the top of this column): type it from the PDF' : fd?.ai ? `AI${fd.page ? `, page ${plain(fd.page)}` : ''}: “${(fd.line ?? '').slice(0, 44)}${(fd.line ?? '').length > 44 ? '…' : ''}”` : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${plain(fd.page)}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : aiKeys.has(f.key) ? 'Not found' : 'Not found: check the PI and type it (the AI helper does not fill this)'}
                                 </div>
                               </td>
                             )
