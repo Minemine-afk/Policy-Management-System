@@ -12,7 +12,7 @@ const STRIP = 'delete Map.prototype.getOrInsertComputed; delete Map.prototype.ge
   await p.goto(B)
   await p.getByLabel('Email').fill('ops1@example.com'); await p.getByLabel('Password').fill('password123')
   await p.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await p.getByRole('button', { name: 'Sign out' }).waitFor()
+  await p.locator('.topbar .user-btn').waitFor()
   await p.goto(B + '/requests/20000000-0000-0000-0000-000000000003')
   await p.getByLabel('Upload policy illustrations (pis)').setInputFiles(process.env.PI_SAMPLES
     ? ['SG_Singlife_EliteTermII_2024.pdf', 'SG_TokioMarine-CIMB_TermProtectPlus_2022.pdf'].map((n) => process.env.PI_SAMPLES + '/' + n)

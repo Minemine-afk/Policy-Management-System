@@ -1,7 +1,6 @@
-import { Navigate, NavLink, Route, Routes, useSearchParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { supabase } from './lib/supabase'
-import { ROLE_LABEL } from './lib/options'
 import Login from './pages/Login'
 import RequestForm from './pages/RequestForm'
 import RequestView from './pages/RequestView'
@@ -16,7 +15,7 @@ import { KbDocuments, KbProducts } from './pages/KnowledgeHub'
 import KbProduct from './pages/KbProduct'
 import ProductMatrixPage from './pages/ProductMatrixPage'
 import { useUnreadCount } from './lib/notifications'
-import { fmtNum } from './lib/num'
+import TopBar, { type NavItem } from './components/TopBar'
 
 export default function App() {
   const { session, profile, loading, has, can, recovering } = useAuth()
@@ -43,7 +42,6 @@ export default function App() {
     )
   }
 
-  const cls = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : '')
   // Admin manages users, settings and the audit log; it does not work on requests.
   const admin = has('admin')
   // Modules: the admin switches them per user. Inside a module the role decides what the user sees.
@@ -55,29 +53,20 @@ export default function App() {
   const matrix = !admin && can('product_matrix')
   // Everyone starts on the module picker (Modules), even with only one module.
   const home = '/home'
+  const introducer = has('introducer')
+  const items: NavItem[] = [
+    { to: '/home', label: 'Modules' },
+    ...(pi && introducer ? [{ to: '/requests/new', label: 'New request' }] : []),
+    ...(pi ? [{ to: '/board', label: 'Board' }] : []),
+    ...(pi ? [{ to: '/backlog', label: introducer ? 'My requests' : 'Backlog' }] : []),
+    ...(pi && has('bsd') ? [{ to: '/reader', label: 'PI reader' }] : []),
+    ...(matrix ? [{ to: '/matrix', label: 'Compare products' }] : []),
+    ...(kb ? [{ to: '/kb', label: 'Knowledge Hub' }] : []),
+    ...(admin ? [{ to: '/admin', label: 'Admin' }] : []),
+  ]
   return (
     <>
-      <header className="topbar">
-        <div className="brand">PWS Service Hub</div>
-        <nav aria-label="Main">
-          <NavLink to="/home" className={cls}>Modules</NavLink>
-          {pi && has('introducer') && <NavLink to="/requests/new" className={cls}>New request</NavLink>}
-          {pi && <NavLink to="/board" className={cls}>Board</NavLink>}
-          {pi && <NavLink to="/backlog" className={cls}>{has('introducer') ? 'My requests' : 'Backlog'}</NavLink>}
-          {pi && has('bsd') && <NavLink to="/reader" className={cls}>PI reader</NavLink>}
-          {matrix && <NavLink to="/matrix" className={cls}>Compare products</NavLink>}
-          {kb && <NavLink to="/kb" className={cls}>Knowledge Hub</NavLink>}
-          {admin && <NavLink to="/admin" className={cls}>Admin</NavLink>}
-        </nav>
-        <div className="who">
-          <NavLink to="/notifications" className={({ isActive }) => `bell${isActive ? ' active' : ''}`} aria-label={`Notifications${unread ? `, ${fmtNum(unread)} unread` : ''}`}>
-            <span aria-hidden="true">🔔</span>{unread > 0 && <span className="badge">{fmtNum(unread)}</span>}
-          </NavLink>
-          <span>{profile.full_name || profile.email} · {ROLE_LABEL[profile.role]}</span>
-          <NavLink to="/account" className="acct" title="Change your password">Account</NavLink>
-          <button onClick={() => supabase.auth.signOut()}>Sign out</button>
-        </div>
-      </header>
+      <TopBar items={items} profile={profile} unread={unread} />
       <Routes>
         <Route path="/" element={<Navigate to={home} replace />} />
         <Route path="/home" element={<Home />} />
