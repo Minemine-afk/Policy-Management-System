@@ -120,11 +120,18 @@ const GENERIC = /^(?:(?:level|renewable|decreasing|term|life|whole|insurance|ass
 /** Words that make an answer a description, not a plan's name ("Non-Participating Term Plan", "Life Client Quote"). */
 const NOT_A_NAME = /\b(?:non participating|participating|client|quote|illustration|summary|disclosure|sheet|proposal|benefit illustration)\b/
 /** A company's name: "... Ltd", "... Insurance", "... Assurance", "... Financial", "... Bank", "... Berhad". */
-const COMPANY = /\b(?:ltd|limited|inc|insurance|assurance|financial|bank|berhad|bhd|company|co\.|group|corporation|life)\b/i
-const LIMIT = /\bup\s+to\b|maximum|\bmax\b|minimum|\bmin\b|\blimit/i
+const COMPANY = /\b(?:ltd|limited|inc|insurance|assurance|financial|bank|berhad|bhd|company|co\.|group|corporation)\b/i
+/** Words in plan names, not company names. */
+const PLAN_WORDS = /\b(?:term|protect\w*|plan|secure|shield|cover|guard|care|essential|plus|saver|elite|first)\b/i
+const LIMIT = /\bup\s+to\b|maximum|\bmax\b|minimum|\bmin\b|\blimit|exceed|\bcap\b/i
 const WORKED = /\d\s*[x×]\s*[\d.]+\s*=/i
 /** An age in such a line is a renewal, conversion or benefit limit, not the age this policy's cover ends. */
-const NOT_COVER_END = /renew|convert|conversion|prior\s+to|before|attain|entry|issue\s+age|disab|\btpd\b|critical|minimum|maximum/i
+const NOT_COVER_END = /renew|convert|conversion|prior\s+to|before|attain|entry|issue\s+age|disab|\btpd\b|critical|minimum|maximum|illustrat|years?[\s-]+old/i
+/** An age where the cover ends is written as such: "expires at age 85", "cover up to age 80", "maturity age", or under a
+ *  column heading such as "Coverage Provided To Age" (the line or the 3 above it). */
+const COVER_END = /expir|matur|\bends?\b|until\s+(?:the\s+)?age|till\s+age|to\s+age|cover(?:ed|age|s)?\s+(?:to|until|till)|terminat/i
+/** A list number ("5. What are...") or a row of year numbers ("1 2 3 4 5"), not a term. */
+const LIST_LINE = /^\s*\d{1,2}\.\s|\b1\s+2\s+3\b/
 const TERM_WORDS = /term|year|yrs?\b|pay|period|age|duration|T-?\d|\d\s*-?\s*(?:yr|year)/i
 const DATE_LIKE = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b|\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}/i
 /** Another amount on the same line within 10% of this one ("RM 102,000.00  RM 100,000.00" for two options): which
@@ -163,7 +170,9 @@ export function checkAnswer(answer: Record<string, unknown> | null, pages: Page[
       if (f.key === 'insurer') {
         // An insurer is one the reader knows (given by its short name), or a name that reads like a company's.
         const known = detectInsurer(v)
-        if (!known && !COMPANY.test(v)) { dropped.push(f.key); continue }
+        // "Acme Life" is a company's name, "Life Term Protect Secure" a plan's.
+        const lifeCo = /\blife\b/i.test(v) && v.split(/\s+/).length <= 3 && !PLAN_WORDS.test(v)
+        if (!known && !COMPANY.test(v) && !lifeCo) { dropped.push(f.key); continue }
         put(f.key, known || v, lineWith(words))
         continue
       }
@@ -184,10 +193,13 @@ export function checkAnswer(answer: Record<string, unknown> | null, pages: Page[
       const n = amountOf(raw)
       // A term under 5 years is too rare in term plans to tell from a footnote number ("® 1"): left for ops.
       const ok = n !== null && Number.isInteger(n) && nums.has(n) && (f.kind === 'years' ? n >= 5 && n <= 100 : n >= 30 && n <= 120)
+      // A term in years is never the N of "To Age N" (that is an age).
+      // Nor the N of "every N policy years" (how often a benefit is paid).
+      const isAge = (t: string) => new RegExp(`\\b(?:age\\s*(?:of\\s*)?|every\\s+)${plain(n!)}\\b`, 'i').test(t)
       // Its line must be about a term or an age, not a date ("September 12, 2024") or a phone number.
       // A premium term's line must speak of paying ("premium", "pay"), so the cover's length is not taken for it.
       const words = f.key === 'premium_term' ? /premium|pay/i : TERM_WORDS
-      const l = ok ? lines.find((x) => [...x.text.matchAll(/\d[\d,]*(?:\.\d+)?(?![\d.]|\s*%)/g)].some((m) => Number(m[0].replace(/,/g, '')) === n) && words.test(x.text) && !DATE_LIKE.test(x.text) && !(f.kind === 'age' && NOT_COVER_END.test(x.text))) : undefined
+      const l = ok ? lines.find((x) => [...x.text.matchAll(/\d[\d,]*(?:\.\d+)?(?![\d.]|\s*%)/g)].some((m) => Number(m[0].replace(/,/g, '')) === n) && words.test(x.text) && !DATE_LIKE.test(x.text) && !LIST_LINE.test(x.text) && !(f.kind === 'years' && isAge(x.text)) && !(f.kind === 'age' && (NOT_COVER_END.test(x.text) || !COVER_END.test(contextOf(lines, x).split(' \n ').slice(-4).join(' '))))) : undefined
       if (!ok || !l) { dropped.push(f.key); continue }
       put(f.key, String(n), l)
     } else {
@@ -205,6 +217,8 @@ export function checkAnswer(answer: Record<string, unknown> | null, pages: Page[
       // The amount's own line decides when it names a frequency; else the lines above it.
       const freq = (t: string) => Object.keys(says).map(Number).filter((k) => says[k].test(t))
       const named = line && freq(line.text).length ? freq(line.text) : freq(ctx)
+      // The distribution cost (commission) is not a premium, though it sits beside one in SG PIs.
+      if (/distribution|commission/i.test(contextOf(lines, line ?? { page: -1, text: '' }).split(' \n ').slice(-3).join(' '))) { dropped.push(f.key); continue }
       // A single premium is not a yearly one; a worked example ("RM200,000 x 4.92 = RM984.00") is not this policy's.
       if (!line || (times > 1 ? !named.includes(times) : named.length > 0 && !named.includes(1)) || /single\s+premium/i.test(ctx) || WORKED.test(line.text) || rivals(line.text, n)) { dropped.push(f.key); continue }
       // A monthly premium times 12 only when the PI shows no yearly premium at all (paying yearly is often cheaper).

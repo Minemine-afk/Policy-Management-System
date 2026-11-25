@@ -5,12 +5,12 @@
   "CA_EmpireLife_Solution20_2024.pdf": {"policy_term": "20", "premium_term": "NOT:1", "base_premium": "137.16"},
   "CA_Equitable_Term20_2024.pdf": {"policy_term": "20", "policy_name": "NOT:Term Life Insurance", "tpd_premium": "", "ci_premium": "", "premium_term": "20"},
   "CA_Manulife_FamilyTerm20_2024.pdf": {"policy_term": "20", "premium_term": "NOT:12", "base_premium": "NOT:100000"},
-  "CA_RBC_YourTerm20_2024.pdf": {"premium_term": "20"},
-  "CA_iA_TermQuote_2024.pdf": {"policy_name": "~Term 20", "policy_term": "20"},
+  "CA_RBC_YourTerm20_2024.pdf": {"premium_term": "20", "cover_age": "NOT:100"},
+  "CA_iA_TermQuote_2024.pdf": {"policy_name": "~Term 20", "policy_term": "20", "base_premium": "196.56"},
   "MY_HLA_MDTA-DreadDisease_PDS_2025.pdf": {"death_sa": "", "base_premium": ""},
-  "MY_Manulife_EasyProtect_PDS_2021.pdf": {"death_sa": "", "tpd_sa": "", "base_premium": ""},
-  "MY_Zurich_DirectTerm_PDS.pdf": {"base_premium": "1325.00"},
-  "MY_Zurich_TermLife_PDS_2026.pdf": {"base_premium": "5215.00", "premium_term": "NOT:50"},
-  "US_PacificLife_PLPromiseTerm20_2022.pdf": {"premium_term": "20", "base_premium": "372.00"},
-  "CA_SunLife_EvolveTerm20_2024.pdf": {"policy_term": "20"}
+  "MY_Manulife_EasyProtect_PDS_2021.pdf": {"death_sa": "", "tpd_sa": "", "base_premium": "", "cover_age": "80", "policy_term": "NOT:5", "premium_term": "NOT:5"},
+  "MY_Zurich_DirectTerm_PDS.pdf": {"base_premium": "1325.00", "tpd_sa": "500000"},
+  "MY_Zurich_TermLife_PDS_2026.pdf": {"base_premium": "5215.00", "premium_term": "NOT:50", "tpd_sa": "500000", "cover_age": "NOT:30"},
+  "US_PacificLife_PLPromiseTerm20_2022.pdf": {"premium_term": "20", "base_premium": "372.00", "cover_age": "95"},
+  "CA_SunLife_EvolveTerm20_2024.pdf": {"policy_term": "20", "base_premium": "193.32"}
 }

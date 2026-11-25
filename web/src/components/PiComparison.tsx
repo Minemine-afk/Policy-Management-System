@@ -344,13 +344,13 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
             <div className="row" style={{ gap: 10, flexWrap: 'wrap' }} aria-label="AI helper">
               {aiCells > 0 && (
                 <button className="btn small" disabled={aiState.busy} onClick={fillWithAi}
-                  title={`A free, open AI model (${fmtNum(AI_FIELDS.length)} plan fields: names, terms, sums assured, premiums) runs in this browser: the PI never leaves this computer. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB on a computer whose graphics chip works with the browser, ${fmtNum(AI_MODELS.small.mb / 1000, 1)} GB (a smaller model that fills fewer cells) otherwise) and keeps it for next time.`}>
+                  title={`A free, open AI model (${fmtNum(AI_FIELDS.length)} plan fields: names, terms, sums assured, premiums) runs in this browser: the PI never leaves this computer. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.small.mb / 1000, 1)} GB) and keeps it for next time.`}>
                   {aiState.busy ? 'AI helper working…' : `Fill ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'} with the free AI helper`}
                 </button>
               )}
               {aiState.text && <span className="small" role="status">{aiState.text}</span>}
               {aiState.error && <span className="error small" role="alert">{aiState.error}</span>}
-              {aiCells > 0 && !aiState.busy && !aiState.text && <span className="small muted">Runs in your browser, nothing is sent. First use downloads about {fmtNum(AI_MODELS.small.mb / 1000, 1)}–{fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB.</span>}
+              {aiCells > 0 && !aiState.busy && !aiState.text && <span className="small muted">Runs in your browser, nothing is sent. First use downloads about {fmtNum(AI_MODELS.small.mb / 1000, 1)} GB.</span>}
             </div>
           )}
           <div className="tablewrap">

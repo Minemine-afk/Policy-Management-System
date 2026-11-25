@@ -76,6 +76,18 @@ const ages = [{ page: 1, items: [], lines: ['Term-20 is renewable to age 80 and 
 const a1 = checkAnswer({ cover_age: '80', premium_term: '10' }, ages, ['cover_age', 'premium_term']).found
 const okA = !Object.keys(a1).length
 okA ? pass++ : fail++; console.log(`${okA ? '✓' : '✗'} a renewal or rider age is not the cover's end, and a percentage is not a term${okA ? '' : ' ' + JSON.stringify(a1)}`)
+const ages2 = [{ page: 1, items: [], lines: ['Policy illustrated to age 100, this does not mean the policy terminates', 'based on a healthy 30-year old male', 'Plan  Year  1  2  3  4  5  6', '5.  WHAT ARE SOME OF THE KEY TERMS', 'Your benefit shall not exceed RM10,000,000 per life', '20 YRCT coverage expires at age 85'].map((text) => ({ page: 1, text })) }]
+const g1 = checkAnswer({ cover_age: '100', policy_term: '5', premium_term: '5', tpd_sa: '10,000,000' }, ages2, ['cover_age', 'policy_term', 'premium_term', 'tpd_sa']).found
+const g2 = checkAnswer({ cover_age: '30' }, ages2, ['cover_age']).found
+const g3 = checkAnswer({ cover_age: '85' }, ages2, ['cover_age']).found
+const eq = [{ page: 1, items: [], lines: ['Coverage  Initial', 'Selected Coverage:  Insured  To Age  Premium', '20 YRCT  $100,000  85  $11.44'].map((text) => ({ page: 1, text })) }]
+const g4 = checkAnswer({ cover_age: '85' }, eq, ['cover_age']).found
+const okG = !Object.keys(g1).length && !g2.cover_age && g3.cover_age?.value === '85' && g4.cover_age?.value === '85'
+okG ? pass++ : fail++; console.log(`${okG ? '✓' : '✗'} a cover-end age must be written as one; list numbers and "shall not exceed" limits are dropped${okG ? '' : ' ' + JSON.stringify([g1, g2, g3])}`)
+const sg2 = [{ page: 1, items: [], lines: ['HSBC Life Term Protect Secure (To Age)  Policy Term To Age 85', 'Annual premium  651.00', 'The Total Distribution Cost for this plan is $1,089 as shown', '6/42  3,338  1,089', 'A benefit is paid at the end of every 5 policy years'].map((text) => ({ page: 1, text })) }]
+const h1 = checkAnswer({ insurer: 'Life Term Protect Secure', policy_term: '85', premium_term: '5', annual_premium: { amount: '1,089', per: 'year' } }, sg2, ['insurer', 'policy_term', 'premium_term', 'annual_premium']).found
+const okH = !Object.keys(h1).length
+okH ? pass++ : fail++; console.log(`${okH ? '✓' : '✗'} a plan name as insurer, "To Age 85" or "every 5 policy years" as a term, and the distribution cost as a premium are dropped${okH ? '' : ' ' + JSON.stringify(h1)}`)
 const msg = buildMessages(pages, ['death_sa', 'annual_premium'])[1].content
 const okMsg = msg.includes('Coverage amount $250,000.00') && msg.includes('"annual_premium": {"amount"') && !msg.includes('policy_term')
 okMsg ? pass++ : fail++; console.log(`${okMsg ? '✓' : '✗'} the prompt holds the PI text and only the fields asked`)
