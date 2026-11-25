@@ -760,7 +760,7 @@ do $$ begin
   raise notice 'ok: admin does not see the product comparison';
 end $$;
 
--- 21. Knowledge Hub: documents, product records and maker-checker
+-- 21. Knowledge Hub: documents and product records, in search without a check
 reset role;
 create temp table kbt (k text primary key, v uuid);
 grant all on kbt to authenticated;
@@ -770,84 +770,110 @@ insert into storage.objects (bucket_id, name) values ('kb-docs', 'f1/maple-ps.pd
 do $$
 declare d uuid; p uuid;
 begin
-  if not kb_member() or kb_checker() then raise exception 'ops should keep but not check the Knowledge Bank'; end if;
+  if not kb_member() or kb_checker() then raise exception 'ops should keep the Knowledge Bank'; end if;
   d := kb_add_document('{"insurer":"Maple Life","title":"Maple Term Product Summary","doc_type":"Product Summary","version":"v1","effective_from":"2026-01-01","valid_until":"2030-12-31","storage_path":"f1/maple-ps.pdf","file_name":"maple-ps.pdf"}');
   insert into kbt values ('doc1', d);
+  if not exists (select 1 from kb_documents where id = d and status = 'checked') then raise exception 'an upload should be in use at once'; end if;
   p := kb_save_product(null, jsonb_build_object('insurer', 'Maple Life', 'name', 'Maple Term', 'category', 'Insurance', 'jurisdiction', 'Onshore',
         'currencies', '["SGD"]'::jsonb, 'entry_age_min', 18, 'entry_age_max', 60, 'residency', '["Singapore citizen","Singapore PR"]'::jsonb,
         'sa_min', 50000, 'sa_max', 2000000, 'has_ci', true,
         'facts', jsonb_build_object('_ps', jsonb_build_object('doc', d), 'death', jsonb_build_object('v', 'Yes', 'doc', d, 'page', 3), 'ad', jsonb_build_object('v', '', 'doc', d)),
         'rates', '[{"age":40,"gender":"Male","smoker":false,"rate":1.2},{"age":40,"gender":"Female","smoker":false,"rate":1.0,"ci_rate":0.9}]'::jsonb));
   insert into kbt values ('maple', p);
-  if not exists (select 1 from kb_products where id = p and status = 'draft' and pending_state = 'draft' and not (pending -> 'facts') ? 'ad') then raise exception 'new product should be a draft without empty facts'; end if;
-  if exists (select 1 from kb_checked_products where id = p) then raise exception 'a draft is offered for comparison'; end if;
-  perform kb_send_for_check(p);
-  raise notice 'ok: ops upload a document and send a new product record for check';
+  if not exists (select 1 from kb_products where id = p and status = 'verified' and version = 1 and pending is null and not facts ? 'ad' and not auto_read) then raise exception 'a saved record should be live without empty facts'; end if;
+  if (select count(*) from kb_rates where product_id = p) <> 2 or not exists (select 1 from kb_product_history where product_id = p and source = 'edit') then raise exception 'rates or history missing'; end if;
+  if not exists (select 1 from kb_checked_products where id = p) then raise exception 'a saved record should be searchable with no check'; end if;
+  perform kb_save_product(p, kb_record(p) || '{"sa_max": 3000000}');
+  if (select sa_max from kb_products where id = p) <> 3000000 or (select version from kb_products where id = p) <> 2 then raise exception 'an edit should go live as version 2'; end if;
+  raise notice 'ok: ops save a product record and it is searchable at once (no BSD check), edits are versions';
 end $$;
-select pg_temp.expect_error($$select kb_check_document((select v from kbt where k = 'doc1'))$$, 'Only BSD');
-select pg_temp.expect_error($$select kb_check_product((select v from kbt where k = 'maple'))$$, 'Only BSD');
+select pg_temp.expect_error($$select kb_send_for_check((select v from kbt where k = 'maple'))$$, 'permission denied');
 select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Maple Life","name":"maple term","category":"Insurance","jurisdiction":"Onshore","currencies":["SGD"],"entry_age_min":18,"entry_age_max":60,"residency":["Singapore PR"]}')$$, 'already a product record');
 select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Maple Life","name":"Other","category":"Insurance","jurisdiction":"Onshore","currencies":["SGD"],"entry_age_min":60,"entry_age_max":18,"residency":["Singapore PR"]}')$$, 'entry ages');
 select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Maple Life","name":"Other","category":"Insurance","jurisdiction":"Onshore","currencies":["SGD"],"entry_age_min":18,"entry_age_max":60,"residency":["Singapore PR"],"facts":{"death":{"v":"Yes"}}}')$$, 'source document');
-select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
-select pg_temp.expect_error($$select kb_check_product((select v from kbt where k = 'maple'))$$, 'not checked');
+-- A bare upload: what the reader found becomes a searchable product, tagged auto-read
+insert into storage.objects (bucket_id, name) values ('kb-docs', 'f3/oak-ps.pdf'), ('kb-docs', 'f3/oak-rates.csv'), ('kb-docs', 'f3/junk.pdf');
 do $$
-declare p uuid := (select v from kbt where k = 'maple');
+declare d uuid; r uuid; j uuid; p uuid; p2 uuid; pj uuid;
 begin
-  perform kb_check_document((select v from kbt where k = 'doc1'));
-  perform kb_check_product(p);
-  if not exists (select 1 from kb_products where id = p and status = 'verified' and version = 1 and pending is null and verified_by = '00000000-0000-0000-0000-000000000005') then raise exception 'check did not apply the record'; end if;
-  if (select count(*) from kb_rates where product_id = p) <> 2 or (select count(*) from kb_product_history where product_id = p) <> 1 then raise exception 'rates or history missing'; end if;
-  if not exists (select 1 from kb_checked_products where id = p) then raise exception 'checked product not offered'; end if;
-  -- BSD change their own record: someone else must check it
-  perform kb_save_product(p, kb_record(p) || '{"sa_max": 3000000}');
-  perform kb_send_for_check(p);
-  if (select sa_max from kb_products where id = p) <> 2000000 then raise exception 'the checked version should stay until the change is checked'; end if;
-  raise notice 'ok: bsd check a record made by ops; it can then be compared';
+  d := kb_add_document('{"insurer":"Oak Life","title":"Oak Term PS","doc_type":"Product Summary","effective_from":"2026-01-01","storage_path":"f3/oak-ps.pdf"}');
+  p := kb_auto_product(d, '{"insurer":"Oak Life","name":"Oak Term","record":{"currencies":["SGD","XYZ"],"entry_age_min":18,"entry_age_max":"60","sa_min":100000,"has_tpd":true},"facts":{"freelook":{"v":"14 days","page":2},"grace":{"v":"  "}},"found":["currencies","entry_age","sa_min","freelook"]}');
+  if not exists (select 1 from kb_products where id = p and status = 'verified' and auto_read and missing = '{}' and currencies = '{SGD}' and entry_age_max = 60
+                 and facts -> 'freelook' ->> 'doc' = d::text and (facts -> 'freelook' ->> 'page')::int = 2 and not facts ? 'grace' and facts -> '_ps' ->> 'doc' = d::text) then
+    raise exception 'auto-read record wrong: %', (select row_to_json(x) from kb_products x where id = p);
+  end if;
+  if not exists (select 1 from kb_checked_products where id = p and auto_read) then raise exception 'a bare upload should be searchable at once, tagged auto-read'; end if;
+  if (select product_id from kb_documents where id = d) <> p then raise exception 'the document should be linked to its product'; end if;
+  -- The rate sheet for the same product name goes on the same record
+  r := kb_add_document('{"insurer":"Oak Life","title":"Oak Term rates","doc_type":"Rate sheet","effective_from":"2026-01-01","storage_path":"f3/oak-rates.csv"}');
+  p2 := kb_auto_product(r, '{"insurer":"oak life","name":"OAK TERM","rates":[{"age":30,"gender":"Male","smoker":false,"rate":0.8,"ci_rate":0.5}],"found":["_rates"]}');
+  if p2 <> p or (select count(*) from kb_rates where product_id = p) <> 1 or not (select has_ci from kb_products where id = p)
+     or (select facts -> '_rs' ->> 'doc' from kb_products where id = p) <> r::text then raise exception 'the rate sheet should update the same record'; end if;
+  -- A file with nothing readable makes a record that is not searchable, and says why
+  j := kb_add_document('{"insurer":"Oak Life","title":"Brochure saved as PS","doc_type":"Product Summary","effective_from":"2026-01-01","storage_path":"f3/junk.pdf"}');
+  pj := kb_auto_product(j, '{"insurer":"Oak Life","name":"Mystery plan","found":[]}');
+  if not exists (select 1 from kb_products where id = pj and missing @> '{currencies,entry_age}') or exists (select 1 from kb_checked_products where id = pj) then
+    raise exception 'a record missing currency and entry age should not be searchable';
+  end if;
+  insert into kbt values ('oak', p), ('junk', pj), ('junkdoc', j);
+  perform kb_mark_reviewed(p);
+  if (select auto_read from kb_products where id = p) then raise exception 'reviewed tag not cleared'; end if;
+  if (select count(*) from kb_product_history where product_id = p and source = 'read') <> 2 then raise exception 'each read should be a version'; end if;
+  raise notice 'ok: a bare upload becomes a searchable auto-read product; incomplete reads are not searchable';
 end $$;
-select pg_temp.expect_error($$select kb_check_product((select v from kbt where k = 'maple'))$$, 'someone else must check');
-select pg_temp.expect_error($$select kb_send_back_product((select v from kbt where k = 'maple'), '')$$, 'Say what needs changing');
-select kb_send_back_product((select v from kbt where k = 'maple'), 'Check the maximum on page 2');
--- A new version of the Product Summary: once checked, the product gets a draft naming it
-select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select pg_temp.expect_error($$select kb_remove_document((select v from kbt where k = 'junkdoc'))$$, 'names this document');
+do $$ begin
+  perform kb_delete_product((select v from kbt where k = 'junk'));
+  perform kb_remove_document((select v from kbt where k = 'junkdoc'));
+  if exists (select 1 from kb_products where id = (select v from kbt where k = 'junk')) then raise exception 'product not deleted'; end if;
+  raise notice 'ok: a record from a wrong file can be deleted, then the file removed';
+end $$;
+-- A new version of the Product Summary takes over at once
 insert into storage.objects (bucket_id, name) values ('kb-docs', 'f2/maple-ps-v2.pdf');
 do $$
 declare d uuid := kb_add_document(jsonb_build_object('insurer', 'Maple Life', 'title', 'Maple Term Product Summary', 'doc_type', 'Product Summary', 'version', 'v2',
                    'effective_from', '2026-06-01', 'storage_path', 'f2/maple-ps-v2.pdf', 'replaces', (select v from kbt where k = 'doc1')));
+        p uuid := (select v from kbt where k = 'maple'); d1 uuid := (select v from kbt where k = 'doc1');
 begin
   insert into kbt values ('doc2', d);
-  if not exists (select 1 from kb_products where id = (select v from kbt where k = 'maple') and pending_note = 'Check the maximum on page 2' and pending_state = 'draft') then raise exception 'send-back note missing'; end if;
-end $$;
-select pg_temp.expect_error($$select kb_remove_document((select v from kbt where k = 'doc1'))$$, 'Only BSD can remove a checked');
-select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
-select pg_temp.expect_error($$select kb_remove_document((select v from kbt where k = 'doc1'))$$, 'names this document');
-do $$
-declare p uuid := (select v from kbt where k = 'maple'); d1 uuid := (select v from kbt where k = 'doc1'); d2 uuid := (select v from kbt where k = 'doc2');
-begin
-  perform kb_check_document(d2);
-  if (select replaced_by from kb_documents where id = d1) <> d2 then raise exception 'old version not replaced'; end if;
-  if not ((select pending from kb_products where id = p) -> 'facts' -> 'death' ->> 'doc' = d2::text) or (select pending_note from kb_products where id = p) not like 'New version%' then
-    raise exception 'product draft should name the new version';
+  if (select replaced_by from kb_documents where id = d1) <> d then raise exception 'old version not replaced'; end if;
+  if (select facts -> 'death' ->> 'doc' from kb_products where id = p) <> d::text or not (select auto_read from kb_products where id = p) then
+    raise exception 'the record should name the new version and be flagged for review';
   end if;
-  if not exists (select 1 from kb_checked_products where id = p) then raise exception 'the checked version should stay offered'; end if;
+  if kb_auto_product(d, '{"record":{"entry_age_min":18,"entry_age_max":65},"found":["entry_age"]}') <> p then raise exception 'a new version should update its record'; end if;
+  if (select entry_age_max from kb_products where id = p) <> 65 then raise exception 'new version values not applied'; end if;
+  if not exists (select 1 from kb_checked_products where id = p) then raise exception 'the product should stay searchable'; end if;
+  raise notice 'ok: a new document version takes over at once and is read into its record';
+end $$;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000005');
+do $$
+declare p uuid := (select v from kbt where k = 'maple');
+begin
   perform kb_withdraw_product(p, 'Insurer stopped selling it');
   if exists (select 1 from kb_checked_products where id = p) then raise exception 'withdrawn product still offered'; end if;
-  raise notice 'ok: new document versions, send back and withdraw';
+  perform kb_save_product(p, kb_record(p));
+  if exists (select 1 from kb_checked_products where id = p) then raise exception 'saving should not put a withdrawn product back'; end if;
+  perform kb_restore_product(p);
+  if not exists (select 1 from kb_checked_products where id = p) then raise exception 'restored product not offered'; end if;
+  raise notice 'ok: withdraw and put back';
 end $$;
--- Introducers with the module read checked, current documents only
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+select pg_temp.expect_error($$select kb_remove_document((select v from kbt where k = 'doc2'))$$, 'names this document');
+-- Introducers with the module read current documents only
 select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
 select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'knowledge_hub', true);
 select pg_temp.as_user('00000000-0000-0000-0000-000000000001');
 do $$ begin
   if exists (select 1 from kb_products) or exists (select 1 from kb_product_history) then raise exception 'introducer reads product records'; end if;
   if not exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc2'))
-     or exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc1') or status <> 'checked') then raise exception 'introducer should see only checked current documents'; end if;
+     or exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc1')) then raise exception 'introducer should see only current documents'; end if;
   if not exists (select 1 from storage.objects where name = 'f2/maple-ps-v2.pdf') or exists (select 1 from storage.objects where name = 'f1/maple-ps.pdf') then
     raise exception 'introducer file access wrong';
   end if;
-  raise notice 'ok: introducers with the Knowledge Hub read checked current documents';
+  raise notice 'ok: introducers with the Knowledge Hub read current documents';
 end $$;
 select pg_temp.expect_error($$select kb_add_document('{}')$$, 'Only ops and BSD');
+select pg_temp.expect_error($$select kb_auto_product((select v from kbt where k = 'doc2'), '{}')$$, 'Only ops and BSD');
 select pg_temp.expect_error($$insert into storage.objects (bucket_id, name) values ('kb-docs', 'x/y.pdf')$$, 'row-level security');
 select pg_temp.as_user('00000000-0000-0000-0000-000000000006');
 select admin_set_user_module('00000000-0000-0000-0000-000000000001', 'knowledge_hub', null);
@@ -855,20 +881,6 @@ do $$ begin
   if exists (select 1 from kb_documents) then raise exception 'admin reads the Knowledge Bank'; end if;
   if (select count(*) from audit_log where action like 'kb.%') < 10 then raise exception 'Knowledge Bank changes not audited'; end if;
   raise notice 'ok: Knowledge Bank changes are in the audit log';
-end $$;
--- A draft that was never checked is deleted when discarded; its documents stay
-select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
-do $$
-declare p uuid := kb_save_product(null, jsonb_build_object('insurer', 'Maple Life', 'name', 'Maple Draft', 'category', 'Insurance', 'jurisdiction', 'Onshore',
-          'currencies', '["SGD"]'::jsonb, 'entry_age_min', 18, 'entry_age_max', 60, 'residency', '["Singapore PR"]'::jsonb,
-          'facts', jsonb_build_object('death', jsonb_build_object('v', 'Yes', 'doc', (select v from kbt where k = 'doc2')))));
-begin
-  declare r boolean; begin
-    r := kb_discard_draft(p);   -- a separate statement, so the check below sees the delete
-    if not r or exists (select 1 from kb_products where id = p) then raise exception 'draft not deleted'; end if;
-  end;
-  if not exists (select 1 from kb_documents where id = (select v from kbt where k = 'doc2')) then raise exception 'document lost'; end if;
-  raise notice 'ok: discarding a never-checked draft deletes it';
 end $$;
 
 -- 22. Product Comparison Matrix: "Add to PI request" by PI number
@@ -958,7 +970,7 @@ begin
   perform kb_update_document(o, '{"title":"Underwriting tips","doc_type":"Guide","doc_type_name":"x","insurer":"Maple Life","effective_from":"2026-01-01"}');
   if (select doc_type_name from kb_documents where id = o) is not null then raise exception 'name kept for a fixed type'; end if;
   perform kb_update_document(o, '{"title":"Underwriting tips","doc_type":"Others","doc_type_name":"Checklist","effective_from":"2026-01-01"}');
-  if not exists (select 1 from kb_documents where id = o and doc_type_name = 'Checklist' and insurer = '' and status = 'new') then raise exception 'changing to Others did not apply'; end if;
+  if not exists (select 1 from kb_documents where id = o and doc_type_name = 'Checklist' and insurer = '' and status = 'checked') then raise exception 'changing to Others did not apply'; end if;
   raise notice 'ok: Knowledge Bank document types incl. Others with a typed name';
 end $$;
 select pg_temp.expect_error($$select kb_add_document('{"title":"Note","doc_type":"Others","doc_type_name":"a very long name that goes on and on past the sixty character limit","effective_from":"2026-01-01","storage_path":"f9/a.pdf"}')$$, '60 characters');

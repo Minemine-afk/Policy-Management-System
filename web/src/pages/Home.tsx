@@ -55,23 +55,27 @@ function usePiBadges(on: boolean, introducer: boolean, soonHours: number): Badge
   return badges
 }
 
-/** Counts on the Knowledge Hub tile for ops and bsd: what waits for a check, and documents running out of date. */
+/** Counts on the Knowledge Hub tile for ops and bsd: products read but not yet reviewed, products that cannot be
+ *  found in search, and documents running out of date. */
 function useKbBadges(on: boolean): Badge[] {
   const [badges, setBadges] = useState<Badge[]>([])
   useEffect(() => {
     if (!on) return
     let live = true
     Promise.all([
-      supabase.from('kb_documents').select('status, valid_until, replaced_by'),
-      supabase.from('kb_products').select('pending_state'),
+      supabase.from('kb_documents').select('valid_until, replaced_by'),
+      supabase.from('kb_products').select('auto_read, missing, status'),
     ]).then(([d, p]) => {
       if (!live) return
       const soon = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10)
-      const docs = (d.data ?? []) as { status: string; valid_until: string | null; replaced_by: string | null }[]
-      const check = docs.filter((x) => x.status === 'new').length + ((p.data ?? []) as { pending_state: string | null }[]).filter((x) => x.pending_state === 'check').length
+      const docs = (d.data ?? []) as { valid_until: string | null; replaced_by: string | null }[]
+      const prods = (p.data ?? []) as { auto_read: boolean; missing: string[] | null; status: string }[]
+      const auto = prods.filter((x) => x.auto_read && x.status === 'verified').length
+      const stuck = prods.filter((x) => x.status !== 'withdrawn' && (x.missing?.length ?? 0) > 0).length
       const expiring = docs.filter((x) => !x.replaced_by && x.valid_until && x.valid_until <= soon).length
       const out: Badge[] = []
-      if (check) out.push({ text: `${fmtNum(check)} to check`, tone: 'info' })
+      if (auto) out.push({ text: `${fmtNum(auto)} not yet reviewed`, tone: 'info' })
+      if (stuck) out.push({ text: `${fmtNum(stuck)} not searchable`, tone: 'warn' })
       if (expiring) out.push({ text: `${fmtNum(expiring)} document${expiring === 1 ? '' : 's'} expiring`, tone: 'warn' })
       setBadges(out)
     })
