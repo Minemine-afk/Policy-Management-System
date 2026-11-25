@@ -17,6 +17,8 @@ import { amounts, currenciesIn, ints, isNegative, residencyOf, riderLabel, summa
 import type { ProductRecord } from './kbAdmin'
 import { parseAnswer } from './piAi.ts'
 import { plain } from './num.ts'
+import { FIN_AI_FACTS, FIN_AI_KEYS } from './kbFinancing.ts'
+import { isFinancing } from './families.ts'
 
 /** Record fields the AI may fill. Each is one key in the model's answer. */
 export const KB_AI_RECORD = ['entry_age', 'sum_assured', 'currencies', 'residency'] as const
@@ -46,6 +48,9 @@ export const KB_AI_FACTS: { key: string; ask: string; find: RegExp; must: RegExp
   { key: 'grace', ask: 'the grace period for paying premiums', find: /grace/i, must: [/grace period/i, /\d+\s*days|\b(?:thirty|sixty|thirty[- ]one) days/i] },
   { key: 'reinstate', ask: 'how a lapsed policy can be reinstated', find: /reinstat|revive|restore/i, must: [/reinstat|revive|restore/i, /lapse|apply|request|within|evidence|health|arrears/i], not: /suicide|will not pay|exclu|date we last|reinstatement date|date of reinstatement/i },
 ]
+
+// A bank's premium financing document has its own facts (kbFinancing.ts).
+KB_AI_FACTS.push(...FIN_AI_FACTS)
 
 /** About 1,500 tokens per question: small enough to read quickly on an office laptop. */
 export const KB_MAX_CHARS = 5500
@@ -120,12 +125,16 @@ export function kbQuestions(doc: ReadDoc, blank: { record: string[]; facts: stri
 /** What the reader's rules left blank, for kbQuestions. */
 export function blankOf(s: SummaryResult): { record: string[]; facts: string[] } {
   const r = s.record
+  // A financing document: only its loan currencies and its own facts (a loan has no entry ages or sum assured).
+  if (isFinancing(s.planType)) {
+    return { record: r.currencies?.length ? [] : ['currencies'], facts: FIN_AI_FACTS.map((f) => f.key).filter((k) => !s.facts[k]?.v) }
+  }
   const record: string[] = []
   if (r.entry_age_min == null || r.entry_age_max == null) record.push('entry_age')
   if (r.sa_min == null && r.sa_max == null) record.push('sum_assured')
   if (!r.currencies?.length) record.push('currencies')
   if (!r.residency?.length) record.push('residency')
-  return { record, facts: KB_AI_FACTS.map((f) => f.key).filter((k) => !s.facts[k]?.v) }
+  return { record, facts: KB_AI_FACTS.map((f) => f.key).filter((k) => !FIN_AI_KEYS.has(k) && !s.facts[k]?.v) }
 }
 
 /** What passed the checks: record fields and facts (each fact with its page), and the keys whose answers failed. */

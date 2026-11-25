@@ -12,7 +12,7 @@ import {
 import { buildComparisonPdf } from '../lib/kbPdf'
 import { AmountInput } from './ui'
 import { fmtNum } from '../lib/num'
-import { GROUPS, groupLabel, groupOf, planLabel, plansIn } from '../lib/families'
+import { GROUPS, comparedIn, groupLabel, groupOf, planLabel } from '../lib/families'
 
 export const MAX_COMPARE = 3
 
@@ -130,7 +130,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
                 category: e.target.value !== 'All' && s.category !== 'All' && groupOf(e.target.value) !== s.category ? 'All' : s.category }))}>
                 <option value="All">All plan types</option>
                 {GROUPS.filter((g) => n.category === 'All' || g === n.category).map((g) => <optgroup key={g} label={groupLabel(g)}>
-                  {plansIn(g).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}</optgroup>)}
+                  {comparedIn(g).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}</optgroup>)}
               </select></div>
             <div className="field wf"><span className="wf-head">{badge(6)}Budget or coverage</span>
               <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>

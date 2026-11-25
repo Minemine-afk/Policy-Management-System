@@ -37,6 +37,7 @@ On a normal machine, use `supabase start` instead and you don't need any of this
 
 Knowledge Bank reader (fills product records from a Product Summary or rate sheet, PDF/Excel/CSV): `node tests/kb-extract/check.mjs`
 (made-up documents from `tests/kb-extract/make-samples.mjs`). The walkthrough also uploads them and checks what is filled in.
+Premium financing documents (CIMB factsheet, iFAST cost-of-funds sheet): `node tests/kb-extract/check-financing.mjs [folder] [--ai]`.
 Real Singapore documents: `node tests/kb-extract/check-real.mjs [folder]` (5 real Product Summaries and the Great Eastern Cares rate
 sheet, kept in the project files under product-matrix/kb-real-summaries/; expected rates in `tests/kb-extract/expected-ge-cares-rates.json`).
 Free AI helper for Product Summaries (the same model as the PI helper; fills only what the rules left blank, every answer must

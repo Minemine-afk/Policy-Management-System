@@ -70,6 +70,11 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
    - `1w-upgrade.sql` (25 Nov: one Product field with the 12 categories under it; a document such as a bank's
      premium financing rates can belong to a whole category, e.g. "All Universal life incl. indexed (inv) products").
      Run it after 1v. Until you run it, uploads work but a category picked without a product is not saved.
+   - `1x-upgrade.sql` (25 Nov: a 13th category, Premium financing (ins). A bank's Product Financing document (CIMB
+     factsheet, iFAST monthly cost-of-funds sheet) is read into a Premium financing product record with its facts and
+     cost-of-funds rates, and can be saved, edited and versioned like any record. Premium financing is not offered in
+     Compare products for now. Product Financing documents filed under "All products" move to Premium financing).
+     Run it after 1w. Until you run it, financing documents are kept as documents but make no product record.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 

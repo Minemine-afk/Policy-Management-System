@@ -8,14 +8,19 @@ import { readFile, readRates, readSummary, readableName, type ReadDoc, type Rate
 import { blankOf, checkKbAnswers, kbQuestions, mergeKbFill, parseAnswer } from './kbAi'
 import { fmtNum, plain } from './num'
 import { missingText } from './kbAdmin'
-import { TERM, planLabel } from './families'
+import { FINANCING, TERM, planLabel } from './families'
+import { readFinancing, type FinancingResult } from './kbFinancing'
 
-/** Document types read into a product record on upload. */
-export const READ_TYPES = ['Product Summary', 'Rate sheet']
+/** Document types read into a product record on upload. A bank's Product Financing document is read into a
+ *  Premium financing record (kbFinancing.ts). */
+export const READ_TYPES = ['Product Summary', 'Rate sheet', 'Product Financing']
+export const FINANCING_DOC = 'Product Financing'
 export const readsInto = (docType: string, fileName: string | null | undefined) => READ_TYPES.includes(docType) && readableName(fileName)
 
 export interface Reading {
-  kind: 'summary' | 'rates'; summary?: SummaryResult; rates?: RatesResult; error?: string
+  kind: 'summary' | 'rates' | 'financing'; summary?: SummaryResult; rates?: RatesResult; error?: string
+  /** A financing document as read (its `summary` is the same reading, for the shared steps). */
+  financing?: FinancingResult
   /** The document as read, for the AI helper. */
   doc?: ReadDoc
   /** What the AI helper filled (record field names and fact keys). */
@@ -28,9 +33,10 @@ export const aiKeysOf = (fields: string[] | null | undefined) => (fields ?? []).
 
 /** Reads a file the person picked (or downloaded). Never throws: a file it can't read comes back with an error. */
 export async function readUpload(data: ArrayBuffer, name: string, docType: string, onProgress?: (t: string) => void): Promise<Reading> {
-  const kind = docType === 'Rate sheet' ? 'rates' : 'summary'
+  const kind = docType === 'Rate sheet' ? 'rates' : docType === FINANCING_DOC ? 'financing' : 'summary'
   try {
     const doc = await readFile(data, name, (done, total, ocr) => onProgress?.(`Reading ${name}: page ${plain(Math.min(total, Math.floor(done) + 1))} of ${plain(total)}${ocr ? ' (scanned, reading the picture)' : ''}…`))
+    if (kind === 'financing') { const f = readFinancing(doc); return { kind, financing: f, summary: f, doc } }
     if (kind === 'summary') return { kind, summary: readSummary(doc), doc }
     const r = readRates(doc)
     return { kind, rates: r, error: r.error || undefined }
@@ -57,8 +63,10 @@ export function autoPayload(r: Reading, target: Target) {
   if (rates.length) found.push('_rates')
   const notes = [...(r.summary?.notes ?? []), ...(r.rates?.notes ?? []), ...(r.error ? [r.error] : [])].join(' ')
   // The plan type: the one chosen on the upload form, else the one the document says (never guessed: left out when neither).
-  const product_type = target.product_type || r.summary?.planType || undefined
-  return { product_id: target.product_id || null, insurer: target.insurer.trim(), name: target.name.trim(), product_type, record, facts, rates, found: [...new Set(found)], notes }
+  const product_type = r.financing ? FINANCING : target.product_type || r.summary?.planType || undefined
+  const fin = r.financing ? { fin_rates: r.financing.finRates, source: r.financing.source } : {}
+  if (r.financing?.finRates.length) found.push('_fin_rates')
+  return { product_id: target.product_id || null, insurer: target.insurer.trim(), name: target.name.trim(), product_type, record, facts, rates, ...fin, found: [...new Set(found)], notes }
 }
 
 /** How many things the AI helper would be asked about (what the rules left blank); 0 for rate sheets and documents
@@ -102,7 +110,14 @@ export function allPlanTypesReady(): Promise<boolean> {
   return plansReady
 }
 /** Empty when the reading can go on a record; else why not (only before 1v-upgrade.sql). */
+let finReady: Promise<boolean> | null = null
+/** Premium financing records need 1x-upgrade.sql. */
+export function financingReady(): Promise<boolean> {
+  finReady ??= Promise.resolve(supabase.rpc('kb_plan_types')).then(({ data, error }) => !error && JSON.stringify(data ?? []).includes(FINANCING), () => false)
+  return finReady
+}
 export async function notSavedLine(r: Reading, type: string | undefined): Promise<string> {
+  if (r.financing && !await financingReady()) return 'The database does not have the Premium financing category yet (1x-upgrade.sql has not been run), so no product record was made from it. The document is kept in the Knowledge Bank.'
   const t = type || r.summary?.planType || ''
   if (!t || t === TERM || await allPlanTypesReady()) return ''
   return `This Product Summary is for ${planLabel(t)}. The database still takes term plans only (1v-upgrade.sql has not been run), so no product record was made from it. The document is kept in the Knowledge Bank.`
@@ -127,6 +142,10 @@ export const readInsurer = (r: Reading | null) => r?.summary?.record.insurer?.tr
 
 /** One line on what was read, for the upload form. */
 export function readingLine(r: Reading): string {
+  if (r.financing) {
+    const f = r.financing.filled
+    return f.length > 1 ? `Read: ${f.join(', ')}.` : 'Nothing could be read from this file. The product record is made; fill in its details on the record.'
+  }
   if (r.summary) {
     const f = r.summary.filled
     return f.length ? `Read: ${f.join(', ')}.` : 'Nothing could be read from this file. The product record is made, but it is not searchable until its details are filled in.'
@@ -139,7 +158,9 @@ export function readingLine(r: Reading): string {
 }
 
 /** After a reading is saved: is the product in search, and if not, why. */
-export function afterRead(r: { missing: string[]; searchable: boolean }) {
+export function afterRead(r: { missing: string[]; searchable: boolean }, financing = false) {
+  if (financing) return r.missing.length ? `The Premium financing record is made, but the ${missingText(r.missing)} ${r.missing.length > 1 ? 'were' : 'was'} not found: open the record to fill ${r.missing.length > 1 ? 'them' : 'it'} in.`
+    : 'It is saved as a Premium financing product record, marked "Auto-read, not yet reviewed". Premium financing is not offered in Compare products for now.'
   const noAges = r.missing.includes('entry_age') ? ' The document does not state the entry ages, so it is marked "Entry ages not stated in the document" and the age filter skips it; open the record to type them in.' : ''
   if (r.searchable) return `The product is in search now (Compare products and the Product Comparison Matrix), marked "Auto-read, not yet reviewed".${noAges}`
   if (r.missing.length) return `The product record is made but is not searchable yet: the ${missingText(r.missing)} ${r.missing.length > 1 ? 'were' : 'was'} not found in the document.`

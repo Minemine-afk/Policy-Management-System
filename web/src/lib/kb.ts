@@ -3,7 +3,7 @@
 // Facts only: nothing here ranks products or says which suits the client (no advice, MAS).
 import { supabase } from './supabase'
 import { fmtNum, groupMoneyInText, plain } from './num.ts'
-import { ILP_NOTE, mixedNote, planKey, planLabel } from './families.ts'
+import { FINANCING, ILP_NOTE, mixedNote, planKey, planLabel } from './families.ts'
 
 export interface KbFact { v: string; doc?: string; page?: number }
 export interface KbProduct {
@@ -145,11 +145,28 @@ export const FACT_ROWS: { cat: string; label: string; key: string; only?: string
   { cat: 'Policy conditions', label: 'Grace period', key: 'grace' },
   { cat: 'Policy conditions', label: 'Reinstatement', key: 'reinstate' },
   { cat: 'Policy conditions', label: 'Main exclusions', key: 'excl' },
+  // Premium financing (a bank loan for a policy's premium): its own rows, and only "Other fees", "Special provisions"
+  // and "Important considerations" of the rows above.
+  { cat: 'Premium financing', label: 'Policies it can finance', key: 'finPolicies', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Pricing', key: 'finPricing', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Spread', key: 'finSpread', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Cost of funds (COF)', key: 'finCof', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Repricing', key: 'finReprice', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Financing tenors', key: 'finTenor', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Quantum of finance (how much can be borrowed)', key: 'finQuantum', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Cancellation fee', key: 'finCancel', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Margin call and close out', key: 'finMargin', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Key risks', key: 'finRisks', only: [FINANCING] },
+  { cat: 'Premium financing', label: 'Conditions on the rates', key: 'finTerms', only: [FINANCING] },
   { cat: 'Special provisions', label: 'Special provisions', key: 'special' },
   { cat: 'Important considerations', label: 'Important considerations', key: 'consider' },
 ]
 /** Does this row apply to this plan type? */
-export const rowApplies = (row: { only?: string[] }, type: string | null | undefined) => !row.only || row.only.includes(planKey(type))
+/** The rows without `only` that a premium financing record has (the rest are about policies). */
+const FINANCING_ALSO = new Set(['_insurer', '_type', '_cur', 'fees', 'special', 'consider'])
+export const rowApplies = (row: { key?: string; only?: string[] }, type: string | null | undefined) =>
+  planKey(type) === FINANCING ? !!row.only?.includes(FINANCING) || (!row.only && FINANCING_ALSO.has(row.key ?? ''))
+    : !row.only || row.only.includes(planKey(type))
 /** A row that does not apply to a product's plan type. */
 export const NOT_APPLICABLE = 'Not applicable'
 export const NOT_AVAILABLE = 'Not available'

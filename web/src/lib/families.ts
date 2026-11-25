@@ -6,6 +6,11 @@
 // * Whole life is grouped as insurance and universal life as investment. Under MAS Notice FAA-N16 every life policy
 //   that is not investment-linked is an Excluded Investment Product; only investment-linked policies are Specified
 //   Investment Products, with the stricter advice and disclosure rules.
+// * Premium financing (Kumar, 25 Nov 2026: "financing documents as a product type since they are also an add on
+//   policy") is a bank loan that pays part of a policy's premium: neither insurance nor an investment product. It is
+//   tagged (ins) because Kumar describes it as an add-on to a policy; to make it (inv), change its group here and in
+//   kb_plan_group (1x-upgrade.sql). Premium financing records are kept in the Knowledge Bank but are NOT offered in
+//   Compare products or the Product Comparison Matrix for now (kb_checked_products leaves them out).
 export interface PlanType { key: string; label: string; group: 'Insurance' | 'Investment' }
 
 export const PLAN_TYPES: PlanType[] = [
@@ -21,9 +26,17 @@ export const PLAN_TYPES: PlanType[] = [
   { key: 'Universal life', label: 'Universal life incl. indexed', group: 'Investment' },
   { key: 'Endowment', label: 'Endowment', group: 'Investment' },
   { key: 'Retirement and annuity', label: 'Retirement and annuity', group: 'Investment' },
+  { key: 'Premium financing', label: 'Premium financing', group: 'Insurance' },
 ]
 export const PLAN_KEYS = PLAN_TYPES.map((t) => t.key)
 export const TERM = 'Term life'
+/** Bank loans that pay part of a policy's premium (an add-on to a policy, not a policy). */
+export const FINANCING = 'Premium financing'
+export const isFinancing = (k: string | null | undefined) => k === FINANCING
+/** Shown on a premium financing record. */
+export const FINANCING_NOTE = 'Premium financing is a loan from a bank, not an insurance policy, and the bank offers it under its own terms ' +
+  'and the rules MAS sets for banks. The client takes on interest rate, margin call and close-out risks: the bank can surrender the policy ' +
+  'if the loan goes over its limits. These facts are copied from the bank\'s documents; they are not advice on whether to borrow.'
 export const GROUPS = ['Insurance', 'Investment'] as const
 export const groupTag = (g: string) => (g === 'Investment' ? 'inv' : 'ins')
 /** "Insurance (ins)", "Investment (inv)". */
@@ -40,6 +53,8 @@ export const planLabel = (k: string | null | undefined) => {
 }
 /** Plan types in one group ('All' = every type). */
 export const plansIn = (group: string) => PLAN_TYPES.filter((t) => group === 'All' || !group || t.group === group)
+/** The same, without premium financing (for Compare products and the Product Comparison Matrix). */
+export const comparedIn = (group: string) => plansIn(group).filter((t) => t.key !== FINANCING)
 
 /** Investment-linked policies are Specified Investment Products (MAS): shown whenever one is compared. */
 export const ILP_NOTE = 'Investment-linked policies are Specified Investment Products under MAS rules: stricter advice and disclosure rules apply ' +

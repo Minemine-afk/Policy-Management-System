@@ -8,8 +8,8 @@ import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
-import { afterRead, aiAskCount, fillWithAi, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
-import { GROUPS, PLAN_TYPES, groupLabel, groupOf, planKey, planLabel, plansIn } from '../lib/families'
+import { FINANCING_DOC, afterRead, aiAskCount, fillWithAi, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
+import { FINANCING, GROUPS, PLAN_TYPES, groupLabel, groupOf, isFinancing, planKey, planLabel, plansIn } from '../lib/families'
 import {
   DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, hasProduct, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
   type KbDoc, type KbProductRow,
@@ -88,13 +88,15 @@ export function KbDocuments() {
     const dl = d.storage_path ? await supabase.storage.from('kb-docs').download(d.storage_path) : null
     if (!dl?.data) { setBusyRead(''); setError(dl?.error?.message ?? 'This document has no file.'); return }
     const r = await readUpload(await dl.data.arrayBuffer(), d.file_name ?? '', d.doc_type)
-    const name = products.find((p) => p.id === d.product_id)?.name || readName(r) || d.title
-    const res = await saveReading(d.id, r, { product_id: d.product_id, insurer: d.insurer, name, product_type: productOf(d) ? planKey(productOf(d)!.product_type) : undefined })
+    // A financing document linked to a policy's record (e.g. "financing for this UL plan") makes its own record.
+    const own = productOf(d) && (d.doc_type !== FINANCING_DOC || isFinancing(productOf(d)!.product_type)) ? productOf(d) : undefined
+    const name = own?.name || readName(r) || d.title
+    const res = await saveReading(d.id, r, { product_id: own?.id ?? null, insurer: d.insurer || readInsurer(r), name, product_type: own ? planKey(own.product_type) : undefined })
     setBusyRead('')
     if ('error' in res && res.error) { setError(says(res.error)); return }
     if ('skipped' in res && res.skipped) { setMsg(res.skipped); return }
     const ok = res as { id: string; missing: string[]; searchable: boolean }
-    setMsg(`${readingLine(r)} ${afterRead(ok)}`); setMade({ id: ok.id, searchable: ok.searchable }); reload()
+    setMsg(`${readingLine(r)} ${afterRead(ok, !!r.financing)}`); setMade({ id: ok.id, searchable: ok.searchable || !!r.financing }); reload()
   }
   async function remove(d: KbDoc) {
     setError(''); setMsg(''); setMade(null)
@@ -219,7 +221,8 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const [newName, setNewName] = useState('')        // the product name for a new product record
   // The plan type (product category): the chosen product's, else what the reader found, else what the person picks.
   const startProduct = products.find((p) => p.id === (doc?.product_id ?? preset?.product_id))
-  const [plan, setPlan] = useState(startProduct ? planKey(startProduct.product_type) : doc?.plan_type ? planKey(doc.plan_type) : '')
+  const [plan, setPlan] = useState(startProduct ? planKey(startProduct.product_type) : doc?.plan_type ? planKey(doc.plan_type)
+    : (doc?.doc_type ?? preset?.doc_type) === FINANCING_DOC ? FINANCING : '')
   const [planTouched, setPlanTouched] = useState(false)
   // Whether the person (or the page that opened this) chose the product, not the reader.
   const [productTouched, setProductTouched] = useState(!!(doc?.product_id ?? preset?.product_id))
@@ -248,7 +251,11 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const ownNames = useMemo(() => customTypeNames(docs), [docs])
   const title = mode === 'new' ? 'Upload document' : mode === 'version' ? `New version of ${doc!.title}` : `Edit ${doc!.title}`
   // A Product Summary or rate sheet is read into a product record on upload: an existing one, or a new one by name.
+  // A financing document is read only into a Premium financing record (or a new one), never into a policy's record.
+  const pickedRecord = products.find((p) => p.id === (mode === 'version' ? doc?.product_id : f.product_id))
   const reads = read && mode !== 'edit' && !!file && readsInto(f.doc_type, file.name)
+    && !(f.doc_type === FINANCING_DOC && pickedRecord && !isFinancing(pickedRecord.product_type))
+    && !(f.doc_type === FINANCING_DOC && !pickedRecord && plan && !isFinancing(plan))
   const target = mode === 'version' ? (doc?.product_id ?? '') : f.product_id
   const needName = reads && mode === 'new' && !target
 
@@ -283,6 +290,9 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
       return next
     })
     if (r.summary?.planType) setPlan((p) => (planTouched && p ? p : r.summary!.planType))
+    // A monthly rate sheet says which month it is for: its dates, so out-of-date rates show as out of date.
+    const fin = r.financing
+    if (fin) setF((s) => ({ ...s, effective_from: s.effective_from || fin.effectiveFrom || '', valid_until: s.valid_until || fin.validUntil || '', version: s.version || fin.version || '' }))
     setNewName((n) => n || nm || x.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').replace(/\s*(product summary|rates?|rate sheet)\s*$/i, '').trim())
   }
 
@@ -299,6 +309,9 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   }
   function setType(t: string) {
     set('doc_type', t)
+    // Product Financing documents go under Premium financing unless the person picked something else.
+    if (t === FINANCING_DOC && !planTouched && !f.product_id) setPlan(FINANCING)
+    else if (t !== FINANCING_DOC && !planTouched && plan === FINANCING) setPlan('')
     // A category or product the reader guessed from the file does not carry over to a type that is not read
     // (e.g. a bank's Product Financing rates): it starts at "All products" until the person picks.
     if (file && !readsInto(t, file.name) && mode === 'new') {
@@ -341,7 +354,8 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
       else {
         const ok = res as { id: string; missing: string[]; searchable: boolean }
         created.product = ok.id; created.searchable = ok.searchable
-        msg += ` ${readingLine(r)} ${afterRead(ok)}`
+        msg += ` ${readingLine(r)} ${afterRead(ok, !!r.financing)}`
+        if (r.financing) created.searchable = true
       }
     }
     setBusy(false)
@@ -426,7 +440,9 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
         )}
         {aiError && !progress && <div className="notice warn" role="status">{aiError}</div>}
         <p className="small muted" style={{ margin: 0 }}>
-          {reads ? 'On upload, what was read goes on the product record and the product can be found in Compare products straight away, marked "Auto-read, not yet reviewed". Reviewing or changing the record afterwards is optional.'
+          {reads && f.doc_type === FINANCING_DOC ? 'On upload, what was read goes on a Premium financing product record (the bank as the lender), marked "Auto-read, not yet reviewed". Premium financing is kept in the Knowledge Bank and not offered in Compare products for now.'
+            : f.doc_type === FINANCING_DOC && file && mode !== 'edit' && !reads ? 'This financing document is filed with the policy record or category chosen and is not read. To read it into a Premium financing record, choose Premium financing in the Product field.'
+            : reads ? 'On upload, what was read goes on the product record and the product can be found in Compare products straight away, marked "Auto-read, not yet reviewed". Reviewing or changing the record afterwards is optional.'
             : mode === 'version' ? 'The new version replaces this one as soon as it is uploaded.'
             : mode === 'edit' ? 'The changes apply at once.'
             : 'The document is in use as soon as it is uploaded.'}
@@ -458,7 +474,8 @@ export function KbProducts() {
   }, [])
   const offered = products.filter((p) => usable.has(p.id)).length
   const auto = products.filter((p) => usable.has(p.id) && p.auto_read).length
-  const notIn = products.filter((p) => !usable.has(p.id) && p.status !== 'withdrawn').length
+  const notIn = products.filter((p) => !usable.has(p.id) && p.status !== 'withdrawn' && !isFinancing(p.product_type)).length
+  const loans = products.filter((p) => isFinancing(p.product_type) && p.status !== 'withdrawn').length
   const soon = products.filter((p) => usable.has(p.id) && Object.values(p.facts ?? {}).some((f) => {
     const d = docs.find((x) => x.id === f?.doc); const left = daysLeft(d?.valid_until ?? null); return left != null && left <= 40
   })).length
@@ -473,6 +490,7 @@ export function KbProducts() {
         <div className="card stat"><strong>{fmtNum(auto)}</strong><span className="pill warn">Auto-read, not yet reviewed</span></div>
         <div className="card stat"><strong>{fmtNum(notIn)}</strong><span className="pill bad">Not searchable</span></div>
         <div className="card stat"><strong>{fmtNum(soon)}</strong><span className="pill warn">Source document expires within 40 days</span></div>
+        {loans > 0 && <div className="card stat"><strong>{fmtNum(loans)}</strong><span className="pill info">Premium financing (kept, not in search)</span></div>}
       </div>
       <section className="card" aria-label="Product records">
         <div className="row" style={{ gap: 12 }}>
@@ -484,7 +502,7 @@ export function KbProducts() {
             <thead><tr><th>Insurer</th><th>Product</th><th>Product category</th><th>Status</th><th className="num">Version</th><th>Facts taken from</th><th>Last saved by</th><th><span className="sr-only">Open</span></th></tr></thead>
             <tbody>
               {listed.map((p) => {
-                const st = productState(p, usable.has(p.id))
+                const st = productState(p, usable.has(p.id), docs)
                 const why = whyNotSearchable(p, usable.has(p.id))
                 return (
                   <tr key={p.id}>
@@ -493,7 +511,7 @@ export function KbProducts() {
                     <td className="small">{planLabel(p.product_type)}</td>
                     <td><span className={`pill ${st.tone}`}>{st.text}</span>{why && p.status !== 'withdrawn' && <div className="small muted" style={{ maxWidth: 320 }}>{why}</div>}</td>
                     <td className="num">{p.verified_at ? `v${plain(p.version)}` : '—'}</td>
-                    <td className="small">{docName(p.facts?._ps?.doc)}<br />{docName(p.facts?._rs?.doc)}</td>
+                    <td className="small">{docName(p.facts?._ps?.doc)}<br />{docName(p.facts?._rs?.doc ?? p.facts?._cof?.doc)}</td>
                     <td className="small">{p.verified_by ? <>{nameOf(people, p.verified_by)}<br />{fmtDate(p.verified_at)}</> : p.auto_read ? <>Read from the document<br />{fmtDate(p.verified_at)}</> : p.verified_at ? fmtDate(p.verified_at) : <span className="muted">—</span>}</td>
                     <td><Link className="btn small" to={`/kb/products/${p.id}`} aria-label={`Open ${p.name}`}>Open</Link></td>
                   </tr>
@@ -507,6 +525,7 @@ export function KbProducts() {
         <p className="small muted" style={{ margin: 0 }}>
           A product is in search as soon as its Product Summary (or rate sheet) is uploaded and its policy currency and entry ages are known.
           Reviewing or changing the record is optional; saving a change puts it in search at once and keeps the earlier version in the history.
+          Premium financing records (read from a bank's Product Financing document) are kept here with their rates but are not offered in Compare products for now.
         </p>
       </section>
     </main>
