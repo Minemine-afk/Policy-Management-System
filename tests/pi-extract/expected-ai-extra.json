@@ -1,0 +1,16 @@
+{
+  "_about": "Extra truths for check-ai.mjs (merged over expected-unknown-formats.json with --extra): the values the AI helper fills that the rules file does not score, checked by hand against each PI on 25 Nov 2026. Renewable term quotes: policy and premium term = the initial term. Base premium = the plan's own premium per year (no riders are quoted in these PIs).",
+  "CA_BMO_Term20_2024.pdf": {"policy_term": "20", "premium_term": "20"},
+  "CA_Desjardins_LifeTerm20_2024.pdf": {"policy_term": "20", "premium_term": "20", "tpd_premium": "", "ci_premium": ""},
+  "CA_EmpireLife_Solution20_2024.pdf": {"policy_term": "20", "premium_term": "NOT:1", "base_premium": "137.16"},
+  "CA_Equitable_Term20_2024.pdf": {"policy_term": "20", "policy_name": "NOT:Term Life Insurance", "tpd_premium": "", "ci_premium": "", "premium_term": "20"},
+  "CA_Manulife_FamilyTerm20_2024.pdf": {"policy_term": "20", "premium_term": "NOT:12", "base_premium": "NOT:100000"},
+  "CA_RBC_YourTerm20_2024.pdf": {"premium_term": "20"},
+  "CA_iA_TermQuote_2024.pdf": {"policy_name": "~Term 20", "policy_term": "20"},
+  "MY_HLA_MDTA-DreadDisease_PDS_2025.pdf": {"death_sa": "", "base_premium": ""},
+  "MY_Manulife_EasyProtect_PDS_2021.pdf": {"death_sa": "", "tpd_sa": "", "base_premium": ""},
+  "MY_Zurich_DirectTerm_PDS.pdf": {"base_premium": "1325.00"},
+  "MY_Zurich_TermLife_PDS_2026.pdf": {"base_premium": "5215.00", "premium_term": "NOT:50"},
+  "US_PacificLife_PLPromiseTerm20_2022.pdf": {"premium_term": "20", "base_premium": "372.00"},
+  "CA_SunLife_EvolveTerm20_2024.pdf": {"policy_term": "20"}
+}

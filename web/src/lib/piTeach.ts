@@ -387,7 +387,8 @@ function placesFor(pages: Page[], field: string, value: string, personal: string
  * The places to remember from a saved comparison column: for each field ops filled in or corrected (or kept as read
  * by the general rules), where that value sits in the PI. A place is kept only when, read back on this same PI, it
  * gives exactly that value (every time it appears). `found` is what the reader gave; values from layout rules that
- * ops kept are already known and not learned again.
+ * ops kept are already known and not learned again. Values the AI helper filled that ops kept are learned, so the
+ * next PI of that insurer needs no AI for them.
  */
 export function learn(pages: Page[], values: Record<string, string>, found: Record<string, Found | undefined>, insurer: string): LearnedRule[] {
   if (!insurer.trim()) return []
@@ -406,11 +407,11 @@ export function learn(pages: Page[], values: Record<string, string>, found: Reco
     const value = (values[field] ?? '').trim()
     if (!value || /^(?:NA|N\/A|-)$/i.test(value)) continue
     const f = found[field]
-    const fromLayout = f && f.value === value && !f.guess && !(f as { learned?: boolean }).learned && !/^Calculated:/.test(f.line ?? '') && f.page !== null
+    const fromLayout = f && f.value === value && !f.guess && !f.ai && !(f as { learned?: boolean }).learned && !/^Calculated:/.test(f.line ?? '') && f.page !== null
     if (fromLayout) continue
     const ctx = { policyTerm: (values.policy_term ?? '').trim() }
     // Ops changed what the reader's own rules gave (not a blank, not a general-rules guess): remember that too.
-    const corrects = !!f?.value && !f.guess && !(f as { learned?: boolean }).learned && f.value !== value
+    const corrects = !!f?.value && !f.guess && !f.ai && !(f as { learned?: boolean }).learned && f.value !== value
     for (const r of placesFor(pages, field, value, field === 'insured_name' || field === 'date_of_birth' ? [] : personal, ctx)) {
       const rule: LearnedRule = { insurer: insurer.trim(), plan: (values.policy_name ?? '').trim(), ...r, ...(corrects ? { corrects: true } : {}) }
       const back = [...new Set(readRule(pages, rule, ctx).map((h) => h.value))]
