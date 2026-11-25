@@ -114,7 +114,7 @@ export default function KbProduct() {
           return next
         })
         setFromDoc((x) => new Set([...x, ...keys]))
-        setReadNotes([])
+        setReadNotes(r.notes)
         setMsg(r.filled.length
           ? `Filled in from ${name}: ${r.filled.join(', ')}. Each is marked "From document". Fill in anything missed, then save: it is in search straight away.`
           : `Couldn't find the details in ${name}. Fill them in by hand.`)

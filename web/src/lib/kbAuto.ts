@@ -40,12 +40,23 @@ export function autoPayload(r: Reading, target: { product_id?: string | null; in
   }
   const rates = r.rates && !r.rates.error ? r.rates.rates : []
   if (rates.length) found.push('_rates')
-  const notes = [...(r.rates?.notes ?? []), ...(r.error ? [r.error] : [])].join(' ')
+  const notes = [...(r.summary?.notes ?? []), ...(r.rates?.notes ?? []), ...(r.error ? [r.error] : [])].join(' ')
   return { product_id: target.product_id || null, insurer: target.insurer.trim(), name: target.name.trim(), record, facts, rates, found: [...new Set(found)], notes }
 }
 
-/** Puts the reading on a product record. Returns the record's id, and whether it can be found in search. */
+/** Products are term plans only for now (Kumar): a Product Summary for another kind of plan (universal life,
+ *  investment-linked, whole life ...) is kept as a document but makes no product record, so it never shows up in
+ *  Compare products as a term plan. Empty when the reading can go on a record. */
+export function notTermLine(r: Reading): string {
+  const k = r.summary?.kind
+  return k ? `This Product Summary is for ${k}, not a term plan. Only term plans go into Compare products for now, so no product record was made from it. The document is kept in the Knowledge Bank.` : ''
+}
+
+/** Puts the reading on a product record. Returns the record's id, and whether it can be found in search; or,
+ *  for a plan that is not a term plan, `skipped` with the reason (nothing is saved). */
 export async function saveReading(docId: string, r: Reading, target: { product_id?: string | null; insurer: string; name: string }) {
+  const skip = notTermLine(r)
+  if (skip) return { skipped: skip }
   const { data, error } = await supabase.rpc('kb_auto_product', { p_doc: docId, p: autoPayload(r, target) })
   if (error) return { error: error.message }
   const id = data as string

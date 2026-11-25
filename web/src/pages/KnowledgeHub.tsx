@@ -8,7 +8,7 @@ import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
-import { afterRead, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
+import { afterRead, notTermLine, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
 import {
   DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
   type KbDoc, type KbProductRow,
@@ -83,6 +83,7 @@ export function KbDocuments() {
     const res = await saveReading(d.id, r, { product_id: d.product_id, insurer: d.insurer, name })
     setBusyRead('')
     if ('error' in res && res.error) { setError(says(res.error)); return }
+    if ('skipped' in res && res.skipped) { setMsg(res.skipped); return }
     const ok = res as { id: string; missing: string[]; searchable: boolean }
     setMsg(`${readingLine(r)} ${afterRead(ok)}`); setMade({ id: ok.id, searchable: ok.searchable }); reload()
   }
@@ -268,6 +269,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
       const name = products.find((x) => x.id === target)?.name || newName.trim() || readName(r) || f.title
       const res = await saveReading(id, r, { product_id: target || null, insurer: f.insurer || doc?.insurer || '', name })
       if ('error' in res && res.error) msg += ` It could not be read into a product record: ${says(res.error)}`
+      else if ('skipped' in res && res.skipped) msg += ` ${res.skipped}`
       else {
         const ok = res as { id: string; missing: string[]; searchable: boolean }
         created.product = ok.id; created.searchable = ok.searchable
@@ -334,7 +336,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
           </label>
         </div>
         {progress && <div className="notice" role="status">{progress}</div>}
-        {reads && reading && !progress && <div className="notice" role="status">{readingLine(reading)}</div>}
+        {reads && reading && !progress && <div className={`notice${notTermLine(reading) ? ' warn' : ''}`} role="status">{notTermLine(reading) || readingLine(reading)}</div>}
         <p className="small muted" style={{ margin: 0 }}>
           {reads ? 'On upload, what was read goes on the product record and the product can be found in Compare products straight away, marked "Auto-read, not yet reviewed". Reviewing or changing the record afterwards is optional.'
             : mode === 'version' ? 'The new version replaces this one as soon as it is uploaded.'
