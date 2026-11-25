@@ -1,0 +1,28 @@
+{
+  "_about": "What check-kb-ai.mjs may fill per document. \"\" = must stay blank (the document does not state it). \"~text\" = the value must contain it. A list = any of them. Keys not listed are printed as '?' for a person to judge.",
+  "FWD_Future_First_Term_Product_Summary.pdf": {
+    "entry_age": "", "sum_assured": "", "currencies": "", "residency": "", "uw": "", "coverTo": "", "reinstate": "", "eci": "", "ad": "", "modes": ""
+  },
+  "Singlife_Elite_Term_II_Product_Summary.pdf": {
+    "entry_age": "", "sum_assured": "", "residency": "", "uw": "", "ad": "", "reinstate": "", "eci": "",
+    "premTerm": ["~premium term", "~Premium Term"], "grace": ["~Grace Period"]
+  },
+  "Orchard_TermShield_Product_Summary.pdf (all blank)": {
+    "entry_age": "18-60", "sum_assured": "100000-5000000", "currencies": "SGD,USD", "residency": "Singapore citizen,Singapore PR,Foreigner living in Singapore",
+    "uw": "Full medical underwriting", "premTerm": "Same as the policy term", "guaranteed": "Not guaranteed; the insurer may revise them",
+    "modes": "Annual, half-yearly, quarterly or monthly", "coverTo": "To age 65, 70, 75 or 85", "death": "100% of the sum assured",
+    "ti": "100% of the sum assured, paid in advance", "tpd": "Included, before age 70", "ci": "Optional rider (CI Accelerator)", "eci": "Not available",
+    "ad": "Not covered", "conversion": "Convert to a whole life plan before age 60 without medical evidence", "renew": "Not renewable", "cash": "None",
+    "dist": "Up to 45% of the first-year premium", "freelook": "14 days", "grace": "30 days", "reinstate": "Within 2 years of lapse, with evidence of health"
+  },
+  "variant-entry-age-sentence": {
+    "entry_age": "19-64", "residency": "Singapore citizen,Singapore PR,Foreigner living in Singapore", "currencies": "SGD,USD", "sum_assured": "50000-3000000",
+    "modes": "~monthly, quarterly, half-yearly or annual", "guaranteed": "~not guaranteed", "coverTo": "~until age 65, 75 or 99",
+    "death": "~death", "ti": "~terminal illness", "freelook": "~within 14 days", "grace": "~30 days", "reinstate": "~A lapsed policy may be restored",
+    "premTerm": "", "uw": "", "eci": "", "ci": "", "tpd": "", "ad": "", "dist": "", "cash": "", "renew": "", "conversion": "", "inc": ""
+  },
+  "variant-no-entry-age": {
+    "entry_age": "", "sum_assured": "", "currencies": "", "residency": "", "uw": "", "premTerm": "",
+    "coverTo": "~policy term of 10, 20 or 30 years", "renew": "~Cover may be renewed", "death": "~we pay 100% of the sum assured"
+  }
+}

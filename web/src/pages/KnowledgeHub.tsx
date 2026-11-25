@@ -8,12 +8,13 @@ import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
-import { afterRead, notTermLine, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
+import { afterRead, aiAskCount, fillWithAi, notTermLine, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
 import {
   DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
   type KbDoc, type KbProductRow,
 } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
+import { AI_MODELS } from '../lib/aiConfig'
 
 export function KbHeader({ tab, actions }: { tab: 'documents' | 'products'; actions?: React.ReactNode }) {
   const { has } = useAuth()
@@ -194,7 +195,10 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const [newName, setNewName] = useState('')        // the product name for a new product record
   const [reading, setReading] = useState<Reading | null>(null)
   const [progress, setProgress] = useState('')
+  const [aiError, setAiError] = useState('')
   const [busy, setBusy] = useState(false)
+  // The AI helper's model is large: free its memory when the dialog closes.
+  useEffect(() => () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }, [])
   const [error, setError] = useState('')
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }))
   const insurers = useMemo(() => [...new Set([...products.map((p) => p.insurer), ...docs.map((d) => d.insurer), ...STANDARD_INSURERS])], [products, docs])
@@ -207,8 +211,23 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const target = mode === 'version' ? (doc?.product_id ?? '') : f.product_id
   const needName = reads && mode === 'new' && !target
 
+  async function askAi() {
+    if (!reading) return
+    setAiError('')
+    setProgress('Starting the free AI helper…')
+    try {
+      const r = await fillWithAi(reading, setProgress)
+      setReading(r)
+      if (!r.ai?.length) setAiError('The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
+    } catch (e) {
+      setAiError(`The AI helper could not run in this browser: ${e instanceof Error ? e.message : String(e)}. What the reader found is kept.`)
+    } finally {
+      setProgress('')
+    }
+  }
+
   async function readPicked(x: File, type: string) {
-    setReading(null)
+    setReading(null); setAiError('')
     if (!read || mode === 'edit' || !readsInto(type, x.name)) return
     setProgress(`Reading ${x.name}…`)
     const r = await readUpload(await x.arrayBuffer(), x.name, type, setProgress)
@@ -337,6 +356,15 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
         </div>
         {progress && <div className="notice" role="status">{progress}</div>}
         {reads && reading && !progress && <div className={`notice${notTermLine(reading) ? ' warn' : ''}`} role="status">{notTermLine(reading) || readingLine(reading)}</div>}
+        {reads && reading && !progress && aiAskCount(reading) > 0 && (
+          <div className="row small" style={{ gap: 8 }}>
+            <button type="button" className="btn small" onClick={askAi} disabled={busy}
+              title={`A free, open AI model runs in this browser: the document never leaves this computer. It is asked only about what the reader missed, must quote the document for every answer, and anything it gives that is not in the document is dropped. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.small.mb / 1000, 1)}–${fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB) and keeps it.`}>
+              Ask the free AI helper about {plain(aiAskCount(reading))} detail{aiAskCount(reading) === 1 ? '' : 's'} the reader missed</button>
+            <span className="muted">Optional. Runs in your browser, nothing is sent. Values it fills are marked "AI".</span>
+          </div>
+        )}
+        {aiError && !progress && <div className="notice warn" role="status">{aiError}</div>}
         <p className="small muted" style={{ margin: 0 }}>
           {reads ? 'On upload, what was read goes on the product record and the product can be found in Compare products straight away, marked "Auto-read, not yet reviewed". Reviewing or changing the record afterwards is optional.'
             : mode === 'version' ? 'The new version replaces this one as soon as it is uploaded.'

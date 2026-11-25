@@ -160,8 +160,9 @@ export function planKind(doc: ReadDoc): string {
   const t = text.search(TERM)
   let first: { at: number; kind: string } | null = null
   for (const [re, kind] of NOT_TERM) {
-    const at = text.search(re)
-    if (at >= 0 && (!first || at < first.at)) first = { at, kind }
+    // "Convert to a whole life plan" (a term plan's conversion option) does not make the plan a whole life plan.
+    const at = [...text.matchAll(new RegExp(re.source, 'gi'))].map((m) => m.index!).find((i) => !/conver|switch|change to|exchange/i.test(text.slice(Math.max(0, i - 50), i)))
+    if (at !== undefined && (!first || at < first.at)) first = { at, kind }
   }
   return first && (t < 0 || first.at < t) ? first.kind : ''
 }
@@ -336,7 +337,7 @@ const SENTENCE_RULES: { key: string; re: RegExp }[] = [
   { key: 'cash', re: /\b(?:no|not have any|does not have(?: any)?)\s+cash (?:surrender )?values?\b/i },
 ]
 
-const ints = (s: string) => [...s.replace(/\b\d+\s*(?:days?|weeks?|months?)\b/gi, '0').matchAll(/\b(\d{1,3})\b/g)].map((m) => +m[1]).filter((n) => n <= 100)
+export const ints = (s: string) => [...s.replace(/\b\d+\s*(?:days?|weeks?|months?)\b/gi, '0').matchAll(/\b(\d{1,3})\b/g)].map((m) => +m[1]).filter((n) => n <= 100)
 
 /** "S$50,000", "5 million", "$1.5m", "100k" -> numbers in the text. */
 export function amounts(s: string): number[] {
@@ -353,7 +354,7 @@ export function amounts(s: string): number[] {
 }
 
 const CURRENCY_CODES = ['SGD', 'USD', 'AUD', 'GBP', 'EUR', 'HKD']
-function currenciesIn(s: string): string[] {
+export function currenciesIn(s: string): string[] {
   const found = new Set<string>()
   for (const c of CURRENCY_CODES) if (new RegExp(`\\b${c}\\b`).test(s)) found.add(c)
   if (/S\$|singapore dollars?/i.test(s)) found.add('SGD')
@@ -414,7 +415,7 @@ function nameFromLayout(doc: ReadDoc, text: string): string {
 
 /** A Product Summary file often holds the base plan and then each rider's own summary. The name of the plan or
  *  rider each page is about: its "Product name" label, its footer, or the page before's. */
-function sectionsOf(doc: ReadDoc): Map<number, string> {
+export function sectionsOf(doc: ReadDoc): Map<number, string> {
   const out = new Map<number, string>()
   let cur = ''
   for (const p of doc.pages) {
@@ -443,11 +444,37 @@ function sectionsOf(doc: ReadDoc): Map<number, string> {
   }
   return out
 }
-const sameName = (a: string, b: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '') === b.toLowerCase().replace(/[^a-z0-9]/g, '')
+export const sameName = (a: string, b: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '') === b.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/** Who can apply, from a document's words, as the record's choices. */
+export function residencyOf(v: string): string[] {
+  const r: string[] = []
+  if (/citizens?/i.test(v)) r.push('Singapore citizen')
+  if (/\bPRs?\b|permanent residen/i.test(v)) r.push('Singapore PR')
+  if (/foreigner|pass holders?|employment pass|work pass|s pass|dependant/i.test(v)) r.push('Foreigner living in Singapore')
+  if (/non[- ]residents?|overseas|outside singapore/i.test(v)) r.push('Non-resident')
+  return r
+}
+
+/** The page lines a Product Summary is read from: two-column pages column by column (PDF pages with positions). */
+export const summaryPages = (doc: ReadDoc): Page[] => (doc.kind === 'pdf' ? doc.pages.map((p) => ({ ...p, lines: p.items.length ? columnLines(p) : p.lines })) : doc.pages)
+
+/** Puts "Rider (name): " in front of a fact found in a rider's own summary later in the same file. */
+export function riderLabel(doc: ReadDoc, recordName: string): (page: number, v: string) => string {
+  const sections = sectionsOf(doc)
+  const base = sections.get(doc.pages[0]?.page ?? 1) || recordName || ''
+  return (page, v) => {
+    const s = sections.get(page) ?? ''
+    return s && base && !sameName(s, base) && !sameName(s, recordName) ? `Rider (${s}): ${v}` : v
+  }
+}
+
+/** A fact that says the cover is not there ("No", "Not covered"). */
+export const isNegative = (v: string) => NEGATIVE.test(v.replace(/^Rider \([^)]*\):\s*/, ''))
 
 export function readSummary(doc: ReadDoc): SummaryResult {
   // Two-column pages are read column by column (PDF pages with positions only).
-  const pages = doc.kind === 'pdf' ? doc.pages.map((p) => ({ ...p, lines: p.items.length ? columnLines(p) : p.lines })) : doc.pages
+  const pages = summaryPages(doc)
   const cdoc: ReadDoc = { ...doc, pages }
   const lines = pages.flatMap((p) => p.lines)
   const text = lines.map((l) => l.text).join('\n')
@@ -497,24 +524,14 @@ export function readSummary(doc: ReadDoc): SummaryResult {
 
   const res = find(lines, REC.residency, used)
   if (res) {
-    const r: string[] = []
-    const v = res.value
-    if (/citizens?/i.test(v)) r.push('Singapore citizen')
-    if (/\bPRs?\b|permanent residen/i.test(v)) r.push('Singapore PR')
-    if (/foreigner|pass holders?|employment pass|work pass|s pass|dependant/i.test(v)) r.push('Foreigner living in Singapore')
-    if (/non[- ]residents?|overseas|outside singapore/i.test(v)) r.push('Non-resident')
+    const r = residencyOf(res.value)
     if (r.length) { record.residency = r; filled.push('who can apply') }
   }
   if (/direct purchase insurance/i.test(text)) { record.dpi = true; filled.push('Direct Purchase Insurance') }
   if (/\boffshore\b/i.test(text) && !/\bonshore\b/i.test(text)) { record.jurisdiction = 'Offshore'; filled.push('offshore') }
 
   // Facts. A fact found in a rider's own summary (later in the same file) says which rider it is from.
-  const sections = sectionsOf(cdoc)
-  const base = sections.get(pages[0]?.page ?? 1) || record.name || ''
-  const from = (page: number, v: string) => {
-    const s = sections.get(page) ?? ''
-    return s && base && !sameName(s, base) && !sameName(s, record.name ?? '') ? `Rider (${s}): ${v}` : v
-  }
+  const from = riderLabel(cdoc, record.name ?? '')
   for (const r of FACT_RULES) {
     const h = find(lines, r.re, used)
     if (h) facts[r.key] = { v: from(h.page, h.value), page: h.page }
@@ -524,7 +541,7 @@ export function readSummary(doc: ReadDoc): SummaryResult {
     const h = sentences.find((x) => r.re.test(x.s) && x.s.length <= 300)
     if (h) facts[r.key] = { v: from(h.page, h.s), page: h.page }
   }
-  const yes = (k: string) => !!facts[k] && !NEGATIVE.test(facts[k].v.replace(/^Rider \([^)]*\):\s*/, ''))
+  const yes = (k: string) => !!facts[k] && !isNegative(facts[k].v)
   if (facts.tpd) record.has_tpd = yes('tpd')
   if (facts.ci || facts.eci) record.has_ci = yes('ci') || yes('eci')
   const n = Object.keys(facts).length
