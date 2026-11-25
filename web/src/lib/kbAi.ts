@@ -26,7 +26,7 @@ type RecKey = (typeof KB_AI_RECORD)[number]
  *  Exclusions, special provisions, fees, investment and "important considerations" are left out: their text is
  *  too open for a check to tell a right quote from a wrong one. */
 export const KB_AI_FACTS: { key: string; ask: string; find: RegExp; must: RegExp[]; not?: RegExp }[] = [
-  { key: 'uw', ask: 'the underwriting (medical checks, health questions, guaranteed acceptance)', find: /underwrit|medical (?:exam|evidence|check)|health (?:declaration|question)|guaranteed acceptance/i, must: [/underwrit|medical (?:exam|evidence|check|question)|health (?:declaration|question)|guaranteed acceptance|simplified issue/i], not: /spouse|convert|conversion|renew|increase the sum|without any underwriting/i },
+  { key: 'uw', ask: 'the underwriting (medical checks, health questions, guaranteed acceptance)', find: /underwrit|medical (?:exam|evidence|check)|health (?:declaration|question)|guaranteed acceptance/i, must: [/underwrit|medical (?:exam|evidence|check|question)|health (?:declaration|question)|guaranteed acceptance|simplified issue/i], not: /spouse|convert|conversion|renew|increase the sum|without any underwriting|(?:may|can|will) (?:vary|change|differ)|depending on (?:our )?underwriting/i },
   { key: 'premTerm', ask: 'how long premiums are paid (premium payment term)', find: /premium/i, must: [/premium/i, /payable|pay(?:ing|ment)? |term|until|years?|age/i], not: /grace|free[- ]?look|renewal|discount/i },
   { key: 'guaranteed', ask: 'whether the premium rates are guaranteed or can change', find: /guarantee|reviewable|revis/i, must: [/guaranteed|not guaranteed|reviewable|may (?:be )?(?:change|revise|review)|can (?:change|be revised)/i, /premium|rate/i], not: /conversion|convert|insurability|renew/i },
   { key: 'modes', ask: 'how often premiums can be paid (monthly, quarterly, half-yearly, yearly)', find: /monthly|quarterly|half[- ]yearly|semi[- ]annual|annually|yearly|payment (?:mode|frequenc)/i, must: [/monthly|quarterly|half[- ]yearly|semi[- ]annual|annual(?:ly)?|yearly/i, /pay|premium|mode|frequenc/i], not: /grace|for a period of|diagnos/i },
@@ -238,7 +238,8 @@ export function checkKbAnswers(doc: ReadDoc, questions: KbQuestion[], answers: (
       }
       const rule = KB_AI_FACTS.find((f) => f.key === key)!
       const q = tidy(at.sentence)
-      const value = at.cell ?? q
+      // A table row read as one line: drop its heading ("Underwriting Full medical underwriting").
+      const value = (at.cell ?? q).replace(key === 'uw' ? /^underwriting\s*:?\s+(?=\S.*underwrit)/i : /^$/, '')
       if (q.length < 8 || !rule.must.every((re) => re.test(q)) || (rule.not && rule.not.test(q)) || clash(flat(value))) { drop(); continue }
       fill.facts[key] = { v: label(at.page, value), page: at.page }
     }
