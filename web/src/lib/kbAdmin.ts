@@ -4,14 +4,24 @@ import { supabase } from './supabase'
 import { FACT_ROWS } from './kb'
 import { fmtNum, plain } from './num.ts'
 
-export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Campaign', 'Regulatory', 'Other']
+export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Training material', 'Product Financing',
+  'Circulars', 'Campaign', 'Regulatory', 'Others']
+/** "Others" asks for a name, which is then shown as the document's type. */
+export const OTHERS = 'Others'
+export const DOC_TYPE_NAME_MAX = 60
+/** Types that need not come from one insurer (the insurer is optional). */
+export const NO_INSURER_TYPES = ['Training material', 'Product Financing', 'Circulars', OTHERS]
+export const needsInsurer = (type: string) => !NO_INSURER_TYPES.includes(type)
+/** The type as people see it: the typed name for "Others". */
+export const docTypeName = (d: { doc_type: string; doc_type_name?: string | null }) =>
+  d.doc_type === OTHERS ? d.doc_type_name?.trim() || OTHERS : d.doc_type
 export const KB_ACCEPT = '.pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx'
 export const KB_MAX_MB = 20
 /** Documents expiring within this many days are flagged (owners get time to upload the new version). */
 export const EXPIRY_WARN_DAYS = 40
 
 export interface KbDoc {
-  id: string; product_id: string | null; insurer: string; title: string; doc_type: string; version: string
+  id: string; product_id: string | null; insurer: string; title: string; doc_type: string; doc_type_name: string | null; version: string
   effective_from: string | null; valid_until: string | null; storage_path: string | null; file_name: string | null
   file_size: number | null; status: 'new' | 'checked'; replaces: string | null; replaced_by: string | null
   uploaded_by: string | null; checked_by: string | null; checked_at: string | null; created_at: string; is_sample: boolean

@@ -10,7 +10,7 @@ import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
 import { readableName } from '../lib/kbExtract'
 import {
-  DOC_TYPES, KB_ACCEPT, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState,
+  DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState,
   type KbDoc, type KbProductRow,
 } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
@@ -25,8 +25,8 @@ export function KbHeader({ tab, actions }: { tab: 'documents' | 'products'; acti
           <p className="muted small" style={{ margin: 0 }}>Knowledge Hub</p>
           <h1>Knowledge Bank</h1>
           <p className="muted" style={{ margin: '6px 0 0', maxWidth: 760 }}>
-            Insurer documents and the product facts taken from them. Compare products on the PI request form reads checked
-            products from here.
+            Insurer documents, training material, circulars and other files, and the product facts taken from them.
+            Compare products on the PI request form reads checked products from here.
           </p>
         </div>
         {actions}
@@ -65,9 +65,11 @@ export function KbDocuments() {
   }, [member])
   useEffect(() => { reload() }, [reload])
 
-  const productName = (id: string | null) => (id ? products.find((p) => p.id === id)?.name ?? '—' : 'All products')
-  const shown = docs.filter((d) => (older || !d.replaced_by) && (!type || d.doc_type === type)
-    && (!q || `${d.title} ${d.insurer} ${productName(d.product_id)} ${d.file_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
+  const productName = (d: KbDoc) => (d.product_id ? products.find((p) => p.id === d.product_id)?.name ?? '—' : needsInsurer(d.doc_type) ? 'All products' : '—')
+  const ownNames = customTypeNames(docs)
+  const typeMatch = (d: KbDoc) => !type || (type === ANY_OTHERS ? d.doc_type === OTHERS : docTypeName(d) === type)
+  const shown = docs.filter((d) => (older || !d.replaced_by) && typeMatch(d)
+    && (!q || `${d.title} ${d.insurer} ${productName(d)} ${docTypeName(d)} ${d.file_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
   const toCheck = docs.filter((d) => d.status === 'new').length
 
   async function act(fn: () => PromiseLike<{ error: { message: string } | null }>, ok: string) {
@@ -92,7 +94,9 @@ export function KbDocuments() {
             onChange={(e) => setQ(e.target.value)} style={{ flex: '1 1 260px', width: 'auto' }} />
           <select aria-label="Document type" value={type} onChange={(e) => setType(e.target.value)} style={{ flex: '0 1 200px', width: 'auto' }}>
             <option value="">All types</option>
-            {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
+            {DOC_TYPES.filter((t) => t !== OTHERS).map((t) => <option key={t}>{t}</option>)}
+            {ownNames.filter((n) => !DOC_TYPES.includes(n)).map((n) => <option key={`o:${n}`} value={n}>{n}</option>)}
+            {ownNames.length > 0 && <option value={ANY_OTHERS}>Others (any name)</option>}
           </select>
           {member && <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={older} onChange={(e) => setOlder(e.target.checked)} /> Show older versions</label>}
         </div>
@@ -111,9 +115,9 @@ export function KbDocuments() {
                   <tr key={d.id}>
                     <td><button className="linkbtn" style={{ textAlign: 'left' }} onClick={async () => { const e = await openDoc(d); if (e) setError(e) }}>{docLabel(d)}</button>
                       {d.file_name && <div className="small muted">{d.file_name}</div>}</td>
-                    <td>{d.insurer}</td>
-                    <td className="small">{productName(d.product_id)}</td>
-                    <td className="small">{d.doc_type}</td>
+                    <td>{d.insurer || <span className="muted">—</span>}</td>
+                    <td className="small">{productName(d)}</td>
+                    <td className="small">{docTypeName(d)}</td>
                     <td className="small">{fmtDate(d.effective_from)}</td>
                     <td className="small">{d.valid_until ? fmtDate(d.valid_until) : 'No end date'}</td>
                     <td><span className={`pill ${st.tone}`}>{st.text}</span>
@@ -149,6 +153,18 @@ export function KbDocuments() {
   )
 }
 
+/** The filter value for every "Others" document, whatever its name. */
+const ANY_OTHERS = '*others'
+/** The names people typed for "Others", A to Z, once each (ignoring case). */
+export function customTypeNames(docs: KbDoc[]) {
+  const seen = new Map<string, string>()
+  for (const d of docs) {
+    const n = d.doc_type === OTHERS ? d.doc_type_name?.trim() : ''
+    if (n && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n)
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b))
+}
+
 /** Document types the reader can fill a product record from. */
 export const FILLS = ['Product Summary', 'Rate sheet']
 export interface Created { id: string; doc_type: string; file: File }
@@ -162,7 +178,7 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
   const [file, setFile] = useState<File | null>(null)
   const [f, setF] = useState({
     insurer: doc?.insurer ?? preset?.insurer ?? '', product_id: doc?.product_id ?? preset?.product_id ?? '', title: doc?.title ?? '',
-    doc_type: doc?.doc_type ?? preset?.doc_type ?? 'Product Summary',
+    doc_type: doc?.doc_type ?? preset?.doc_type ?? 'Product Summary', doc_type_name: doc?.doc_type_name ?? '',
     version: mode === 'edit' ? doc?.version ?? '' : '', effective_from: mode === 'edit' ? doc?.effective_from ?? '' : '',
     valid_until: mode === 'edit' ? doc?.valid_until ?? '' : '',
   })
@@ -171,6 +187,8 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }))
   const insurers = useMemo(() => [...new Set([...products.map((p) => p.insurer), ...docs.map((d) => d.insurer), ...STANDARD_INSURERS])], [products, docs])
   const plans = products.filter((p) => p.insurer.toLowerCase() === f.insurer.trim().toLowerCase())
+  const others = f.doc_type === OTHERS
+  const ownNames = useMemo(() => customTypeNames(docs), [docs])
   const title = mode === 'new' ? 'Upload document' : mode === 'version' ? `New version of ${doc!.title}` : `Edit ${doc!.title}`
 
   function pick(list: FileList | null) {
@@ -187,8 +205,9 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
   async function save() {
     setError('')
     if (mode !== 'edit' && !file) { setError('Choose a file'); return }
+    if (others && !f.doc_type_name.trim()) { setError('Type a name for the document type'); return }
     setBusy(true)
-    const p = { ...f, product_id: f.product_id || null, valid_until: f.valid_until || null }
+    const p = { ...f, product_id: f.product_id || null, valid_until: f.valid_until || null, doc_type_name: others ? f.doc_type_name.trim() : null }
     if (mode === 'edit') {
       const { error } = await supabase.rpc('kb_update_document', { p_id: doc!.id, p })
       setBusy(false)
@@ -217,7 +236,7 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
           </label>
         )}
         <div className="form-grid">
-          <label className="field">Insurer
+          <label className="field">{needsInsurer(f.doc_type) ? 'Insurer' : 'Insurer (optional)'}
             <input type="text" list="kb-insurers" value={f.insurer} onChange={(e) => set('insurer', e.target.value)} disabled={mode === 'version'} />
             <datalist id="kb-insurers">{insurers.map((x) => <option key={x} value={x} />)}</datalist>
           </label>
@@ -235,6 +254,14 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
               {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
             </select>
           </label>
+          {others && (
+            <label className="field" style={{ gridColumn: '1 / -1' }}>Name of this document type
+              <input type="text" list="kb-type-names" required maxLength={DOC_TYPE_NAME_MAX} autoFocus placeholder="e.g. Underwriting guide"
+                value={f.doc_type_name} onChange={(e) => set('doc_type_name', e.target.value)} />
+              <datalist id="kb-type-names">{ownNames.map((x) => <option key={x} value={x} />)}</datalist>
+              <span className="small muted">Shown as the document's type in the list and the type filter.</span>
+            </label>
+          )}
           <label className="field">Version (optional)
             <input type="text" placeholder="e.g. v4.2" value={f.version} onChange={(e) => set('version', e.target.value)} />
           </label>
