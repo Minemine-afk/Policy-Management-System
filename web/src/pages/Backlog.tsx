@@ -10,6 +10,7 @@ import { STATUS_LABEL, dobDmy, byPriorityThenDue, daysSince, dueInfo, fmtDate, i
 import { downloadCsv } from '../lib/csv'
 import { StatusPill, UrgentPill } from '../components/ui'
 import type { PiRequest, SavedFilter } from '../lib/types'
+import { fmtNum } from '../lib/num'
 
 interface Filters { status: string; assignee: string; priority: string; due: string; from: string; to: string; q: string }
 const OPEN = (r: PiRequest) => !['completed', 'removed'].includes(r.status)
@@ -132,7 +133,7 @@ export default function Backlog() {
     const body = list.map((r) => [r.ref, STATUS_LABEL[r.status], r.priority === 'urgent' ? 'Urgent' : 'Normal', r.product, r.plan_category,
       r.date_of_birth ? dobDmy(r.date_of_birth) : '', r.age_band, r.gender, r.smoker ? 'Yes' : 'No', r.coverage_term, r.sum_assured_band, r.premium_type, r.ci_benefit ? 'Yes' : 'No',
       r.client_type ?? '', r.residency ?? '', r.nationality ?? '', r.insurer ?? '', r.plan_name ?? '', r.currency ?? '',
-      r.amount_basis === 'premium' ? 'Premium' : r.amount_basis ? 'Sum assured' : '', r.amount != null ? String(r.amount) : '',
+      r.amount_basis === 'premium' ? 'Premium' : r.amount_basis ? 'Sum assured' : '', r.amount != null ? fmtNum(r.amount) : '',
       r.compare_term ? r.compare_product_1 ?? '' : '', r.compare_term ? r.compare_product_2 ?? '' : '',
       nameOf(people, r.introducer_id), people[r.introducer_id]?.company ?? '', r.assignee_id ? nameOf(people, r.assignee_id) : '',
       r.submitted_at, r.due_at ?? '', r.completed_at ?? '', due(r)?.label ?? ''])
@@ -149,7 +150,7 @@ export default function Backlog() {
       <div className="row between">
         <h1>{intro ? 'My requests' : 'Backlog'}</h1>
         <div className="row">
-          {staff && <button className="btn" onClick={exportCsv} disabled={!list.length}>Export CSV ({list.length})</button>}
+          {staff && <button className="btn" onClick={exportCsv} disabled={!list.length}>Export CSV ({fmtNum(list.length)})</button>}
           {intro && <Link className="btn primary" to="/requests/new">New request</Link>}
         </div>
       </div>
@@ -165,14 +166,14 @@ export default function Backlog() {
                 {workload.people.map(({ p, ...c }) => (
                   <tr key={p.id}>
                     <td><button className="linkish" onClick={() => set({ assignee: p.id, status: 'open' })}>{p.full_name || p.email}</button></td>
-                    <td className="num">{c.assigned}</td><td className="num">{c.in_progress}</td><td className="num">{c.sent_back}</td>
-                    <td className="num">{c.urgent}</td><td className="num">{c.overdue}</td><td className="num"><strong>{c.total}</strong></td>
+                    <td className="num">{fmtNum(c.assigned)}</td><td className="num">{fmtNum(c.in_progress)}</td><td className="num">{fmtNum(c.sent_back)}</td>
+                    <td className="num">{fmtNum(c.urgent)}</td><td className="num">{fmtNum(c.overdue)}</td><td className="num"><strong>{fmtNum(c.total)}</strong></td>
                   </tr>
                 ))}
                 <tr>
                   <td><button className="linkish" onClick={() => set({ assignee: 'none', status: 'open' })}>Unassigned pool</button></td>
-                  <td className="num">—</td><td className="num">—</td><td className="num">{workload.pool.sent_back}</td>
-                  <td className="num">{workload.pool.urgent}</td><td className="num">{workload.pool.overdue}</td><td className="num"><strong>{workload.pool.total}</strong></td>
+                  <td className="num">—</td><td className="num">—</td><td className="num">{fmtNum(workload.pool.sent_back)}</td>
+                  <td className="num">{fmtNum(workload.pool.urgent)}</td><td className="num">{fmtNum(workload.pool.overdue)}</td><td className="num"><strong>{fmtNum(workload.pool.total)}</strong></td>
                 </tr>
               </tbody>
             </table>
@@ -249,7 +250,7 @@ export default function Backlog() {
 
         {bsd && picked.size > 0 && (
           <div className="toolbar" role="region" aria-label="Bulk assign">
-            <strong>{picked.size} selected</strong>
+            <strong>{fmtNum(picked.size)} selected</strong>
             <select aria-label="Assign selected to" value={bulkTo} onChange={(e) => setBulkTo(e.target.value)}>
               <option value="">Assign to…</option>
               {ops.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
@@ -290,7 +291,7 @@ export default function Backlog() {
                       <button className="btn small primary" onClick={() => claim(r.id)}>Assign to me</button>
                     ) : nameOf(people, r.assignee_id)}
                   </td>}
-                  <td className="num">{daysSince(r.submitted_at)}d</td>
+                  <td className="num">{fmtNum(daysSince(r.submitted_at))}d</td>
                   {staff && <td>{d && <span className={`due ${d.level}`}>{d.label}</span>}</td>}
                   <td>{fmtDate(r.submitted_at)}</td>
                 </tr>

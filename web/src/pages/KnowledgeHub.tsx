@@ -13,6 +13,7 @@ import {
   DOC_TYPES, KB_ACCEPT, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState,
   type KbDoc, type KbProductRow,
 } from '../lib/kbAdmin'
+import { fmtNum, plain } from '../lib/num'
 
 export function KbHeader({ tab, actions }: { tab: 'documents' | 'products'; actions?: React.ReactNode }) {
   const { has } = useAuth()
@@ -95,7 +96,7 @@ export function KbDocuments() {
           </select>
           {member && <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={older} onChange={(e) => setOlder(e.target.checked)} /> Show older versions</label>}
         </div>
-        {member && toCheck > 0 && <div className="notice" role="status">{toCheck} document{toCheck === 1 ? ' is' : 's are'} waiting for a BSD person to check {toCheck === 1 ? 'it' : 'them'}{checker ? '' : ' (someone other than the uploader)'}.</div>}
+        {member && toCheck > 0 && <div className="notice" role="status">{fmtNum(toCheck)} document{toCheck === 1 ? ' is' : 's are'} waiting for a BSD person to check {toCheck === 1 ? 'it' : 'them'}{checker ? '' : ' (someone other than the uploader)'}.</div>}
         {msg && <div className="notice ok" role="status">{msg}
           {made && <> <Link to={`/kb/products/new?${made.doc_type === 'Rate sheet' ? 'rates' : 'summary'}=${made.id}`}>Make a product record from it</Link> (the details are read from the file for you to check).</>}</div>}
         {error && <div className="error" role="alert">{error}</div>}
@@ -178,7 +179,7 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
     if (!x) return
     const ext = x.name.toLowerCase().replace(/^.*(\.[^.]+)$/, '$1')
     if (!KB_ACCEPT.split(',').includes(ext)) { setError('Choose a PDF, image, Word or Excel file'); return }
-    if (x.size > KB_MAX_MB * 1024 * 1024) { setError(`The file is over ${KB_MAX_MB} MB`); return }
+    if (x.size > KB_MAX_MB * 1024 * 1024) { setError(`The file is over ${fmtNum(KB_MAX_MB)} MB`); return }
     setFile(x)
     if (!f.title) set('title', x.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '))
   }
@@ -212,7 +213,7 @@ export function DocDialog({ mode, doc, docs, products, preset, onClose, onDone }
         {mode !== 'edit' && (
           <label className="field">File
             <input type="file" accept={KB_ACCEPT} onChange={(e) => pick(e.target.files)} />
-            <span className="small muted">PDF, image, Word or Excel, up to {KB_MAX_MB} MB. Stored privately.</span>
+            <span className="small muted">PDF, image, Word or Excel, up to {fmtNum(KB_MAX_MB)} MB. Stored privately.</span>
           </label>
         )}
         <div className="form-grid">
@@ -285,10 +286,10 @@ export function KbProducts() {
     <main className="page">
       <KbHeader tab="products" actions={<button className="btn primary" onClick={() => nav('/kb/products/new')}>New product record</button>} />
       <div className="stats">
-        <div className="card stat"><strong>{offered}</strong><span className="pill ok">Checked, in Compare products</span></div>
-        <div className="card stat"><strong>{waiting}</strong><span className="pill purple">Waiting for check</span></div>
-        <div className="card stat"><strong>{drafts}</strong><span className="pill info">Drafts</span></div>
-        <div className="card stat"><strong>{soon}</strong><span className="pill warn">Source document expires within 40 days</span></div>
+        <div className="card stat"><strong>{fmtNum(offered)}</strong><span className="pill ok">Checked, in Compare products</span></div>
+        <div className="card stat"><strong>{fmtNum(waiting)}</strong><span className="pill purple">Waiting for check</span></div>
+        <div className="card stat"><strong>{fmtNum(drafts)}</strong><span className="pill info">Drafts</span></div>
+        <div className="card stat"><strong>{fmtNum(soon)}</strong><span className="pill warn">Source document expires within 40 days</span></div>
       </div>
       <section className="card" aria-label="Product records">
         <div className="tablewrap">
@@ -303,7 +304,7 @@ export function KbProducts() {
                     <td>{p.status === 'draft' && p.pending ? p.pending.insurer : p.insurer}</td>
                     <td><strong>{name}</strong>{p.is_sample && <span className="small muted"> (sample)</span>}</td>
                     <td><span className={`pill ${st.tone}`}>{st.text}</span></td>
-                    <td className="num">{p.verified_at ? `v${p.version}` : '—'}</td>
+                    <td className="num">{p.verified_at ? `v${plain(p.version)}` : '—'}</td>
                     <td className="small">{docName(p.facts?._ps?.doc)}<br />{docName(p.facts?._rs?.doc)}</td>
                     <td className="small">{p.verified_by ? <>{nameOf(people, p.verified_by)}<br />{fmtDate(p.verified_at)}</> : p.verified_at ? fmtDate(p.verified_at) : <span className="muted">Not checked</span>}</td>
                     <td className="small">{usable.has(p.id) ? 'Yes' : <span className="muted">No</span>}</td>

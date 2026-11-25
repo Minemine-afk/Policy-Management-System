@@ -4,6 +4,7 @@
 // Shared with the Node tests (tests/kb-extract), so it imports types only from files that need the browser.
 import { detectInsurer, readPdf, toLines, type Line, type Page, type TextItem } from './piExtract.ts'
 import type { ProductRecord, Rate } from './kbAdmin'
+import { fmtNum, plain } from './num.ts'
 
 export interface Row { page: number; cells: string[] }
 export interface ReadDoc { pages: Page[]; rows: Row[]; kind: 'pdf' | 'excel' }
@@ -271,7 +272,7 @@ export function readSummary(doc: ReadDoc): SummaryResult {
   if (facts.tpd) record.has_tpd = yes('tpd')
   if (facts.ci || facts.eci) record.has_ci = yes('ci') || yes('eci')
   const n = Object.keys(facts).length
-  if (n) filled.push(`${n} fact${n === 1 ? '' : 's'}`)
+  if (n) filled.push(`${fmtNum(n)} fact${n === 1 ? '' : 's'}`)
   return { record, facts, filled }
 }
 
@@ -299,7 +300,7 @@ function scaleTo1000(text: string): { f: number; note: string } {
   const m = text.match(/per\s+(?:every\s+)?(?:S\$|US\$|\$|SGD|USD)?\s*([\d,]+)\s*(?:of\s+)?(?:sum\s+(?:assured|insured)|SA|cover|coverage)?/i)
   const per = m ? Number(m[1].replace(/,/g, '')) : 1000
   if (!per || per === 1000) return { f: 1, note: m ? '' : 'The sheet does not say per how much cover its rates are, so they were read as per 1,000 of sum assured. Check this.' }
-  return { f: 1000 / per, note: `The sheet's rates are per ${per.toLocaleString('en-SG')} of sum assured; they were converted to per 1,000.` }
+  return { f: 1000 / per, note: `The sheet's rates are per ${fmtNum(per)} of sum assured; they were converted to per 1,000.` }
 }
 
 /** Reads the premium rates table: one row per age, with columns for gender and smoker status (and the critical
@@ -311,7 +312,7 @@ export function readRates(doc: ReadDoc): RatesResult {
   const notes = note ? [note] : []
   const out = new Map<string, Rate>()
   const add = (r: Rate) => {
-    const k = `${r.age}|${r.gender}|${r.smoker}`
+    const k = `${plain(r.age)}|${r.gender}|${r.smoker}`
     const was = out.get(k)
     if (!was) out.set(k, r)
     else if (r.ci_rate != null && was.ci_rate == null && was.rate === r.rate) was.ci_rate = r.ci_rate

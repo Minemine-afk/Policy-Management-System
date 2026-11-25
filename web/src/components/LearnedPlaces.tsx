@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FIELDS } from '../lib/piExtract'
 import { fmtDateTime, says } from '../lib/options'
 import { forgetRules, loadRules, type SavedRule } from '../lib/teach'
+import { fmtNum, plain } from '../lib/num'
 
 const fieldLabel = (k: string) => FIELDS.find((f) => f.key === k)?.label ?? k
 function describe(r: SavedRule): string {
   if (r.how === 'na') return `NA for ${r.plan || 'this plan'}${r.corrects ? ' (ops corrected the reader here)' : ''}`
   const where = r.how === 'beside'
-    ? r.offset === 0 ? `right after “${r.label}”` : `${r.offset === 1 ? 'next to' : `${r.offset} columns after`} “${r.label}”`
+    ? r.offset === 0 ? `right after “${r.label}”` : `${r.offset === 1 ? 'next to' : `${plain(r.offset)} columns after`} “${r.label}”`
     : r.how === 'row' ? `in the column “${r.label}”, ${r.row === 'term' ? 'on the row of the last policy year' : 'on the last row'}`
     : `under the heading “${r.label}”`
   const factor = r.factor === 12 ? ', monthly figure × 12' : r.factor === 4 ? ', quarterly figure × 4' : r.factor === 2 ? ', half-yearly figure × 2' : ''
@@ -47,7 +48,7 @@ export default function LearnedPlaces() {
     setBusy(true); setError(''); setNote('')
     const { removed, error } = await forgetRules(confirm.ids)
     if (error) setError(says(error))
-    else setNote(`Deleted ${removed} learned ${removed === 1 ? 'place' : 'places'} (${confirm.what}).`)
+    else setNote(`Deleted ${fmtNum(removed)} learned ${removed === 1 ? 'place' : 'places'} (${confirm.what}).`)
     setConfirm(null); setBusy(false)
     await load()
   }
@@ -70,7 +71,7 @@ export default function LearnedPlaces() {
           <div className="row between">
             <div>
               <strong>{ins.name}</strong>
-              <div className="small muted">{ins.rules.length} {ins.rules.length === 1 ? 'place' : 'places'} for {ins.fields.join(', ')}
+              <div className="small muted">{fmtNum(ins.rules.length)} {ins.rules.length === 1 ? 'place' : 'places'} for {ins.fields.join(', ')}
                 {ins.plans.length ? ` · plans: ${ins.plans.join(', ')}` : ''} · last learned {fmtDateTime(ins.last)}</div>
             </div>
             <div className="row">
@@ -101,7 +102,7 @@ export default function LearnedPlaces() {
       ))}
       {confirm && (
         <div className="notice" role="alertdialog" aria-label="Confirm delete">
-          <p style={{ margin: '0 0 8px' }}>Delete {confirm.what}? The reader stops using {confirm.ids.length === 1 ? 'this place' : `these ${confirm.ids.length} places`} straight away.</p>
+          <p style={{ margin: '0 0 8px' }}>Delete {confirm.what}? The reader stops using {confirm.ids.length === 1 ? 'this place' : `these ${fmtNum(confirm.ids.length)} places`} straight away.</p>
           <div className="row">
             <button className="btn primary" disabled={busy} onClick={forget}>{busy ? 'Deleting…' : 'Delete'}</button>
             <button className="btn" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>

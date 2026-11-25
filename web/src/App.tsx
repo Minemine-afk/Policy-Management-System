@@ -16,6 +16,7 @@ import { KbDocuments, KbProducts } from './pages/KnowledgeHub'
 import KbProduct from './pages/KbProduct'
 import ProductMatrixPage from './pages/ProductMatrixPage'
 import { useUnreadCount } from './lib/notifications'
+import { fmtNum } from './lib/num'
 
 export default function App() {
   const { session, profile, loading, has, can, recovering } = useAuth()
@@ -69,8 +70,8 @@ export default function App() {
           {admin && <NavLink to="/admin" className={cls}>Admin</NavLink>}
         </nav>
         <div className="who">
-          <NavLink to="/notifications" className={({ isActive }) => `bell${isActive ? ' active' : ''}`} aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}>
-            <span aria-hidden="true">🔔</span>{unread > 0 && <span className="badge">{unread}</span>}
+          <NavLink to="/notifications" className={({ isActive }) => `bell${isActive ? ' active' : ''}`} aria-label={`Notifications${unread ? `, ${fmtNum(unread)} unread` : ''}`}>
+            <span aria-hidden="true">🔔</span>{unread > 0 && <span className="badge">{fmtNum(unread)}</span>}
           </NavLink>
           <span>{profile.full_name || profile.email} · {ROLE_LABEL[profile.role]}</span>
           <NavLink to="/account" className="acct" title="Change your password">Account</NavLink>

@@ -37,9 +37,5 @@ export const ACKNOWLEDGEMENT = 'I confirm these details are correct, and the cli
 /** Everyone but the introducer who submitted the request sees this instead of the client's name (Kumar, 22 Nov 2026). */
 export const vipName = (gender: string | null | undefined) => (gender === 'Female' ? 'Ms VIP' : 'Mr VIP')
 
-/** "1000000" -> "SGD 1,000,000". */
-export const fmtMoney = (amount: number | string | null | undefined, currency: string | null | undefined) => {
-  const n = Number(amount)
-  if (!Number.isFinite(n)) return '—'
-  return `${currency ?? ''} ${n.toLocaleString('en-SG', { maximumFractionDigits: 2 })}`.trim()
-}
+/** "1000000" -> "SGD 1,000,000" (the shared formatter in num.ts). */
+export { fmtMoney } from './num.ts'

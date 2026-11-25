@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { STATUS_LABEL, fmtDateTime, says } from '../lib/options'
+import { fmtNum } from '../lib/num'
 
 interface Candidate { id: string; ref: string; status: string; due_at: string; days_overdue: number; files: number }
 interface Setting { auto_delete_on: boolean; auto_delete_days: number }
@@ -53,7 +54,7 @@ export default function AutoDelete() {
     const { data, error } = await supabase.functions.invoke('cleanup-deleted-files', { body: {} })
     if (error) return 'The files will be removed by the hourly clean-up (the clean-up function did not answer: is it deployed?).'
     const left = Number((data as { remaining?: number })?.remaining ?? 0)
-    return left ? `${left} files are still waiting and will be removed by the hourly clean-up.` : 'Their files were removed.'
+    return left ? `${fmtNum(left)} files are still waiting and will be removed by the hourly clean-up.` : 'Their files were removed.'
   }
 
   async function deleteNow() {
@@ -62,7 +63,7 @@ export default function AutoDelete() {
     if (error) { setError(says(error.message)); setBusy(false); return }
     const done = (data as { ref: string; files: number }[]) ?? []
     const files = done.some((d) => d.files > 0) ? ' ' + await cleanFiles() : ''
-    setNote(done.length ? `Deleted ${done.length} ${done.length === 1 ? 'request' : 'requests'}: ${done.map((d) => d.ref).join(', ')}.${files}` : 'Nothing to delete.')
+    setNote(done.length ? `Deleted ${fmtNum(done.length)} ${done.length === 1 ? 'request' : 'requests'}: ${done.map((d) => d.ref).join(', ')}.${files}` : 'Nothing to delete.')
     setConfirming(false); setBusy(false)
     load()
   }
@@ -101,11 +102,11 @@ export default function AutoDelete() {
 
       <h3 style={{ margin: '8px 0 0' }}>Preview: what would be deleted now</h3>
       {list === null ? <div className="empty">Loading…</div> : !list.length ? (
-        <div className="empty">No request is overdue for more than {days} days.</div>
+        <div className="empty">No request is overdue for more than {fmtNum(days)} days.</div>
       ) : (
         <>
           <div className="small muted">
-            {list.length} {list.length === 1 ? 'request' : 'requests'}
+            {fmtNum(list.length)} {list.length === 1 ? 'request' : 'requests'}
             {saved.auto_delete_on ? ' will be deleted at the next daily run.' : ' would be deleted if automatic deletion were on.'}
           </div>
           <div className="tablewrap">
@@ -115,7 +116,7 @@ export default function AutoDelete() {
                 {list.map((c) => (
                   <tr key={c.id}>
                     <td>{c.ref}</td><td>{STATUS_LABEL[c.status] ?? c.status}</td><td>{fmtDateTime(c.due_at)}</td>
-                    <td>{c.days_overdue}</td><td>{c.files}</td>
+                    <td>{fmtNum(c.days_overdue)}</td><td>{fmtNum(c.files)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -123,7 +124,7 @@ export default function AutoDelete() {
           </div>
           {saved.auto_delete_on && (confirming ? (
             <div className="row">
-              <span className="small"><strong>Delete {list.length} {list.length === 1 ? 'request' : 'requests'} for good?</strong> This cannot be undone.</span>
+              <span className="small"><strong>Delete {fmtNum(list.length)} {list.length === 1 ? 'request' : 'requests'} for good?</strong> This cannot be undone.</span>
               <button className="btn primary" disabled={busy} onClick={deleteNow}>{busy ? 'Deleting…' : 'Yes, delete them'}</button>
               <button className="btn" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
             </div>
@@ -134,7 +135,7 @@ export default function AutoDelete() {
       )}
       {waiting > 0 && (
         <div className="row small">
-          <span>{waiting} {waiting === 1 ? 'file' : 'files'} of deleted requests still waiting to be removed (nobody can open them).</span>
+          <span>{fmtNum(waiting)} {waiting === 1 ? 'file' : 'files'} of deleted requests still waiting to be removed (nobody can open them).</span>
           <button className="btn small" disabled={busy} onClick={removeWaiting}>Remove now</button>
         </div>
       )}

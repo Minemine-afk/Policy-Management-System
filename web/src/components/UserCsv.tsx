@@ -5,6 +5,7 @@ import { downloadCsv, parseCsv } from '../lib/csv'
 import { MAX_IMPORT_ROWS, actionLabel, planImport, templateCsvRows, usersToCsvRows, type ImportRow } from '../lib/userCsv'
 import { createUser, tempPassword } from '../lib/users'
 import type { Profile } from '../lib/types'
+import { fmtNum, plain } from '../lib/num'
 
 type Outcome = { row: ImportRow; ok: boolean; message: string; password?: string }
 
@@ -74,7 +75,7 @@ export default function UserCsv({ myId, onChanged }: { myId: string; onChanged: 
       <p className="small muted" style={{ margin: 0 }}>
         Export lists everyone (no passwords). To import, use the same columns: Name, Email, Role ({Object.values(ROLE_LABEL).join(', ')}),
         Firm, Active (Yes or No) and an optional Temporary password. A new email adds a user; an existing email updates that
-        person, and blank cells keep what is there. You see what will happen before anything changes. Up to {MAX_IMPORT_ROWS} rows per file.
+        person, and blank cells keep what is there. You see what will happen before anything changes. Up to {fmtNum(MAX_IMPORT_ROWS)} rows per file.
       </p>
       <div className="row">
         <button type="button" className="btn small" onClick={exportUsers}>Export users</button>
@@ -90,8 +91,8 @@ export default function UserCsv({ myId, onChanged }: { myId: string; onChanged: 
       {plan && (
         <>
           <div className="small" role="status">
-            <strong>{fileName}</strong>: {count('create')} to add, {count('update')} to update, {count('same')} unchanged,{' '}
-            <span style={{ color: count('error') ? 'var(--bad)' : undefined }}>{count('error')} with problems (skipped)</span>.
+            <strong>{fileName}</strong>: {fmtNum(count('create'))} to add, {fmtNum(count('update'))} to update, {fmtNum(count('same'))} unchanged,{' '}
+            <span style={{ color: count('error') ? 'var(--bad)' : undefined }}>{fmtNum(count('error'))} with problems (skipped)</span>.
           </div>
           <div className="tablewrap">
             <table aria-label="Import preview">
@@ -99,7 +100,7 @@ export default function UserCsv({ myId, onChanged }: { myId: string; onChanged: 
               <tbody>
                 {plan.map((r) => (
                   <tr key={r.line}>
-                    <td>{r.line}</td><td>{r.email}</td><td>{r.full_name || <span className="muted">{r.existing?.full_name}</span>}</td>
+                    <td>{plain(r.line)}</td><td>{r.email}</td><td>{r.full_name || <span className="muted">{r.existing?.full_name}</span>}</td>
                     <td>{r.role ? ROLE_LABEL[r.role] : <span className="muted">{r.existing?.role ? ROLE_LABEL[r.existing.role] : ''}</span>}</td>
                     <td>{r.company ?? <span className="muted">{r.existing?.company}</span>}</td>
                     <td>{r.active === null ? <span className="muted">{r.existing ? (r.existing.active ? 'Yes' : 'No') : 'Yes'}</span> : r.active ? 'Yes' : 'No'}</td>
@@ -111,7 +112,7 @@ export default function UserCsv({ myId, onChanged }: { myId: string; onChanged: 
           </div>
           <div className="row">
             <button type="button" className="btn primary" disabled={busy || !todo} onClick={run}>
-              {busy ? `Working… ${progress} of ${todo}` : todo ? `Import ${todo} ${todo === 1 ? 'user' : 'users'}` : 'Nothing to import'}
+              {busy ? `Working… ${fmtNum(progress)} of ${fmtNum(todo)}` : todo ? `Import ${fmtNum(todo)} ${todo === 1 ? 'user' : 'users'}` : 'Nothing to import'}
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => setPlan(null)}>Cancel</button>
           </div>
@@ -121,11 +122,11 @@ export default function UserCsv({ myId, onChanged }: { myId: string; onChanged: 
       {outcomes && (
         <>
           <div className="small" role="status" style={{ color: failed.length ? 'var(--bad)' : 'var(--ok)' }}>
-            Import finished: {outcomes.filter((o) => o.ok).length} done, {failed.length} not imported.
+            Import finished: {fmtNum(outcomes.filter((o) => o.ok).length)} done, {fmtNum(failed.length)} not imported.
           </div>
           {added.length > 0 && (
             <div className="small">
-              {added.length} new {added.length === 1 ? 'login' : 'logins'} with temporary passwords. Pass each one to the person privately;
+              {fmtNum(added.length)} new {added.length === 1 ? 'login' : 'logins'} with temporary passwords. Pass each one to the person privately;
               they can change it under Account. Delete the downloaded file once you have.{' '}
               <button type="button" className="btn small" onClick={() => downloadCsv(`new-logins-${today()}.csv`,
                 [['Name', 'Email', 'Role', 'Temporary password'], ...added.map((o) => [o.row.full_name, o.row.email, ROLE_LABEL[o.row.role!], o.password])])}>
@@ -147,7 +148,7 @@ export default function UserCsv({ myId, onChanged }: { myId: string; onChanged: 
               <tbody>
                 {outcomes.map((o) => (
                   <tr key={o.row.line}>
-                    <td>{o.row.line}</td><td>{o.row.email}</td>
+                    <td>{plain(o.row.line)}</td><td>{o.row.email}</td>
                     <td style={{ color: o.ok ? 'var(--ok)' : 'var(--bad)' }}>{o.message}</td>
                     <td>{o.password && <code>{o.password}</code>}</td>
                   </tr>

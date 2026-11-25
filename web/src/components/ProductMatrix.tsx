@@ -8,10 +8,12 @@ import {
   DISCLAIMER, NOT_AVAILABLE, comparisonRows, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
 } from '../lib/kb'
 import { buildComparisonPdf } from '../lib/kbPdf'
+import { AmountInput } from './ui'
+import { fmtNum } from '../lib/num'
 
 export const MAX_COMPARE = 3
 
-const fmt = (cur: string, x: number) => `${cur} ${Math.round(x).toLocaleString('en-SG')}`
+const fmt = (cur: string, x: number) => `${cur} ${fmtNum(Math.round(x))}`
 const COL_HEAD = ['Product (9)', '1st Product (12)', '2nd Product (13)']
 
 export default function ProductMatrix({ kb, initial, mainId, selected, onUse, onClose, standalone, footer }: {
@@ -121,8 +123,8 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
                   onChange={(e) => set('mode', e.target.value as Needs['mode'])}>
                   <option value="coverage">Coverage</option><option value="budget">Budget a year</option>
                 </select>
-                <input aria-label={n.mode === 'coverage' ? 'Sum assured' : 'Budget a year'} type="number" min={0} style={{ minWidth: 0, flex: 1 }} value={n.amount || ''}
-                  onChange={(e) => set('amount', Number(e.target.value) || 0)} />
+                <AmountInput aria-label={n.mode === 'coverage' ? 'Sum assured' : 'Budget a year'} style={{ minWidth: 0, flex: 1 }} value={n.amount || ''}
+                  onValue={(v) => set('amount', Number(v) || 0)} />
               </div>{hint('From sum assured / premium (11)')}</div>
             <div className="field wf"><span className="wf-head">{badge(7)}<label htmlFor="m-f7">Insurer</label></span>
               <select id="m-f7" value={n.insurer} onChange={(e) => set('insurer', e.target.value)}>
@@ -147,7 +149,7 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
           </div>
 
           <div className="row between">
-            <h3 style={{ margin: 0 }} aria-live="polite">{ok.length} matching term product{ok.length === 1 ? '' : 's'}</h3>
+            <h3 style={{ margin: 0 }} aria-live="polite">{fmtNum(ok.length)} matching term product{ok.length === 1 ? '' : 's'}</h3>
             <label className="row small" style={{ gap: 8 }}>Sort by
               <select value={sort} style={{ width: 'auto' }} onChange={(e) => setSort(e.target.value as 'premium' | 'insurer')}>
                 <option value="premium">{n.mode === 'coverage' ? 'Min premium' : 'Cover the budget buys'}</option><option value="insurer">Insurer</option>
@@ -182,7 +184,7 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
           </div>
           {out.length > 0 && (
             <details className="small">
-              <summary style={{ cursor: 'pointer' }}>{out.length} product{out.length === 1 ? " doesn't" : "s don't"} match</summary>
+              <summary style={{ cursor: 'pointer' }}>{fmtNum(out.length)} product{out.length === 1 ? " doesn't" : "s don't"} match</summary>
               <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
                 {out.map((r) => <li key={r.p.id}>{productLabel(r.p)}: {r.why.join(', ')}</li>)}
               </ul>
@@ -193,10 +195,10 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
             {n.ci ? ', with a critical illness rider' : ''}, paying to age 65. Plans without critical illness cover are left out when the form asks for it.
           </p>
           <div className="matrix-foot row between">
-            <span className="small muted">Selected {picked.length} of {MAX_COMPARE} (pick at least 2)</span>
+            <span className="small muted">Selected {fmtNum(picked.length)} of {fmtNum(MAX_COMPARE)} (pick at least 2)</span>
             <div className="wf-row">{badge(10)}
               <button type="button" className="btn primary" disabled={picked.length < 2} onClick={() => { setStep('table'); setError('') }}>
-                Compare selected ({picked.length})</button>
+                Compare selected ({fmtNum(picked.length)})</button>
             </div>
           </div>
         </> : <>
@@ -211,7 +213,7 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
           <div className="matrix-foot row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" onClick={download} disabled={busy}>{busy ? 'Making the PDF…' : 'Download summary (PDF)'}</button>
             {!footer && <button type="button" className="btn primary" onClick={() => onUse?.(ordered.map((p) => p.id))}>
-              Use these {ordered.length} products in the PI request</button>}
+              Use these {fmtNum(ordered.length)} products in the PI request</button>}
           </div>
           {footer?.(ordered, n)}
         </>}

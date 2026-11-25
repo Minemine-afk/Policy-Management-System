@@ -6,6 +6,7 @@
 // Reading with learned places follows the general rules' safety rule: when two places disagree, the cell stays blank.
 
 import { FIELDS, type Found, type Line, type Page, type TextItem } from './piExtract.ts'
+import { fmtNum, plain } from './num.ts'
 
 /** One remembered place. `how`: 'beside' = the value is `offset` pieces after the label on the same line (0 = in the
  *  label's own piece, after it); 'under' = the value is the first value under the column heading `label`;
@@ -339,7 +340,7 @@ function placesFor(pages: Page[], field: string, value: string, personal: string
           while (j > 0 && isPunct(ps[j])) j--
           bits.forEach((bit, n) => {
             if (CANON[field](stripLead(bit)) !== want || j < 0 || i === 0 || isNumberish(ps[j])) return
-            add({ how: 'beside', label: normLabel(ps[j]), offset: i - j, factor: 1, cut: bits.length > 1 ? `,${n}` : '' })
+            add({ how: 'beside', label: normLabel(ps[j]), offset: i - j, factor: 1, cut: bits.length > 1 ? `,${plain(n)}` : '' })
           })
         })
       }
@@ -454,7 +455,7 @@ export function applyLearned(found: Record<string, Found>, pages: Page[], rules:
   if (ins?.value && insurer && ins.value !== insurer && fuzzyKey(ins.value) === fuzzyKey(insurer)) { fixed.push(`Insurer (read as ${ins.value})`); out.insurer = { ...ins, value: insurer } }
   const notes: string[] = []
   if (fixed.length) notes.push(`Spelled as ops saved before for ${insurer}: ${fixed.join(', ')}.`)
-  if (used) notes.push(`${used} value${used === 1 ? '' : 's'} read from places ops taught for ${insurer} (tagged "Learned"). Please check them.`)
+  if (used) notes.push(`${fmtNum(used)} value${used === 1 ? '' : 's'} read from places ops taught for ${insurer} (tagged "Learned"). Please check them.`)
   if (replaced.length) notes.push(`Ops corrected these for ${insurer} before, so the taught place was used instead of the reader's rules: ${replaced.join(', ')}.`)
   if (conflicts.length) notes.push(`Places taught for ${insurer} gave different values for ${conflicts.join(', ')}, so ${conflicts.length === 1 ? 'it was' : 'they were'} left blank.`)
   return { found: out, notes, insurer }

@@ -1,6 +1,7 @@
 // "Download summary (PDF)" from the product comparison pop-up: the wireframe 5 table, with each value's source,
 // and the disclaimer. Made in the browser; nothing is uploaded. No client name on it (only the profile used).
 import { DISCLAIMER, NOT_AVAILABLE, comparisonRows, type Kb, type KbProduct, type Needs } from './kb'
+import { fmtNum, plain } from './num.ts'
 
 const NAVY = [0.06, 0.16, 0.3] as const
 const GREY = [0.42, 0.45, 0.5] as const
@@ -49,8 +50,8 @@ export async function buildComparisonPdf(kb: Kb, products: KbProduct[], n: Needs
   const date = now.toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' })
   text(`Made ${date}`, W - M - width(`Made ${date}`, 9), y - 12, 9, font, GREY)
   y -= 30
-  const who = [n.age != null ? `age ${n.age} next birthday` : '', n.gender.toLowerCase(), n.smoker ? 'smoker' : 'non-smoker',
-    n.residency.toLowerCase(), n.currency, n.mode === 'coverage' ? `cover ${n.currency} ${n.amount.toLocaleString('en-SG')}` : `budget ${n.currency} ${n.amount.toLocaleString('en-SG')} a year`,
+  const who = [n.age != null ? `age ${plain(n.age)} next birthday` : '', n.gender.toLowerCase(), n.smoker ? 'smoker' : 'non-smoker',
+    n.residency.toLowerCase(), n.currency, n.mode === 'coverage' ? `cover ${n.currency} ${fmtNum(n.amount)}` : `budget ${n.currency} ${fmtNum(n.amount)} a year`,
     n.ci ? 'with critical illness' : ''].filter(Boolean).join(', ')
   for (const l of wrap(`Client profile used: ${who}.`, 9, W - 2 * M)) { text(l, M, y, 9, font, GREY); y -= 12 }
   y -= 6
@@ -90,7 +91,7 @@ export async function buildComparisonPdf(kb: Kb, products: KbProduct[], n: Needs
   dis.forEach((l, i) => text(l, M + 6, y - 10 - i * 11, 8.5, i === 0 ? font : font))
 
   const pages = doc.getPages()
-  pages.forEach((p, i) => p.drawText(`Page ${i + 1} of ${pages.length} · Factual comparison from the Knowledge Bank, not advice`,
+  pages.forEach((p, i) => p.drawText(`Page ${plain(i + 1)} of ${plain(pages.length)} · Factual comparison from the Knowledge Bank, not advice`,
     { x: M, y: M - 18, size: 7.5, font, color: rgb(GREY[0], GREY[1], GREY[2]) }))
   return new Blob([await doc.save()], { type: 'application/pdf' })
 }

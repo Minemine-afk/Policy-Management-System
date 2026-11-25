@@ -1,3 +1,4 @@
+import { fmtNum, plain } from './num.ts'
 // Form categories (same fields as the first design). Term life only for now.
 export const PLAN_CATEGORIES = ['All', 'Direct Purchase Insurance (DPI)', 'Non-DPI']
 export const PRODUCTS = ['Term life']
@@ -75,8 +76,8 @@ export function summary(r: { age_band: string; gender: string; smoker: boolean; 
 
 /** "48 hours" -> "2 days". */
 export function fmtHours(h: number) {
-  if (h % 24 === 0) return h === 24 ? '1 day' : `${h / 24} days`
-  return h === 1 ? '1 hour' : `${h} hours`
+  if (h % 24 === 0) return h === 24 ? '1 day' : `${fmtNum(h / 24)} days`
+  return h === 1 ? '1 hour' : `${fmtNum(h)} hours`
 }
 
 /** Each request has a due time (set from the deadline in Admin > Settings). Orange: the "due soon" window.
@@ -90,10 +91,10 @@ export function dueInfo(r: { status: string; due_at: string | null; paused_at?: 
   const left = (new Date(r.due_at).getTime() - Date.now()) / 3_600_000
   if (left < 0) {
     const over = Math.floor(-left)
-    const label = over >= 24 ? `Overdue by ${Math.floor(over / 24)}d` : `Overdue by ${Math.max(over, 1)}h`
+    const label = over >= 24 ? `Overdue by ${fmtNum(Math.floor(over / 24))}d` : `Overdue by ${fmtNum(Math.max(over, 1))}h`
     return { level: 'late', overdue: true, label }
   }
-  const label = left >= 24 ? `Due in ${Math.ceil(left / 24)}d` : `Due in ${Math.max(Math.ceil(left), 1)}h`
+  const label = left >= 24 ? `Due in ${fmtNum(Math.ceil(left / 24))}d` : `Due in ${fmtNum(Math.max(Math.ceil(left), 1))}h`
   return { level: left <= soonHours ? 'soon' : 'ok', overdue: false, label }
 }
 
@@ -117,7 +118,7 @@ export function ageOn(dob: string, today = new Date()): number | null {
   if (today.getMonth() + 1 < Number(m[2]) || (today.getMonth() + 1 === Number(m[2]) && today.getDate() < Number(m[3]))) a--
   return a
 }
-export const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+export const isoToday = () => { const d = new Date(); return `${plain(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
 /** "1990-05-17" -> "17/05/1990" (day first, as on Singapore PIs). */
 export const dobDmy = (iso: string) => iso.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')

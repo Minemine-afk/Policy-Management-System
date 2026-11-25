@@ -77,6 +77,7 @@ const SG_LABELS = {
   await check(sam.getByLabel('Product', { exact: true }).locator('option').allTextContents().then((t) => t.join('|') === 'Select|Harbour Term Secure|Other term plan (name it in the remarks)'), 'the product list has only that insurer\'s plans')
   await sam.getByLabel('Product', { exact: true }).selectOption({ label: 'Harbour Term Secure' })
   await sam.locator('#f-amount').fill('1000000')
+  await check(sam.locator('#f-amount').inputValue().then((v) => v === '1,000,000'), 'the amount box shows thousands commas as you type')
   await sam.getByRole('group', { name: 'Smoker status' }).getByRole('button', { name: 'Non-smoker' }).click()
   await sam.getByLabel('Coverage term').selectOption('11 to 20 years')
   await sam.getByRole('group', { name: 'Critical illness benefit' }).getByRole('button', { name: 'Yes' }).click()
@@ -86,6 +87,7 @@ const SG_LABELS = {
   await mx.waitFor()
   const anb = Number(await mx.getByLabel('Age next birthday').inputValue())
   await check(Promise.resolve(anb >= 38 && anb <= 40), 'the pop-up fills the age (next birthday) from the date of birth')
+  await check(mx.getByLabel('Sum assured').inputValue().then((v) => v === '1,000,000'), 'and the sum assured, with thousands commas')
   await check(mx.getByLabel('Client profile').inputValue().then((v) => v === 'Family'), 'and the client profile from the client type')
   await check(mx.getByRole('heading', { name: '3 matching term products' }).isVisible(), 'lists the checked products that fit (3 with CI cover in SGD)')
   await check(mx.getByLabel('Select Harbour Life (sample) · Harbour Term Secure').isChecked(), 'the product on the form is ticked already')
@@ -197,23 +199,23 @@ const SG_LABELS = {
   await check(val('Policy Name', 2).then((v) => v === 'Secure Term'), 'policy name without the insurer name in front (as in the spec)')
   await check(val('Insured Name', 1).then((v) => v === 'XXXXX'), 'reads the insured name (Life Assured)')
   await check(Promise.all([val('Gender', 1), val('Underwriting Class', 1), val('Residency', 1)]).then((v) => v.join('|') === 'Female|Non-Smoker|Singapore'), 'reads gender, underwriting class and residency')
-  await check(val('Death', 1).then((v) => v === '500000'), 'reads the death sum assured from the summary table, not the small print')
+  await check(val('Death', 1).then((v) => v === '500,000'), 'reads the death sum assured from the summary table, not the small print')
   await check(val('Policy Term (Years)', 1).then((v) => v === 'To age 65'), 'keeps "To Age 65" as a policy term')
   await check(val('Policy Term: Up till age', 1).then((v) => v === '65'), 'works out the cover-until age')
   await check(val('Premium Term (Years)', 2).then((v) => v === '30'), 'reads premium term in years')
-  await check(val('Annual Premium', 1).then((v) => v === '1262.40'), 'turns a monthly premium into a yearly one')
+  await check(val('Annual Premium', 1).then((v) => v === '1,262.40'), 'turns a monthly premium into a yearly one')
   await check(olivia.getByLabel('Notes for PI 1').getByText(/Payment mode is Monthly: premiums are shown per year/).isVisible(), 'says the premiums were made yearly')
-  await check(val('Annual Premium', 2).then((v) => v === '1180.00'), 'keeps an annual premium as it is')
+  await check(val('Annual Premium', 2).then((v) => v === '1,180.00'), 'keeps an annual premium as it is')
   await check(val('Policy Currency', 2).then((v) => v === 'USD'), 'reads the policy currency (USD)')
   await check(olivia.getByLabel('Notes for PI 3').getByText(/Policy currency not found|fill in the policy currency/).isVisible(), 'asks for the currency when the PI does not say')
-  await check(val('Death', 3).then((v) => v === '600000'), 'reads sum assured when headings are joined together')
+  await check(val('Death', 3).then((v) => v === '600,000'), 'reads sum assured when headings are joined together')
   await check(val('Premium', 3).then((v) => v === '816.00'), 'base premium is the premium payable after discount, per year')
   await check(olivia.getByText('After discount').isVisible(), 'flags a discounted premium')
   await check(olivia.getByLabel('Notes for PI 3').getByText(/15% discount \(80.00 monthly before/).isVisible(), 'notes the discount and the premium before it')
-  await check(val('Annual Premium', 3).then((v) => v === '1020.00'), 'annual premium is the Total line (plan + riders)')
-  await check(Promise.all([val('Critical Illness', 3), val('CI Premium', 3)]).then((v) => v.join('|') === '200000|204.00'), 'reads the CI rider and its premium')
+  await check(val('Annual Premium', 3).then((v) => v === '1,020.00'), 'annual premium is the Total line (plan + riders)')
+  await check(Promise.all([val('Critical Illness', 3), val('CI Premium', 3)]).then((v) => v.join('|') === '200,000|204.00'), 'reads the CI rider and its premium')
   await check(Promise.all([val('Critical Illness', 1), val('CI Premium', 1)]).then((v) => v.join('|') === 'NA|NA'), 'no CI rider shows NA and NA')
-  await check(val('Total Premium', 3).then((v) => v === '25500.00'), 'total premium from the last row of the illustration')
+  await check(val('Total Premium', 3).then((v) => v === '25,500.00'), 'total premium from the last row of the illustration')
   await check(val('Cash Value', 3).then((v) => v === 'NA'), 'no cash value shows NA')
   await check(val('Campaigns', 3).then((v) => v === '15% perpetual discount with CI rider'), 'describes the discount campaign')
   await check(val('Terminal Illness', 3).then((v) => v === 'Included'), 'terminal illness included when the PI says so')
@@ -714,7 +716,7 @@ const SG_LABELS = {
     const labels = SG_LABELS
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
-        const got = await olivia.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()
+        const got = (await olivia.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()).replace(/(\d),(?=\d{3})/g, '$1')   // shown with thousands commas
         // PI-00003's request form has a date of birth (set by the introducer above): it fills a PI that has none
         const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
         await check(Promise.resolve(got === want), `real sample ${n}: ${label} = ${got || '(blank)'}`)
@@ -743,7 +745,7 @@ const SG_LABELS = {
     const labels = SG_LABELS
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
-        const got = await cmp.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()
+        const got = (await cmp.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()).replace(/(\d),(?=\d{3})/g, '$1')
         const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
         await check(Promise.resolve(got === want), `scanned ${n} (OCR): ${label} = ${got || '(blank)'}`)
       }
@@ -991,7 +993,7 @@ const SG_LABELS = {
   await olivia.getByRole('button', { name: 'Save draft' }).click()
   await olivia.getByText('Draft saved.').waitFor()
   await check(seen(olivia.getByText('The checked version (v1) stays in Compare products until these changes are checked.')), 'a change to a checked record is kept as a draft')
-  await check(seen(olivia.getByText('Maximum sum assured: — → 2000000')), 'and lists what it changes')
+  await check(seen(olivia.getByText('Maximum sum assured: — → 2,000,000')), 'and lists what it changes')
   await olivia.getByRole('button', { name: 'Send for check' }).click()
   await pat.goto(mapleUrl)
   await pat.getByRole('button', { name: 'Send back' }).click()
@@ -1027,7 +1029,7 @@ const SG_LABELS = {
   await check(olivia.getByLabel('Product name').inputValue().then((v) => v === 'Orchard TermShield'), 'product name read')
   await check(olivia.getByLabel('Insurer', { exact: true }).inputValue().then((v) => v === 'Marina Life Assurance'), 'insurer read')
   await check(olivia.getByLabel('Entry age to').inputValue().then((v) => v === '60'), 'entry age read')
-  await check(olivia.getByLabel('Maximum sum assured (optional)').inputValue().then((v) => v === '5000000'), 'maximum sum assured read ("S$5 million")')
+  await check(olivia.getByLabel('Maximum sum assured (optional)').inputValue().then((v) => v === '5,000,000'), 'maximum sum assured read ("S$5 million")')
   await check(olivia.getByLabel('Foreigner living in Singapore').isChecked(), 'who can apply read')
   await check(olivia.getByLabel('Free-look period', { exact: true }).inputValue().then((v) => v === '14 days'), 'a fact read')
   await check(olivia.getByLabel('Page for Free-look period').inputValue().then((v) => v === '2'), 'with the page it is on')

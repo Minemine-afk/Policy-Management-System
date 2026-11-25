@@ -1,5 +1,6 @@
 import type { Profile, Role } from './types'
 import { ROLE_LABEL } from './options'
+import { fmtNum, plain } from './num.ts'
 
 /** Columns of the users CSV (export and import). The password column is only read on import, never exported. */
 export const USER_CSV_HEADER = ['Name', 'Email', 'Role', 'Firm', 'Active', 'Temporary password']
@@ -76,7 +77,7 @@ export function planImport(cells: string[][], people: Profile[], myId: string): 
   if (col.email < 0) return { rows: [], error: 'The first line must be the column names, with at least an "Email" column. Download the template to see the layout.' }
   const body = cells.slice(1)
   if (!body.length) return { rows: [], error: 'The file has column names but no users.' }
-  if (body.length > MAX_IMPORT_ROWS) return { rows: [], error: `At most ${MAX_IMPORT_ROWS} users per file; this one has ${body.length}. Split it into smaller files.` }
+  if (body.length > MAX_IMPORT_ROWS) return { rows: [], error: `At most ${fmtNum(MAX_IMPORT_ROWS)} users per file; this one has ${fmtNum(body.length)}. Split it into smaller files.` }
 
   const byEmail = new Map(people.map((p) => [p.email.toLowerCase(), p]))
   const seen = new Map<string, number>()
@@ -94,7 +95,7 @@ export function planImport(cells: string[][], people: Profile[], myId: string): 
     }
     if (!email) row.problems.push('Email is missing')
     else if (!EMAIL.test(email)) row.problems.push('Email is not valid')
-    else if (seen.has(email)) row.problems.push(`Same email as line ${seen.get(email)}`)
+    else if (seen.has(email)) row.problems.push(`Same email as line ${plain(seen.get(email))}`)
     if (email) seen.set(email, seen.get(email) ?? line)
     if (roleText) {
       const role = roleFrom(roleText)
@@ -120,7 +121,7 @@ export function planImport(cells: string[][], people: Profile[], myId: string): 
     } else {
       if (!row.full_name) row.problems.push('Name is missing (needed for a new user)')
       if (!roleText) row.problems.push('Role is missing (needed for a new user)')
-      if (row.password && row.password.length < MIN_PASSWORD) row.problems.push(`Temporary password needs at least ${MIN_PASSWORD} characters`)
+      if (row.password && row.password.length < MIN_PASSWORD) row.problems.push(`Temporary password needs at least ${fmtNum(MIN_PASSWORD)} characters`)
       if (row.active === false) row.problems.push('A new user cannot start inactive; leave Active blank or Yes')
       if (!row.problems.length) row.action = 'create'
     }

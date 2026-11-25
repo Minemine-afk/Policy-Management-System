@@ -11,25 +11,27 @@ import {
   FACT_FIELDS, RATES_HEADER, blankRecord, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
   type Fact, type HistoryRow, type KbDoc, type KbProductRow, type ProductRecord, type Rate,
 } from '../lib/kbAdmin'
-import { ReasonDialog } from '../components/ui'
+import { AmountInput, ReasonDialog } from '../components/ui'
 import { DocDialog, KbHeader, type Created } from './KnowledgeHub'
 import { ratesCsv, readFile, readRates, readSummary, readableName } from '../lib/kbExtract'
 import { loadProducts } from '../lib/kbAdmin'
+import { fmtNum, plain } from '../lib/num'
 
 const FIELD_LABEL: Record<string, string> = {
   insurer: 'Insurer', name: 'Product name', category: 'Category', dpi: 'Direct Purchase Insurance', jurisdiction: 'Onshore / offshore',
   currencies: 'Policy currencies', entry_age_min: 'Entry age from', entry_age_max: 'Entry age to', residency: 'Who can apply',
   sa_min: 'Minimum sum assured', sa_max: 'Maximum sum assured', has_tpd: 'TPD cover', has_ci: 'Critical illness cover',
 }
-const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v == null || v === '' ? '—' : String(v))
-const factText = (f?: Fact) => (f?.v ? `${f.v}${f.page ? ` (p.${f.page})` : ''}` : '—')
+const show = (v: unknown, k?: string) => (Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v == null || v === '' ? '—'
+  : k === 'sa_min' || k === 'sa_max' ? fmtNum(v as number | string) : String(v))
+const factText = (f?: Fact) => (f?.v ? `${f.v}${f.page ? ` (p.${plain(f.page)})` : ''}` : '—')
 
 /** What the draft changes compared with the checked version, in plain words. */
 function changes(live: ProductRecord | null, draft: ProductRecord, rates: boolean): string[] {
   if (!live) return ['New product record']
   const out: string[] = []
   for (const k of Object.keys(FIELD_LABEL) as (keyof ProductRecord)[]) {
-    if (JSON.stringify(show(live[k])) !== JSON.stringify(show(draft[k]))) out.push(`${FIELD_LABEL[k]}: ${show(live[k])} → ${show(draft[k])}`)
+    if (JSON.stringify(show(live[k])) !== JSON.stringify(show(draft[k]))) out.push(`${FIELD_LABEL[k]}: ${show(live[k], k)} → ${show(draft[k], k)}`)
   }
   for (const r of [{ key: '_ps', label: 'Product Summary' }, { key: '_rs', label: 'Rate sheet' }, ...FACT_FIELDS]) {
     const a = live.facts[r.key], b = draft.facts[r.key]
@@ -124,7 +126,7 @@ export default function KbProduct() {
         if (dl.error || !dl.data) throw new Error(dl.error?.message ?? 'Could not download the file')
         data = await dl.data.arrayBuffer()
       }
-      const doc = await readFile(data, name, (done, total, ocr) => setReading(`Reading ${name}: page ${Math.min(total, Math.floor(done) + 1)} of ${total}${ocr ? ' (scanned, reading the picture)' : ''}…`))
+      const doc = await readFile(data, name, (done, total, ocr) => setReading(`Reading ${name}: page ${plain(Math.min(total, Math.floor(done) + 1))} of ${plain(total)}${ocr ? ' (scanned, reading the picture)' : ''}…`))
       if (kind === 'summary') {
         const r = readSummary(doc)
         const keys = new Set<string>()
@@ -152,7 +154,7 @@ export default function KbProduct() {
         setFromDoc((x) => new Set([...x, '_rates']))
         setReadNotes(r.notes)
         const ages = r.rates.map((x) => x.age)
-        setMsg(`Read ${r.rates.length} premium rates from ${name} (ages ${Math.min(...ages)} to ${Math.max(...ages)}${r.rates.some((x) => x.ci_rate != null) ? ', with critical illness rider rates' : ''}). Check a few against the sheet, then save the draft.`)
+        setMsg(`Read ${fmtNum(r.rates.length)} premium rates from ${name} (ages ${plain(Math.min(...ages))} to ${plain(Math.max(...ages))}${r.rates.some((x) => x.ci_rate != null) ? ', with critical illness rider rates' : ''}). Check a few against the sheet, then save the draft.`)
       }
     } catch (e) {
       setError(`Couldn't read ${name}: ${e instanceof Error ? e.message : String(e)}`)
@@ -240,7 +242,7 @@ export default function KbProduct() {
         {steps.map((s, i) => <li key={s} className={i === at ? 'on' : i < at ? 'done' : ''} aria-current={i === at ? 'step' : undefined}>{s}</li>)}
       </ol>
       {row?.pending_note && <div className="notice warn" role="status"><strong>{row.pending_note.startsWith('New version') ? 'Re-check needed' : 'Sent back'}:</strong> {row.pending_note}</div>}
-      {row?.status === 'verified' && row.pending && <div className="notice" role="status">The checked version (v{row.version}) stays in Compare products until these changes are checked.</div>}
+      {row?.status === 'verified' && row.pending && <div className="notice" role="status">The checked version (v{plain(row.version)}) stays in Compare products until these changes are checked.</div>}
       {reading && <div className="notice" role="status">{reading}</div>}
       {msg && <div className="notice ok" role="status">{msg}</div>}
       {readNotes.map((n) => <div key={n} className="notice warn" role="status">{n}</div>)}
@@ -292,8 +294,8 @@ export default function KbProduct() {
               </label>
               <label className="field">Entry age from (next birthday)<input type="number" min={0} max={100} value={rec.entry_age_min} onChange={(e) => set('entry_age_min', e.target.value)} /></label>
               <label className="field">Entry age to<input type="number" min={0} max={100} value={rec.entry_age_max} onChange={(e) => set('entry_age_max', e.target.value)} /></label>
-              <label className="field">Minimum sum assured (optional)<input type="number" min={0} value={rec.sa_min ?? ''} onChange={(e) => set('sa_min', e.target.value || null)} /></label>
-              <label className="field">Maximum sum assured (optional)<input type="number" min={0} value={rec.sa_max ?? ''} onChange={(e) => set('sa_max', e.target.value || null)} /></label>
+              <label className="field">Minimum sum assured (optional)<AmountInput value={rec.sa_min ?? ''} onValue={(v) => set('sa_min', (v || null) as ProductRecord['sa_min'])} /></label>
+              <label className="field">Maximum sum assured (optional)<AmountInput value={rec.sa_max ?? ''} onValue={(v) => set('sa_max', (v || null) as ProductRecord['sa_max'])} /></label>
             </div>
             <fieldset className="field"><legend>Policy currencies</legend>
               <div className="row" style={{ gap: '6px 18px' }}>{CURRENCIES.map((c) => (
@@ -350,7 +352,7 @@ export default function KbProduct() {
                 <input type="file" accept=".csv,.txt" hidden onChange={async (e) => { const x = e.target.files?.[0]; if (x) { setRatesText(await x.text()); setRatesTouched(true) } }} />
               </label>
               {parsed.error ? <span className="error">{parsed.error}</span>
-                : <span className="muted">{parsed.rates.length} rate{parsed.rates.length === 1 ? '' : 's'}{ratesTouched ? ' (changed, saved with the draft)' : liveRates.length && !row?.pending?.rates ? ' (the checked rates)' : ''}</span>}
+                : <span className="muted">{fmtNum(parsed.rates.length)} rate{parsed.rates.length === 1 ? '' : 's'}{ratesTouched ? ' (changed, saved with the draft)' : liveRates.length && !row?.pending?.rates ? ' (the checked rates)' : ''}</span>}
             </div>
           </section>
         </div>
@@ -399,8 +401,8 @@ export default function KbProduct() {
             <section className="card" aria-label="Version history">
               <h3 className="eyebrow">Version history</h3>
               <ul className="small plain">
-                {history.map((h) => <li key={h.id}>v{h.version} · checked by {nameOf(people, h.checked_by)} on {fmtDateTime(h.checked_at)}{h.changed_by ? ` · made by ${nameOf(people, h.changed_by)}` : ''}</li>)}
-                {!history.length && <li className="muted">{row.verified_at ? `v${row.version} (checked before the history began)` : 'Not checked yet'}</li>}
+                {history.map((h) => <li key={h.id}>v{plain(h.version)} · checked by {nameOf(people, h.checked_by)} on {fmtDateTime(h.checked_at)}{h.changed_by ? ` · made by ${nameOf(people, h.changed_by)}` : ''}</li>)}
+                {!history.length && <li className="muted">{row.verified_at ? `v${plain(row.version)} (checked before the history began)` : 'Not checked yet'}</li>}
               </ul>
               {row.pending_at && <p className="small muted" style={{ margin: 0 }}>Draft last saved {fmtDateTime(row.pending_at)} by {nameOf(people, row.pending_by)}.</p>}
             </section>
