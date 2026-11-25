@@ -1,16 +1,28 @@
-// The Knowledge Hub module's Knowledge Bank: documents (with versions and expiry) and product records with
-// maker-checker. Ops and BSD keep it; a BSD person who did not make a change checks it.
+// The Knowledge Hub module's Knowledge Bank: documents (with versions and expiry) and product records.
+// Ops and BSD keep it. No check step (Kumar, 25 Nov 2026): uploads are in use at once, and a product record is in
+// search as soon as it is read from an upload or saved; what the reader filled in is tagged until someone reviews it.
 import { supabase } from './supabase'
 import { FACT_ROWS } from './kb'
+import { fmtNum, plain } from './num.ts'
 
-export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Campaign', 'Regulatory', 'Other']
+export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Training material', 'Product Financing',
+  'Circulars', 'Campaign', 'Regulatory', 'Others']
+/** "Others" asks for a name, which is then shown as the document's type. */
+export const OTHERS = 'Others'
+export const DOC_TYPE_NAME_MAX = 60
+/** Types that need not come from one insurer (the insurer is optional). */
+export const NO_INSURER_TYPES = ['Training material', 'Product Financing', 'Circulars', OTHERS]
+export const needsInsurer = (type: string) => !NO_INSURER_TYPES.includes(type)
+/** The type as people see it: the typed name for "Others". */
+export const docTypeName = (d: { doc_type: string; doc_type_name?: string | null }) =>
+  d.doc_type === OTHERS ? d.doc_type_name?.trim() || OTHERS : d.doc_type
 export const KB_ACCEPT = '.pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx'
 export const KB_MAX_MB = 20
 /** Documents expiring within this many days are flagged (owners get time to upload the new version). */
 export const EXPIRY_WARN_DAYS = 40
 
 export interface KbDoc {
-  id: string; product_id: string | null; insurer: string; title: string; doc_type: string; version: string
+  id: string; product_id: string | null; insurer: string; title: string; doc_type: string; doc_type_name: string | null; version: string
   effective_from: string | null; valid_until: string | null; storage_path: string | null; file_name: string | null
   file_size: number | null; status: 'new' | 'checked'; replaces: string | null; replaced_by: string | null
   uploaded_by: string | null; checked_by: string | null; checked_at: string | null; created_at: string; is_sample: boolean
@@ -30,8 +42,21 @@ export interface KbProductRow extends ProductRecord {
   pending: ProductRecord | null; pending_state: 'draft' | 'check' | null; pending_by: string | null; pending_at: string | null
   pending_note: string | null; submitted_by: string | null; verified_by: string | null; verified_at: string | null
   created_by: string | null; updated_at: string
+  auto_read: boolean; auto_fields: string[]; missing: string[]; read_note: string | null
 }
-export interface HistoryRow { id: number; product_id: string; version: number; record: ProductRecord & { rates_changed?: boolean }; changed_by: string | null; checked_by: string | null; checked_at: string }
+export interface HistoryRow { id: number; product_id: string; version: number; record: ProductRecord & { rates_changed?: boolean }; changed_by: string | null; checked_by: string | null; checked_at: string; source: 'checked' | 'edit' | 'read' | 'migrated' }
+
+/** What a record still needs before it can be found in search, in plain words. */
+export const MISSING_LABEL: Record<string, string> = { currencies: 'policy currency', entry_age: 'entry ages' }
+export const missingText = (m: string[]) => m.map((x) => MISSING_LABEL[x] ?? x).join(' and ')
+/** Why a product is not in Compare products (empty = it is). */
+export function whyNotSearchable(p: KbProductRow, usable: boolean): string {
+  if (usable) return ''
+  if (p.status === 'withdrawn') return 'Withdrawn'
+  if (p.missing?.length) return `Not searchable: the ${missingText(p.missing)} ${p.missing.length > 1 ? 'were' : 'was'} not found in the documents. Open the record and fill ${p.missing.length > 1 ? 'them' : 'it'} in`
+  if (p.status === 'draft') return 'Not saved yet: open it and save it to put it in search'
+  return 'Not searchable: a source document is out of date. Upload the new version'
+}
 
 /** The comparison rows a person fills in (the rest come from the record's own fields). */
 export const FACT_FIELDS = FACT_ROWS.filter((r) => !r.key.startsWith('_'))
@@ -57,18 +82,17 @@ export function docState(d: KbDoc): { text: string; tone: 'ok' | 'warn' | 'bad' 
   if (d.replaced_by) return { text: 'Older version', tone: 'grey' }
   const left = daysLeft(d.valid_until)
   if (left != null && left < 0) return { text: 'Out of date', tone: 'bad' }
-  if (d.status === 'new') return { text: d.replaces ? 'New version, not checked' : 'New, not checked', tone: 'info' }
-  if (left != null && left <= EXPIRY_WARN_DAYS) return { text: `Expires in ${left} day${left === 1 ? '' : 's'}`, tone: 'warn' }
-  return { text: 'Checked', tone: 'ok' }
+  if (left != null && left <= EXPIRY_WARN_DAYS) return { text: `Expires in ${fmtNum(left)} day${left === 1 ? '' : 's'}`, tone: 'warn' }
+  return { text: 'In use', tone: 'ok' }
 }
 
 /** Where a product record stands. */
 export function productState(p: KbProductRow, usable: boolean): { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info' | 'purple' } {
-  if (p.pending_state === 'check') return { text: p.status === 'verified' ? 'Changes waiting for check' : 'Waiting for check', tone: 'purple' }
   if (p.status === 'withdrawn') return { text: 'Withdrawn', tone: 'grey' }
-  if (p.status === 'verified' && !usable) return { text: 'A source document is out of date', tone: 'bad' }
-  if (p.status === 'verified') return { text: p.pending ? 'Checked · draft changes' : 'Checked', tone: 'ok' }
-  return { text: p.pending_note ? 'Draft · sent back' : 'Draft', tone: 'info' }
+  if (p.status === 'draft' && !p.missing?.length) return { text: 'Not saved yet', tone: 'info' }
+  if (!usable) return { text: p.missing?.length ? `Not searchable: no ${missingText(p.missing)}` : 'A source document is out of date', tone: 'bad' }
+  if (p.auto_read) return { text: 'In search · auto-read, not yet reviewed', tone: 'warn' }
+  return { text: 'In search', tone: 'ok' }
 }
 
 export async function loadDocs(): Promise<KbDoc[]> {
@@ -79,7 +103,7 @@ export async function loadProducts(): Promise<KbProductRow[]> {
   const { data } = await supabase.from('kb_products').select('*').order('insurer').order('name')
   return (data as KbProductRow[]) ?? []
 }
-/** Ids of the products Compare products offers now. */
+/** Ids of the products Compare products offers now (in search). */
 export async function loadUsable(): Promise<Set<string>> {
   const { data } = await supabase.from('kb_checked_products').select('id')
   return new Set(((data as { id: string }[]) ?? []).map((x) => x.id))
@@ -110,7 +134,7 @@ export function parseRates(text: string): { rates: Rate[]; error: string } {
     const g = /^f/i.test(c[1]) ? 'Female' : /^m/i.test(c[1]) ? 'Male' : ''
     const smoker = /^(y|yes|true|1|s|smoker)$/i.test(c[2]) ? true : /^(n|no|false|0|ns|non-smoker)$/i.test(c[2]) ? false : null
     if (!Number.isInteger(age) || age < 0 || age > 100 || !g || smoker == null || !(rate > 0) || (ci != null && !(ci > 0))) {
-      return { rates: [], error: `Line ${i + 1} ("${line}") needs: age, gender (M/F), smoker (yes/no), rate, and optionally the CI rate` }
+      return { rates: [], error: `Line ${plain(i + 1)} ("${line}") needs: age, gender (M/F), smoker (yes/no), rate, and optionally the CI rate` }
     }
     rates.push({ age, gender: g, smoker, rate, ci_rate: ci })
   }

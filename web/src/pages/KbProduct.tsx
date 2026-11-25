@@ -1,53 +1,29 @@
-// One Knowledge Bank product record: its facts (each naming a document and page), premium rates, and the
-// maker-checker steps: save draft, send for check, then a BSD person who did not make the change checks it.
+// One Knowledge Bank product record: its facts (each naming a document and page) and premium rates. No check step
+// (Kumar, 25 Nov 2026): saving puts it in search at once; changing it is optional. What the reader filled in is marked
+// "From document" until someone saves the record or marks it as reviewed.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, fmtDateTime, says } from '../lib/options'
 import { CURRENCIES, RESIDENCIES, STANDARD_INSURERS } from '../lib/formOptions'
 import {
-  FACT_FIELDS, RATES_HEADER, blankRecord, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
-  type Fact, type HistoryRow, type KbDoc, type KbProductRow, type ProductRecord, type Rate,
+  FACT_FIELDS, RATES_HEADER, blankRecord, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
+  whyNotSearchable, type Fact, type HistoryRow, type KbDoc, type KbProductRow, type ProductRecord, type Rate,
 } from '../lib/kbAdmin'
-import { ReasonDialog } from '../components/ui'
+import { AmountInput, ReasonDialog } from '../components/ui'
 import { DocDialog, KbHeader, type Created } from './KnowledgeHub'
 import { ratesCsv, readFile, readRates, readSummary, readableName } from '../lib/kbExtract'
 import { loadProducts } from '../lib/kbAdmin'
+import { fmtNum, plain } from '../lib/num'
 
-const FIELD_LABEL: Record<string, string> = {
-  insurer: 'Insurer', name: 'Product name', category: 'Category', dpi: 'Direct Purchase Insurance', jurisdiction: 'Onshore / offshore',
-  currencies: 'Policy currencies', entry_age_min: 'Entry age from', entry_age_max: 'Entry age to', residency: 'Who can apply',
-  sa_min: 'Minimum sum assured', sa_max: 'Maximum sum assured', has_tpd: 'TPD cover', has_ci: 'Critical illness cover',
-}
-const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v == null || v === '' ? '—' : String(v))
-const factText = (f?: Fact) => (f?.v ? `${f.v}${f.page ? ` (p.${f.page})` : ''}` : '—')
-
-/** What the draft changes compared with the checked version, in plain words. */
-function changes(live: ProductRecord | null, draft: ProductRecord, rates: boolean): string[] {
-  if (!live) return ['New product record']
-  const out: string[] = []
-  for (const k of Object.keys(FIELD_LABEL) as (keyof ProductRecord)[]) {
-    if (JSON.stringify(show(live[k])) !== JSON.stringify(show(draft[k]))) out.push(`${FIELD_LABEL[k]}: ${show(live[k])} → ${show(draft[k])}`)
-  }
-  for (const r of [{ key: '_ps', label: 'Product Summary' }, { key: '_rs', label: 'Rate sheet' }, ...FACT_FIELDS]) {
-    const a = live.facts[r.key], b = draft.facts[r.key]
-    if ((a?.v ?? '') !== (b?.v ?? '') || (a?.page ?? null) !== (b?.page ?? null) || (a?.doc ?? '') !== (b?.doc ?? '')) {
-      out.push(r.key.startsWith('_') ? `${r.label}: source document changed` : `${r.label}: ${factText(a)} → ${factText(b)}${(a?.doc ?? '') !== (b?.doc ?? '') && a?.doc && b?.doc ? ' (new source document)' : ''}`)
-    }
-  }
-  if (rates) out.push('Premium rates replaced')
-  return out
-}
+const HOW: Record<string, string> = { edit: 'saved', read: 'read from an upload', migrated: 'put live when checks were removed', checked: 'checked' }
 
 export default function KbProduct() {
   const { id } = useParams()
   const isNew = !id
   const nav = useNavigate()
-  const { profile, has } = useAuth()
   const people = usePeople()
-  const checker = has('bsd')
   const [row, setRow] = useState<KbProductRow | null>(null)
   const [docs, setDocs] = useState<KbDoc[]>([])
   const [usable, setUsable] = useState<Set<string>>(new Set())
@@ -61,8 +37,8 @@ export default function KbProduct() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
-  const [dialog, setDialog] = useState<'back' | 'withdraw' | null>(null)
-  // Reading a Product Summary or rate sheet into the draft.
+  const [dialog, setDialog] = useState<'withdraw' | 'delete' | null>(null)
+  // Reading a Product Summary or rate sheet into the form.
   const [params] = useSearchParams()
   const [reading, setReading] = useState('')
   const [fromDoc, setFromDoc] = useState<Set<string>>(new Set())   // fact keys and fields filled in by the reader
@@ -84,9 +60,10 @@ export default function KbProduct() {
     const lr = ((r.data as Rate[]) ?? []).map((x) => ({ ...x, rate: Number(x.rate), ci_rate: x.ci_rate == null ? null : Number(x.ci_rate) }))
     setLiveRates(lr)
     if (p) {
-      const base = p.pending ?? liveRecord(p)
+      const base = liveRecord(p)
       setRec({ ...base, facts: base.facts ?? {} }); setSaved(JSON.stringify({ ...base, rates: undefined }))
-      setRatesText(ratesToCsv(p.pending?.rates ?? lr)); setRatesTouched(false)
+      setRatesText(ratesToCsv(lr)); setRatesTouched(false)
+      setFromDoc(new Set(p.auto_read ? (p.auto_fields ?? []) : []))
     }
     setReady(true)
   }, [id])
@@ -103,12 +80,9 @@ export default function KbProduct() {
   const docOptions = docs.filter((d) => named.has(d.id) || (!d.replaced_by && (!rec.insurer.trim() || d.insurer.toLowerCase() === rec.insurer.trim().toLowerCase())))
   const ps = rec.facts._ps?.doc
 
-  const maker = row && profile && [row.pending_by, row.submitted_by].includes(profile.id)
-  const canCheck = checker && row?.pending_state === 'check' && !maker
-  const live = row && row.verified_at ? liveRecord(row) : null
 
   /** Reads a Product Summary or rate sheet (an uploaded document, or the file just uploaded) into the draft.
-   *  Nothing is saved: the maker checks what was filled in, then saves the draft. */
+   *  Nothing is saved until Save: check what was filled in if you wish, then save. */
   async function fillFrom(docId: string, kind: 'summary' | 'rates', file?: File, all = docs) {
     const d = all.find((x) => x.id === docId)
     const name = file?.name ?? d?.file_name ?? ''
@@ -124,7 +98,7 @@ export default function KbProduct() {
         if (dl.error || !dl.data) throw new Error(dl.error?.message ?? 'Could not download the file')
         data = await dl.data.arrayBuffer()
       }
-      const doc = await readFile(data, name, (done, total, ocr) => setReading(`Reading ${name}: page ${Math.min(total, Math.floor(done) + 1)} of ${total}${ocr ? ' (scanned, reading the picture)' : ''}…`))
+      const doc = await readFile(data, name, (done, total, ocr) => setReading(`Reading ${name}: page ${plain(Math.min(total, Math.floor(done) + 1))} of ${plain(total)}${ocr ? ' (scanned, reading the picture)' : ''}…`))
       if (kind === 'summary') {
         const r = readSummary(doc)
         const keys = new Set<string>()
@@ -142,7 +116,7 @@ export default function KbProduct() {
         setFromDoc((x) => new Set([...x, ...keys]))
         setReadNotes([])
         setMsg(r.filled.length
-          ? `Filled in from ${name}: ${r.filled.join(', ')}. Each is marked "From document": check it against the document, fill in what was missed, then save the draft.`
+          ? `Filled in from ${name}: ${r.filled.join(', ')}. Each is marked "From document". Fill in anything missed, then save: it is in search straight away.`
           : `Couldn't find the details in ${name}. Fill them in by hand.`)
       } else {
         const r = readRates(doc)
@@ -152,7 +126,7 @@ export default function KbProduct() {
         setFromDoc((x) => new Set([...x, '_rates']))
         setReadNotes(r.notes)
         const ages = r.rates.map((x) => x.age)
-        setMsg(`Read ${r.rates.length} premium rates from ${name} (ages ${Math.min(...ages)} to ${Math.max(...ages)}${r.rates.some((x) => x.ci_rate != null) ? ', with critical illness rider rates' : ''}). Check a few against the sheet, then save the draft.`)
+        setMsg(`Read ${fmtNum(r.rates.length)} premium rates from ${name} (ages ${plain(Math.min(...ages))} to ${plain(Math.max(...ages))}${r.rates.some((x) => x.ci_rate != null) ? ', with critical illness rider rates' : ''}). Then save: it is in search straight away.`)
       }
     } catch (e) {
       setError(`Couldn't read ${name}: ${e instanceof Error ? e.message : String(e)}`)
@@ -192,14 +166,15 @@ export default function KbProduct() {
       if (!f?.v?.trim()) continue
       facts[k] = { v: f.v.trim(), doc: f.doc || ps, page: f.page ? Number(f.page) : undefined }
     }
-    const keepRates = ratesTouched ? parsed.rates : row?.pending?.rates
+    const keepRates = ratesTouched ? parsed.rates : undefined
     const p = { ...rec, facts, ...(keepRates ? { rates: keepRates } : {}) }
     setBusy(true)
     const { data, error } = await supabase.rpc('kb_save_product', { p_id: id ?? null, p })
     setBusy(false)
     if (error) { setError(says(error.message)); return }
     if (isNew) { nav(`/kb/products/${data}`, { replace: true }); return }
-    setMsg(row?.pending_state === 'check' ? 'Saved. The change is a draft again: send it for check when ready.' : 'Draft saved.')
+    setMsg(row?.status === 'withdrawn' ? 'Saved. It stays withdrawn until you put it back.' : 'Saved. Compare products uses this version now.')
+    setFromDoc(new Set())
     load()
   }
   async function call(fn: string, args: Record<string, unknown>, ok: string) {
@@ -207,7 +182,8 @@ export default function KbProduct() {
     const { data, error } = await supabase.rpc(fn, args)
     setBusy(false)
     if (error) { setError(says(error.message)); return false }
-    if (fn === 'kb_discard_draft' && data === true) { nav('/kb/products', { replace: true }); return true }
+    void data
+    if (fn === 'kb_delete_product') { nav('/kb/products', { replace: true }); return true }
     setMsg(ok); load(); return true
   }
 
@@ -215,14 +191,12 @@ export default function KbProduct() {
   if (!isNew && !row) return <main className="page"><div className="card">Product record not found. <Link to="/kb/products">Back to product records</Link></div></main>
 
   const st = row ? productState(row, usable.has(row.id)) : { text: 'New record', tone: 'info' as const }
-  const steps = ['Draft', 'Waiting for check', 'Checked, in Compare products']
-  const at = row?.pending_state === 'check' ? 1 : row && !row.pending && row.status === 'verified' ? 2 : 0
-  const draftChanges = row?.pending ? changes(live, row.pending, !!row.pending.rates) : []
+  const why = row ? whyNotSearchable(row, usable.has(row.id)) : ''
   const title = rec.name || 'New product record'
   const docSelect = (value: string | undefined, onChange: (v: string) => void, label: string, blank = 'Choose a document', elId?: string) => (
     <select id={elId} aria-label={elId ? undefined : label} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       <option value="">{blank}</option>
-      {docOptions.map((d) => <option key={d.id} value={d.id}>{docLabel(d)} · {d.doc_type}{d.replaced_by ? ' (older version)' : d.status === 'new' ? ' (not checked yet)' : ''}</option>)}
+      {docOptions.map((d) => <option key={d.id} value={d.id}>{docLabel(d)} · {docTypeName(d)}{d.replaced_by ? ' (older version)' : ''}</option>)}
     </select>
   )
 
@@ -236,11 +210,9 @@ export default function KbProduct() {
         </div>
         <span className={`pill ${st.tone}`}>{st.text}</span>
       </div>
-      <ol className="steps" aria-label="Checking steps">
-        {steps.map((s, i) => <li key={s} className={i === at ? 'on' : i < at ? 'done' : ''} aria-current={i === at ? 'step' : undefined}>{s}</li>)}
-      </ol>
-      {row?.pending_note && <div className="notice warn" role="status"><strong>{row.pending_note.startsWith('New version') ? 'Re-check needed' : 'Sent back'}:</strong> {row.pending_note}</div>}
-      {row?.status === 'verified' && row.pending && <div className="notice" role="status">The checked version (v{row.version}) stays in Compare products until these changes are checked.</div>}
+      {why && row?.status !== 'withdrawn' && <div className="notice warn" role="status">{why}.</div>}
+      {row?.auto_read && <div className="notice warn" role="status"><strong>Auto-read, not yet reviewed.</strong> The values marked "From document" were read by the system
+        and are shown in Compare products as they are. Reviewing them is optional: change anything wrong and save, or mark it as reviewed.{row.read_note ? ` ${row.read_note}` : ''}</div>}
       {reading && <div className="notice" role="status">{reading}</div>}
       {msg && <div className="notice ok" role="status">{msg}</div>}
       {readNotes.map((n) => <div key={n} className="notice warn" role="status">{n}</div>)}
@@ -273,7 +245,7 @@ export default function KbProduct() {
                 )
               })}
             </div>
-            <p className="small muted" style={{ margin: 0 }}>A record can only be checked once every document it names is checked and in date. Uploads are listed on the <Link to="/kb">Documents</Link> tab.</p>
+            <p className="small muted" style={{ margin: 0 }}>When a document it names passes its valid-until date, the product drops out of Compare products. Uploads are listed on the <Link to="/kb">Documents</Link> tab.</p>
           </section>
 
           <section className="card" aria-labelledby="kb-info">
@@ -292,8 +264,8 @@ export default function KbProduct() {
               </label>
               <label className="field">Entry age from (next birthday)<input type="number" min={0} max={100} value={rec.entry_age_min} onChange={(e) => set('entry_age_min', e.target.value)} /></label>
               <label className="field">Entry age to<input type="number" min={0} max={100} value={rec.entry_age_max} onChange={(e) => set('entry_age_max', e.target.value)} /></label>
-              <label className="field">Minimum sum assured (optional)<input type="number" min={0} value={rec.sa_min ?? ''} onChange={(e) => set('sa_min', e.target.value || null)} /></label>
-              <label className="field">Maximum sum assured (optional)<input type="number" min={0} value={rec.sa_max ?? ''} onChange={(e) => set('sa_max', e.target.value || null)} /></label>
+              <label className="field">Minimum sum assured (optional)<AmountInput value={rec.sa_min ?? ''} onValue={(v) => set('sa_min', (v || null) as ProductRecord['sa_min'])} /></label>
+              <label className="field">Maximum sum assured (optional)<AmountInput value={rec.sa_max ?? ''} onValue={(v) => set('sa_max', (v || null) as ProductRecord['sa_max'])} /></label>
             </div>
             <fieldset className="field"><legend>Policy currencies</legend>
               <div className="row" style={{ gap: '6px 18px' }}>{CURRENCIES.map((c) => (
@@ -350,36 +322,20 @@ export default function KbProduct() {
                 <input type="file" accept=".csv,.txt" hidden onChange={async (e) => { const x = e.target.files?.[0]; if (x) { setRatesText(await x.text()); setRatesTouched(true) } }} />
               </label>
               {parsed.error ? <span className="error">{parsed.error}</span>
-                : <span className="muted">{parsed.rates.length} rate{parsed.rates.length === 1 ? '' : 's'}{ratesTouched ? ' (changed, saved with the draft)' : liveRates.length && !row?.pending?.rates ? ' (the checked rates)' : ''}</span>}
+                : <span className="muted">{fmtNum(parsed.rates.length)} rate{parsed.rates.length === 1 ? '' : 's'}{ratesTouched ? ' (changed, saved when you save)' : liveRates.length ? ' (in use)' : ''}</span>}
             </div>
           </section>
         </div>
 
         <aside className="kb-side">
-          <section className="card" aria-label="Check">
-            <h3 className="eyebrow">Check</h3>
-            <button className="btn primary" onClick={save} disabled={busy || (!dirty && !isNew)}>{busy ? 'Saving…' : 'Save draft'}</button>
-            {row?.pending && row.pending_state === 'draft' && (
-              <button className="btn" onClick={() => call('kb_send_for_check', { p_id: row.id }, 'Sent for check. A BSD person who did not make the change checks it next.')} disabled={busy || dirty}>Send for check</button>
-            )}
-            {dirty && row?.pending_state === 'draft' && <span className="small muted">Save your changes before sending them for check.</span>}
-            {row?.pending_state === 'check' && !canCheck && (
-              <p className="small muted" style={{ margin: 0 }}>{maker ? 'Waiting for a BSD person who did not make these changes to check them. Editing takes the change back to draft.' : 'Waiting for a BSD person to check it.'}</p>
-            )}
-            {canCheck && <>
-              <p className="small muted" style={{ margin: 0 }}>Compare each fact with the document page it names, then:</p>
-              <button className="btn primary" onClick={() => call('kb_check_product', { p_id: row!.id }, 'Checked. Compare products now uses this version.')} disabled={busy || dirty}>Mark as checked</button>
-              <button className="btn" onClick={() => setDialog('back')} disabled={busy}>Send back</button>
-            </>}
-            {row?.pending && draftChanges.length > 0 && (
-              <div>
-                <span className="small muted">What the draft changes</span>
-                <ul className="small changes">{draftChanges.slice(0, 30).map((c) => <li key={c}>{c}</li>)}</ul>
-              </div>
-            )}
-            {row?.pending && <button className="linkbtn danger" onClick={() => call('kb_discard_draft', { p_id: row.id }, 'Draft discarded.')} disabled={busy}>
-              {row.verified_at ? 'Discard the draft changes' : 'Delete this draft product'}</button>}
-            {checker && row?.status === 'verified' && <button className="linkbtn danger" onClick={() => setDialog('withdraw')} disabled={busy}>Withdraw from Compare products</button>}
+          <section className="card" aria-label="Save">
+            <h3 className="eyebrow">Save</h3>
+            <button className="btn primary" onClick={save} disabled={busy || (!dirty && !isNew)}>{busy ? 'Saving…' : 'Save'}</button>
+            <span className="small muted">{row?.status === 'withdrawn' ? 'Saved changes apply when the product is put back.' : 'Saving puts the record in Compare products straight away. No check is needed.'}</span>
+            {row?.auto_read && <button className="btn" onClick={() => call('kb_mark_reviewed', { p_id: row.id }, 'Marked as reviewed. The "Auto-read, not yet reviewed" tag is gone.')} disabled={busy || dirty}>Mark as reviewed (no changes)</button>}
+            {row?.status === 'verified' && <button className="linkbtn danger" onClick={() => setDialog('withdraw')} disabled={busy}>Withdraw from Compare products</button>}
+            {row && row.status !== 'verified' && !row.missing?.length && <button className="btn" onClick={() => call('kb_restore_product', { p_id: row.id }, 'Put back. It is in Compare products again.')} disabled={busy}>Put back in Compare products</button>}
+            {row && <button className="linkbtn danger" onClick={() => setDialog('delete')} disabled={busy}>Delete this product record</button>}
           </section>
 
           {row && (
@@ -399,19 +355,28 @@ export default function KbProduct() {
             <section className="card" aria-label="Version history">
               <h3 className="eyebrow">Version history</h3>
               <ul className="small plain">
-                {history.map((h) => <li key={h.id}>v{h.version} · checked by {nameOf(people, h.checked_by)} on {fmtDateTime(h.checked_at)}{h.changed_by ? ` · made by ${nameOf(people, h.changed_by)}` : ''}</li>)}
-                {!history.length && <li className="muted">{row.verified_at ? `v${row.version} (checked before the history began)` : 'Not checked yet'}</li>}
+                {history.map((h) => <li key={h.id}>v{plain(h.version)} · {HOW[h.source] ?? 'saved'}{h.changed_by ? ` by ${nameOf(people, h.changed_by)}` : ''}{h.checked_by ? ` · checked by ${nameOf(people, h.checked_by)}` : ''} on {fmtDateTime(h.checked_at)}</li>)}
+                {!history.length && <li className="muted">{row.verified_at ? `v${plain(row.version)} (before the history began)` : 'Not saved yet'}</li>}
               </ul>
-              {row.pending_at && <p className="small muted" style={{ margin: 0 }}>Draft last saved {fmtDateTime(row.pending_at)} by {nameOf(people, row.pending_by)}.</p>}
             </section>
           )}
         </aside>
       </div>
 
-      {upload && <DocDialog mode="new" docs={docs} products={products} preset={{ doc_type: upload, insurer: rec.insurer.trim(), product_id: row?.id }}
+      {upload && <DocDialog mode="new" read={false} docs={docs} products={products} preset={{ doc_type: upload, insurer: rec.insurer.trim(), product_id: row?.id }}
         onClose={() => setUpload(null)} onDone={uploaded} />}
-      {dialog === 'back' && <ReasonDialog title="Send back for changes" confirmLabel="Send back" fieldLabel="What needs changing?"
-        onCancel={() => setDialog(null)} onConfirm={async (note) => { if (await call('kb_send_back_product', { p_id: row!.id, p_note: note }, 'Sent back with your note.')) setDialog(null) }} />}
+      {dialog === 'delete' && (
+        <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setDialog(null) }}>
+          <div className="card dialog" role="dialog" aria-modal="true" aria-label="Delete this product record" style={{ maxWidth: 480 }}>
+            <h2>Delete {row!.name}?</h2>
+            <p className="small">The record, its rates and history are deleted and it leaves Compare products. Its documents stay in the Knowledge Bank; PI requests keep the product's name.</p>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setDialog(null)}>Cancel</button>
+              <button className="btn danger" onClick={() => call('kb_delete_product', { p_id: row!.id }, '')}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
       {dialog === 'withdraw' && <ReasonDialog title="Withdraw from Compare products" confirmLabel="Withdraw" fieldLabel="Reason"
         onCancel={() => setDialog(null)} onConfirm={async (r) => { if (await call('kb_withdraw_product', { p_id: row!.id, p_reason: r }, 'Withdrawn. It no longer appears in Compare products.')) setDialog(null) }} />}
     </main>

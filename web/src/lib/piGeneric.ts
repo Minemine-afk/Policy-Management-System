@@ -14,6 +14,7 @@
 // Measured on PIs these rules were not written for: see docs/pi-reading/unknown-formats.md.
 
 import { detectInsurer, type Found, type Line, type Page, type TextItem } from './piExtract.ts'
+import { fmtNum } from './num.ts'
 
 /** A note about one field. `used`: shown only when that field's value came from these rules;
  *  otherwise shown only while the field is still blank. */
@@ -203,7 +204,7 @@ export function extractGeneric(pages: Page[]): GenericResult {
   const sumC = [...besideLabel(lines, SUM_LABELS, sumPick), ...underHeading(pages, SUM_HEADINGS, sumPick)]
   const sa = agree(sumC)
   if (sa.c) set('death_sa', fmtSum(sa.c.value), sa.c.page, sa.c.text)
-  else if (sa.seen.length > 1) note('death_sa', `More than one sum assured is written (${sa.seen.slice(0, 4).map((v) => v.toLocaleString('en-US')).join(', ')}): fill in Death by hand.`)
+  else if (sa.seen.length > 1) note('death_sa', `More than one sum assured is written (${sa.seen.slice(0, 4).map((v) => fmtNum(v)).join(', ')}): fill in Death by hand.`)
 
   // ----- Annual premium, from the total the PI states for a period. Yearly first; else monthly etc. x payments a year. -----
   const premC: (Cand & { period: keyof typeof FACTOR; total: boolean })[] = []
@@ -251,7 +252,7 @@ export function extractGeneric(pages: Page[]): GenericResult {
   if (pr.c) {
     const c = top[0]
     set('annual_premium', fmtMoney(pr.c.value), c.page, c.text)
-    if (c.period !== 'year') note('annual_premium', `Only a ${c.period === 'month' ? 'monthly' : c.period === 'quarter' ? 'quarterly' : 'half-yearly'} premium is shown (${c.value.toFixed(2)}): the annual premium is ${FACTOR[c.period]} × that. The insurer's own annual rate may be a little lower.`, true)
+    if (c.period !== 'year') note('annual_premium', `Only a ${c.period === 'month' ? 'monthly' : c.period === 'quarter' ? 'quarterly' : 'half-yearly'} premium is shown (${fmtNum(c.value, 2)}): the annual premium is ${fmtNum(FACTOR[c.period])} × that. The insurer's own annual rate may be a little lower.`, true)
   } else if (pr.seen.length > 1) note('annual_premium', `Different premiums are written (${pr.seen.slice(0, 4).map((v) => v.toFixed(2)).join(', ')} a year): fill in Annual Premium by hand.`)
   if (/\bsingle\s+premium\b/i.test(text) && !found.annual_premium) note('annual_premium', 'This looks like a single premium policy: fill in the premiums by hand.')
 

@@ -11,6 +11,8 @@ import { buildPack, packFileName, packState, preloadPdf, sha256 } from '../lib/p
 import { findIssueDate, showDate, toDmy } from '../lib/piIssueDate'
 import { fillFromForm, isFromForm } from '../lib/formFill'
 import type { PiRequest, RequestDocument } from '../lib/types'
+import { AmountInput } from './ui'
+import { fmtNum, groupMoneyInText, plain } from '../lib/num'
 
 interface Column {
   fileName: string
@@ -38,7 +40,7 @@ function confidence(fd: Found | undefined, ocrPages: number[] | undefined): { le
   if (fd.guess) return { level: 'Check', why: "This PI's layout is new to the reader: this value was read by general rules. Check it against the PI." }
   if (fd.check) return { level: 'Check', why: 'This value fails a cross-check (see the notes). Check it against the PI.' }
   if (/^Calculated:/.test(fd.line ?? '')) return { level: 'Check', why: 'Calculated from other values, as the PI does not show it. Check it.' }
-  if (fd.page && ocrPages?.includes(fd.page)) return { level: 'Check', why: `Read with OCR from scanned page ${fd.page}. Check it against the PI.` }
+  if (fd.page && ocrPages?.includes(fd.page)) return { level: 'Check', why: `Read with OCR from scanned page ${plain(fd.page)}. Check it against the PI.` }
   return { level: 'Sure', why: "Read by the reader's rules for this layout from the PDF's own text." }
 }
 
@@ -54,7 +56,7 @@ function pageList(ps: number[]): string {
   for (let i = 0; i < ps.length; i++) {
     let j = i
     while (j + 1 < ps.length && ps[j + 1] === ps[j] + 1) j++
-    runs.push(j > i ? `${ps[i]}–${ps[j]}` : String(ps[i]))
+    runs.push(j > i ? `${plain(ps[i])}–${plain(ps[j])}` : String(ps[i]))
     i = j
   }
   return runs.join(', ')
@@ -66,7 +68,7 @@ function withLimit<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   return Promise.race([
     p,
-    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} took longer than ${ms / 1000} seconds`)), ms) }),
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} took longer than ${fmtNum(ms / 1000)} seconds`)), ms) }),
   ]).finally(() => clearTimeout(timer))
 }
 
@@ -179,8 +181,8 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         const keys = aiTodo(c)
         if (!keys.length) continue
         const res = await askAi(c.pages!, keys, c.values, (p) => setAiState({ busy: true, error: '',
-          text: p.stage === 'download' ? `Downloading the AI model, first time only: ${Math.round((p.pct ?? 0) * 100)}%`
-            : `The AI (${p.model}) is reading PI${i + 1} (${c.fileName})${p.device === 'wasm' ? ' on the processor, which can take a few minutes' : ''}…` }))
+          text: p.stage === 'download' ? `Downloading the AI model, first time only: ${plain(Math.round((p.pct ?? 0) * 100))}%`
+            : `The AI (${p.model}) is reading PI${plain(i + 1)} (${c.fileName})${p.device === 'wasm' ? ' on the processor, which can take a few minutes' : ''}…` }))
         const got = Object.keys(res.found)
         filled += got.length
         const names = (ks: string[]) => ks.map((k) => FIELDS.find((f) => f.key === k)?.label ?? k).join(', ')
@@ -189,13 +191,13 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           const found = { ...col.found }, values = { ...col.values }
           for (const k of got) if (!(values[k] ?? '').trim()) { found[k] = res.found[k]; values[k] = res.found[k].value }
           const notes = [...col.notes]
-          if (got.length) notes.push(`The free AI helper filled ${got.length} blank ${got.length === 1 ? 'cell' : 'cells'} (${names(got)}), tagged "AI": check ${got.length === 1 ? 'it' : 'them'} against the PI.`)
+          if (got.length) notes.push(`The free AI helper filled ${fmtNum(got.length)} blank ${got.length === 1 ? 'cell' : 'cells'} (${names(got)}), tagged "AI": check ${got.length === 1 ? 'it' : 'them'} against the PI.`)
           if (res.dropped.length) notes.push(`The AI's answers for ${names([...new Set(res.dropped)])} did not match the PI's text, so they were left blank.`)
           return { ...col, found, values, notes }
         }))
       }
       setChecked(false); setSaved('')
-      setAiState({ busy: false, error: '', text: filled ? `The AI filled ${filled} of ${aiCells} blank ${aiCells === 1 ? 'cell' : 'cells'}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PI text: the blank cells stay blank.' })
+      setAiState({ busy: false, error: '', text: filled ? `The AI filled ${fmtNum(filled)} of ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PI text: the blank cells stay blank.' })
     } catch (e) {
       setAiState({ busy: false, text: '', error: 'The AI helper could not run in this browser: ' + (e as Error).message + '. Fill the blank cells by hand.' })
     }
@@ -220,7 +222,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
 
   async function makeExcel() {
     const res = await fetch(TEMPLATE_URL)
-    if (!res.ok) throw new Error(`Could not load the Excel template (${res.status}).`)
+    if (!res.ok) throw new Error(`Could not load the Excel template (${plain(res.status)}).`)
     return buildWorkbook(exportCols(), await res.arrayBuffer())
   }
 
@@ -256,7 +258,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       const blob = await makePack()
       const hash = await sha256(blob)
       const old = docs.filter((d) => d.kind === 'pi_output' && (pack.isPack(d) || isComparisonFile(d.file_name)) && d.uploaded_by === userId)
-      const path = `${req.id}/${Date.now()}-${packName}`
+      const path = `${req.id}/${plain(Date.now())}-${packName}`
       const up = await supabase.storage.from('request-docs').upload(path, blob, { contentType: 'application/pdf' })
       if (up.error) throw new Error(says(up.error.message))
       const ins = await supabase.rpc('add_pi_pack', { p_request: req.id, p_path: path, p_name: packName, p_sha256: hash, p_docs: pdfs.map((d) => d.id) })
@@ -268,7 +270,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         const rm = await supabase.rpc('remove_document', { p_document: d.id })
         if (!rm.error) await supabase.storage.from('request-docs').remove([d.storage_path])
       }
-      setSaved(`Saved ${packName} (${(blob.size / 1024 / 1024).toFixed(1)} MB, fingerprint ${hash.slice(0, 12)}…). The introducer gets this one PDF when you mark the request completed.${await teach()}`)
+      setSaved(`Saved ${packName} (${fmtNum(blob.size / 1024 / 1024, 1)} MB, fingerprint ${hash.slice(0, 12)}…). The introducer gets this one PDF when you mark the request completed.${await teach()}`)
       onSaved()
     } catch (e) { setError((e as Error).message) }
     setSaving(false)
@@ -285,7 +287,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       if (error) return ` The reader could not learn from it: ${says(error)}`
       if (!added) return ''
       const who = [...new Set(learned.map((r) => r.insurer))].join(', ')
-      return ` The reader learned ${added} new ${added === 1 ? 'place' : 'places'} for ${who}, used on the next PI from ${learned.length > 1 && who.includes(',') ? 'these insurers' : 'this insurer'}.`
+      return ` The reader learned ${fmtNum(added)} new ${added === 1 ? 'place' : 'places'} for ${who}, used on the next PI from ${learned.length > 1 && who.includes(',') ? 'these insurers' : 'this insurer'}.`
     } catch { return '' }
   }
 
@@ -315,20 +317,20 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         them, never the values), and your corrections and NAs, so the next PI from that insurer fills in more (tagged “Learned”).
         Each value is tagged: “Sure” (the reader's rules, from the PDF's own text), “Learned”, “AI”, or “Check” (new layout,
         scanned page, calculated, or failing a cross-check). Check those first.
-        {pdfs.length > MAX && ` Only the first ${MAX} of the ${pdfs.length} PDFs are compared.`}
+        {pdfs.length > MAX && ` Only the first ${fmtNum(MAX)} of the ${fmtNum(pdfs.length)} PDFs are compared.`}
       </p>
       {!key && <div className="small muted">Upload the PI PDFs above and they are read here straight away.</div>}
 
       {progress && (
         <div className="progress" role="status" aria-label="Reading PIs">
           <div className="row between small">
-            <span>Reading PI {progress.file + 1} of {progress.files}: {progress.name}
-              {progress.ocr ? ` · scanned page ${Math.floor(progress.page) + 1} of ${progress.pages}, reading it with OCR (slower)`
-                : progress.pages ? ` · page ${Math.floor(progress.page)} of ${progress.pages}` : ' · downloading'}</span>
-            <strong>{pct}%</strong>
+            <span>Reading PI {plain(progress.file + 1)} of {plain(progress.files)}: {progress.name}
+              {progress.ocr ? ` · scanned page ${plain(Math.floor(progress.page) + 1)} of ${plain(progress.pages)}, reading it with OCR (slower)`
+                : progress.pages ? ` · page ${plain(Math.floor(progress.page))} of ${plain(progress.pages)}` : ' · downloading'}</span>
+            <strong>{plain(pct)}%</strong>
           </div>
-          <progress max={100} value={pct} aria-label={`${pct}% read`} />
-          <span className="small muted">A PI is stopped if nothing happens for {READ_LIMIT_MS / 1000} seconds. Scanned pages are read with OCR, which takes several seconds each (the first one also downloads the OCR engine, about 28 MB, or 36 MB on hard-to-read scans).</span>
+          <progress max={100} value={pct} aria-label={`${plain(pct)}% read`} />
+          <span className="small muted">A PI is stopped if nothing happens for {fmtNum(READ_LIMIT_MS / 1000)} seconds. Scanned pages are read with OCR, which takes several seconds each (the first one also downloads the OCR engine, about 28 MB, or 36 MB on hard-to-read scans).</span>
         </div>
       )}
 
@@ -336,19 +338,19 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
         <>
           <div className="row between">
             <h3 className="small" style={{ margin: 0 }}>Check the values</h3>
-            <span className="small muted">{missing ? `${missing} empty ${missing === 1 ? 'cell' : 'cells'} (shaded) to fill or leave blank` : 'Every field has a value'}</span>
+            <span className="small muted">{missing ? `${fmtNum(missing)} empty ${missing === 1 ? 'cell' : 'cells'} (shaded) to fill or leave blank` : 'Every field has a value'}</span>
           </div>
           {(aiCells > 0 || aiState.text || aiState.error) && (
             <div className="row" style={{ gap: 10, flexWrap: 'wrap' }} aria-label="AI helper">
               {aiCells > 0 && (
                 <button className="btn small" disabled={aiState.busy} onClick={fillWithAi}
-                  title={`A free, open AI model (${AI_FIELDS.length} plan fields: names, terms, sums assured, premiums) runs in this browser: the PI never leaves this computer. The first time, the browser downloads the model (about ${(AI_MODELS.gpu.mb / 1000).toFixed(1)} GB on a computer whose graphics chip works with the browser, ${(AI_MODELS.small.mb / 1000).toFixed(1)} GB (a smaller model that fills fewer cells) otherwise) and keeps it for next time.`}>
-                  {aiState.busy ? 'AI helper working…' : `Fill ${aiCells} blank ${aiCells === 1 ? 'cell' : 'cells'} with the free AI helper`}
+                  title={`A free, open AI model (${fmtNum(AI_FIELDS.length)} plan fields: names, terms, sums assured, premiums) runs in this browser: the PI never leaves this computer. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB on a computer whose graphics chip works with the browser, ${fmtNum(AI_MODELS.small.mb / 1000, 1)} GB (a smaller model that fills fewer cells) otherwise) and keeps it for next time.`}>
+                  {aiState.busy ? 'AI helper working…' : `Fill ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'} with the free AI helper`}
                 </button>
               )}
               {aiState.text && <span className="small" role="status">{aiState.text}</span>}
               {aiState.error && <span className="error small" role="alert">{aiState.error}</span>}
-              {aiCells > 0 && !aiState.busy && !aiState.text && <span className="small muted">Runs in your browser, nothing is sent. First use downloads about {(AI_MODELS.small.mb / 1000).toFixed(1)}–{(AI_MODELS.gpu.mb / 1000).toFixed(1)} GB.</span>}
+              {aiCells > 0 && !aiState.busy && !aiState.text && <span className="small muted">Runs in your browser, nothing is sent. First use downloads about {fmtNum(AI_MODELS.small.mb / 1000, 1)}–{fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB.</span>}
             </div>
           )}
           <div className="tablewrap">
@@ -358,12 +360,12 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                   <th>Field</th>
                   {cols.map((c, i) => (
                     <th key={i}>
-                      PI{i + 1}
+                      PI{plain(i + 1)}
                       <div className="small muted" style={{ fontWeight: 400, marginTop: 4 }}>{c.fileName}</div>
                       {!c.error && (
                         <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 400, marginTop: 6 }}>
                           Currency
-                          <input type="text" aria-label={`Policy Currency for PI ${i + 1}`} value={c.values.currency ?? ''} maxLength={3} placeholder="?"
+                          <input type="text" aria-label={`Policy Currency for PI ${plain(i + 1)}`} value={c.values.currency ?? ''} maxLength={3} placeholder="?"
                             style={{ width: 70, height: 30 }} className={c.values.currency ? '' : 'empty-cell'}
                             onChange={(e) => setValue(i, 'currency', e.target.value.toUpperCase())} />
                         </label>
@@ -371,13 +373,13 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                       {!c.error && (
                         <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 400, marginTop: 6 }}>
                           Issue date
-                          <input type="text" aria-label={`PI issue date for PI ${i + 1}`} value={c.issueDate} placeholder="DD/MM/YYYY" maxLength={10}
+                          <input type="text" aria-label={`PI issue date for PI ${plain(i + 1)}`} value={c.issueDate} placeholder="DD/MM/YYYY" maxLength={10}
                             style={{ width: 124, height: 30 }} className={!c.issueDate ? 'empty-cell' : c.issueDate.trim() && !toDmy(c.issueDate) ? 'empty-cell' : c.issueDate !== (c.issueFound?.value ?? '') ? 'edited-cell' : ''}
-                            title={c.issueFound ? `Page ${c.issueFound.page}: ${c.issueFound.line}` : 'Not found in the PI: the comparison date is used if no PI has one'}
+                            title={c.issueFound ? `Page ${plain(c.issueFound.page)}: ${c.issueFound.line}` : 'Not found in the PI: the comparison date is used if no PI has one'}
                             onChange={(e) => setIssueDate(i, e.target.value)} />
                         </label>
                       )}
-                      {!c.error && c.issueDate && toDmy(c.issueDate) && <div className="small muted" style={{ fontWeight: 400 }}>{showDate(toDmy(c.issueDate))}{c.issueFound && c.issueDate === c.issueFound.value ? `, page ${c.issueFound.page}` : ''}</div>}
+                      {!c.error && c.issueDate && toDmy(c.issueDate) && <div className="small muted" style={{ fontWeight: 400 }}>{showDate(toDmy(c.issueDate))}{c.issueFound && c.issueDate === c.issueFound.value ? `, page ${plain(c.issueFound.page)}` : ''}</div>}
                       {c.error && <div className="error">{c.error}</div>}
                     </th>
                   ))}
@@ -399,13 +401,16 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                             const conf = !edited && !isFromForm(fd) && c.values[f.key] ? confidence(fd, c.ocrPages) : null
                             return (
                               <td key={i} className={!c.values[f.key] ? 'empty-cell' : edited ? 'edited-cell' : conf && conf.level !== 'Sure' ? 'guess-cell' : ''}>
-                                <input type="text" aria-label={`${label} for PI ${i + 1}`} value={c.values[f.key] ?? ''}
-                                  onChange={(e) => setValue(i, f.key, e.target.value)} />
+                                {f.kind === 'money' || f.kind === 'sum'
+                                  ? <AmountInput allowText aria-label={`${label} for PI ${plain(i + 1)}`} value={c.values[f.key] ?? ''}
+                                    onValue={(v) => setValue(i, f.key, v)} />
+                                  : <input type="text" aria-label={`${label} for PI ${plain(i + 1)}`} value={c.values[f.key] ?? ''}
+                                    onChange={(e) => setValue(i, f.key, e.target.value)} />}
                                 {(f.kind === 'money' || f.kind === 'sum') && !currency && cur && c.values[f.key] && c.values[f.key] !== 'NA' && <div className="small">in {cur}</div>}
                                 {conf && <div className={`pill ${conf.level === 'Sure' ? 'ok' : 'info'}`} style={{ margin: '4px 0 2px', fontSize: 12 }} title={conf.why}>{conf.level}</div>}
                                 {f.key === 'base_premium' && c.discounted && <div className="pill warn" style={{ margin: '4px 0 2px', fontSize: 12 }}>After discount</div>}
                                 <div className="small muted" title={fd?.line ?? ''}>
-                                  {edited ? 'Changed by hand' : fd?.ai ? `AI${fd.page ? `, page ${fd.page}` : ''}: “${(fd.line ?? '').slice(0, 44)}${(fd.line ?? '').length > 44 ? '…' : ''}”` : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${fd.page}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}
+                                  {edited ? 'Changed by hand' : fd?.ai ? `AI${fd.page ? `, page ${plain(fd.page)}` : ''}: “${(fd.line ?? '').slice(0, 44)}${(fd.line ?? '').length > 44 ? '…' : ''}”` : isFromForm(fd) ? 'From the request form (not in the PI)' : /^Calculated:/.test(fd?.line ?? '') ? 'Calculated from the PI (see notes)' : fd?.page ? `Page ${plain(fd.page)}: “${(fd.line ?? '').slice(0, 48)}${(fd.line ?? '').length > 48 ? '…' : ''}”` : fd?.value ? (f.section === 'riders' ? 'No such rider in the PI' : f.key === 'campaigns' ? 'No discount in the PI' : f.kind === 'cover' ? 'Not mentioned in the PI' : 'From the PI') : 'Not found'}
                                 </div>
                               </td>
                             )
@@ -419,8 +424,8 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                   <tr>
                     <td><strong>Notes</strong></td>
                     {cols.map((c, i) => (
-                      <td key={i} aria-label={`Notes for PI ${i + 1}`}>
-                        {c.notes.length ? <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{c.notes.map((n) => <li key={n}>{n}</li>)}</ul> : <span className="small muted">None</span>}
+                      <td key={i} aria-label={`Notes for PI ${plain(i + 1)}`}>
+                        {c.notes.length ? <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{c.notes.map((n) => <li key={n}>{groupMoneyInText(n)}</li>)}</ul> : <span className="small muted">None</span>}
                       </td>
                     ))}
                   </tr>
@@ -440,7 +445,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
             <button className={canSave ? 'btn' : 'btn primary'} disabled={!checked || badDates > 0} onClick={exportPdf}>Export comparison (PDF)</button>
             <button className="btn" disabled={!checked || badDates > 0} onClick={exportXlsx} title="For ops and BSD only: introducers never receive the Excel file">Export to Excel</button>
           </div>
-          {pdfs.length > MAX && <div className="small muted">The PI pack includes all {pdfs.length} PI PDFs; the comparison shows the first {MAX}.</div>}
+          {pdfs.length > MAX && <div className="small muted">The PI pack includes all {fmtNum(pdfs.length)} PI PDFs; the comparison shows the first {fmtNum(MAX)}.</div>}
         </>
       )}
     </section>

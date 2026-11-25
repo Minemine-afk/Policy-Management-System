@@ -8,6 +8,7 @@ import { BOARD_STATUSES, COLUMN_COLOR, INTRO_GROUPS, STATUS_LABEL, byPriorityThe
 import { useSettings } from '../lib/settings'
 import type { PiRequest, RequestStatus } from '../lib/types'
 import { ReasonDialog, UrgentPill } from '../components/ui'
+import { fmtNum } from '../lib/num'
 
 export default function Board() {
   const { has, profile } = useAuth()
@@ -67,7 +68,7 @@ export default function Board() {
         </div>
       </div>
       {staff && visible.some((r) => due(r)?.overdue) && (
-        <div className="notice bad"><strong>{visible.filter((r) => due(r)?.overdue).length} overdue</strong>
+        <div className="notice bad"><strong>{fmtNum(visible.filter((r) => due(r)?.overdue).length)} overdue</strong>
           <span>Requests are due {fmtHours(settings.deadline_hours)} after submission and turn red once overdue.
             Orange means {fmtHours(settings.due_soon_hours)} or less is left. Overdue requests are marked urgent automatically and urgent requests are listed first.</span></div>
       )}
@@ -89,7 +90,7 @@ export default function Board() {
               <header className="colhead">
                 <span className="swatch" style={{ background: COLUMN_COLOR[s] }} />
                 <h2>{STATUS_LABEL[s]}</h2>
-                <span className="count">{cards.length}</span>
+                <span className="count">{fmtNum(cards.length)}</span>
               </header>
               <div className="colbody">
                 {cards.map((r) => {
@@ -99,7 +100,7 @@ export default function Board() {
                     <Link key={r.id} to={`/requests/${r.id}`} className={`cardlet${d && (d.level === 'soon' || d.level === 'late') ? ' ' + d.level : ''}${staff ? ' draggable' : ''}${urgent ? ' urgent' : ''}`} data-ref={r.ref}
                       draggable={staff} onDragStart={(e) => e.dataTransfer.setData('text/plain', r.id)}>
                       {staff && <span className="grip" aria-hidden="true" title="Drag to move">⋮⋮</span>}
-                      <div className="row between"><strong>{r.ref} {urgent && <UrgentPill auto={r.urgent_auto} />}</strong><span className="small muted" style={{ marginRight: staff ? 22 : 0 }}>{daysSince(r.submitted_at)}d</span></div>
+                      <div className="row between"><strong>{r.ref} {urgent && <UrgentPill auto={r.urgent_auto} />}</strong><span className="small muted" style={{ marginRight: staff ? 22 : 0 }}>{fmtNum(daysSince(r.submitted_at))}d</span></div>
                       <div className="small">{summary(r)}</div>
                       {staff && <div className="small muted">{nameOf(people, r.introducer_id)} · {people[r.introducer_id]?.company}</div>}
                       {staff && <div className="small handler" style={{ fontWeight: 700 }}>{r.assignee_id ? `Handled by: ${nameOf(people, r.assignee_id)}` : 'Unassigned'}</div>}

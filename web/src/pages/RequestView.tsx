@@ -12,6 +12,7 @@ import { fmtMoney, vipName } from '../lib/formOptions'
 import { Fact, ReasonDialog, StatusPill, UrgentPill } from '../components/ui'
 import Files from '../components/Files'
 import PiComparison from '../components/PiComparison'
+import { fmtNum, plain } from '../lib/num'
 
 export default function RequestView() {
   const { id } = useParams()
@@ -91,7 +92,7 @@ export default function RequestView() {
           <h1>{r.ref} <StatusPill status={r.status} />{urgent && <> <UrgentPill auto={r.urgent_auto} /></>}{due && <span className={`due ${due.level}`} style={{ marginLeft: 8, fontSize: 14 }}>{due.label}</span>}</h1>
         </div>
         <div className="row">
-          <button className="btn" aria-haspopup="dialog" onClick={() => setHistoryOpen(true)}>History ({events.length})</button>
+          <button className="btn" aria-haspopup="dialog" onClick={() => setHistoryOpen(true)}>History ({fmtNum(events.length)})</button>
           {has('introducer') && r.introducer_id === profile.id && r.status === 'submitted' &&
             <Link className="btn" to={`/requests/${r.id}/edit`}>Edit request</Link>}
           {owner && <Link className="btn" to={`/requests/new?from=${r.id}`}>Duplicate</Link>}
@@ -152,7 +153,7 @@ export default function RequestView() {
                 : <Fact label="Product">{r.product} · {r.plan_category}</Fact>}
               {r.client_type && <Fact label="Client type">{r.client_type}</Fact>}
               {r.residency && <Fact label="Residency · Nationality">{r.residency} · {r.nationality ?? '—'}</Fact>}
-              {r.date_of_birth ? <Fact label="Date of birth">{dobDmy(r.date_of_birth)} (age {ageOn(r.date_of_birth)})</Fact> : <Fact label="Age band">{r.age_band}</Fact>}
+              {r.date_of_birth ? <Fact label="Date of birth">{dobDmy(r.date_of_birth)} (age {plain(ageOn(r.date_of_birth))})</Fact> : <Fact label="Age band">{r.age_band}</Fact>}
               <Fact label="Gender · Smoker">{r.gender} · {r.smoker ? 'Yes' : 'No'}</Fact>
               <Fact label="Coverage term">{r.coverage_term}</Fact>
               {r.amount != null && r.currency

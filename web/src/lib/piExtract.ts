@@ -189,6 +189,7 @@ function coverRow(lines: Line[], label: RegExp): { value: string; line: Line } |
 }
 
 import { extractGeneric } from './piGeneric.ts'
+import { fmtNum, plain } from './num.ts'
 
 // ---------- Summary table, read by position ----------
 
@@ -517,7 +518,7 @@ function readIllustrations(lines: Line[], pages: Page[] = []): { segments: IllRo
       const gap = prev.age - prev.year, d = joined[1]
       for (let k = 1; k < d.length; k++) {
         const y = +d.slice(0, k), a = +d.slice(k)
-        if (y > prev.year && a - y === gap) { text = `${y}/${a}` + text.slice(d.length); break }
+        if (y > prev.year && a - y === gap) { text = `${plain(y)}/${plain(a)}` + text.slice(d.length); break }
       }
     }
     // "25/61  13,905 ..." or, with year and age in their own columns, "25  61  13,905 ..."
@@ -633,7 +634,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   }
   const currency = found.currency.value
   /** An amount for a note: "SGD 1,089.00" (no currency when it is not known). */
-  const cm = (v: string | number) => `${currency ? currency + ' ' : ''}${num(String(v)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const cm = (v: string | number) => `${currency ? currency + ' ' : ''}${fmtNum(num(String(v)), 2)}`
 
   // Total distribution cost: not a comparison field any more, but useful to know.
   for (const l of lines) {
@@ -734,7 +735,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
     for (const [kind, has, sa, prem, isKind] of [['CI', ci, 'ci_sa', 'ci_premium', isCi], ['TPD', tpd, 'tpd_sa', 'tpd_premium', isTpd]] as const) {
       if (has) continue
       const hint = baseCoversAll(lines) ? undefined : unread(isKind)
-      if (hint) notes.push(`This PI seems to have a ${kind} rider (page ${hint.page}: "${hint.text.slice(0, 60)}") that could not be read: fill in the ${kind} rows by hand.`)
+      if (hint) notes.push(`This PI seems to have a ${kind} rider (page ${plain(hint.page)}: "${hint.text.slice(0, 60)}") that could not be read: fill in the ${kind} rows by hand.`)
       else { set(sa, 'NA', null, null); set(prem, 'NA', null, null) }
     }
   }
@@ -744,7 +745,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
   else if (table && baseModal && ridersSeen === false && !riders.length && !ridersUnread) set('annual_premium', yearly(baseModal), table.page, table.line)
   else if (baseRow && planRows!.rows.length === 1 && !ridersUnread) set('annual_premium', yearly(baseModal), baseRow.page, baseRow.line)
   if (factor && factor !== 1 && !byFreq && (found.annual_premium.value || found.base_premium.value)) {
-    notes.push(`Payment mode is ${modeName}: premiums are shown per year (${factor} × the ${modeName.toLowerCase()} premium${total ? `, ${cm(total.value)} in total` : baseModal ? `, ${cm(baseModal)}` : ''}).`)
+    notes.push(`Payment mode is ${modeName}: premiums are shown per year (${fmtNum(factor)} × the ${modeName.toLowerCase()} premium${total ? `, ${cm(total.value)} in total` : baseModal ? `, ${cm(baseModal)}` : ''}).`)
   }
   if (!factor && !byFreq && (table?.values.premium || total || baseRow)) {
     notes.push('Payment mode not found, so premiums were left blank. Fill them in as yearly amounts.')
@@ -757,11 +758,11 @@ export function extract(pages: Page[], fileName: string): Extracted {
     const lasts = segments.map((s) => s[s.length - 1])
     const sum = lasts.reduce((n, r) => n + num(r.total), 0)
     set('total_premium', fmt2(sum), lasts[0].page, lasts.map((r) => r.line).join(' + '))
-    if (lasts.length > 1) notes.push(`Total premium adds the main plan (${cm(lasts[0].total)}) and ${lasts.length - 1 === 1 ? 'the rider' : `${lasts.length - 1} riders`} (${lasts.slice(1).map((r) => `${cm(r.total)}`).join(', ')}).`)
+    if (lasts.length > 1) notes.push(`Total premium adds the main plan (${cm(lasts[0].total)}) and ${lasts.length - 1 === 1 ? 'the rider' : `${fmtNum(lasts.length - 1)} riders`} (${lasts.slice(1).map((r) => `${cm(r.total)}`).join(', ')}).`)
     // "To Age 85" terms: the spec wants years, which is the main illustration's last policy year.
     for (const k of ['policy_term', 'premium_term'] as const) {
       const toAge = found[k].value.match(/^to\s+age\s+(\d+)/i)
-      if (toAge && +toAge[1] === lasts[0].age) found[k] = { value: String(lasts[0].year), page: lasts[0].page, line: `${found[k].line ?? ''} (to age ${toAge[1]} = ${lasts[0].year} years, from ${lasts[0].line})` }
+      if (toAge && +toAge[1] === lasts[0].age) found[k] = { value: String(lasts[0].year), page: lasts[0].page, line: `${found[k].line ?? ''} (to age ${toAge[1]} = ${plain(lasts[0].year)} years, from ${lasts[0].line})` }
     }
     // Covered up till age: the age on the main illustration's last row.
     set('cover_age', String(lasts[0].age), lasts[0].page, lasts[0].line)
@@ -773,7 +774,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
       // A surrender value read by column position wins: an empty cell there is no value, whatever else the row holds.
       const sv = main.map((r) => (r.sv !== undefined ? r.sv || '-' : r.rest.length >= 2 ? r.rest[r.rest.length - 1] : '-')).map((x) => (NUM.test(x) ? num(x.replace(/[^\d.]/g, '')) : 0))
       const best = Math.max(...sv)
-      set('cash_value', best > 0 ? money(String(best)) : 'NA', lasts[0].page, best > 0 ? `highest guaranteed surrender value ${best}` : 'guaranteed surrender values are all "-" or 0')
+      set('cash_value', best > 0 ? money(String(best)) : 'NA', lasts[0].page, best > 0 ? `highest guaranteed surrender value ${fmtNum(best)}` : 'guaranteed surrender values are all "-" or 0')
       if (best > 0) notes.push(`Cash value shown is the highest guaranteed surrender value in the illustration (${cm(money(String(best)))}).`)
     }
   }
@@ -909,7 +910,7 @@ export function extract(pages: Page[], fileName: string): Extracted {
     found[k] = { ...f, value: v }
     guessed.push(FIELDS.find((x) => x.key === k)!.label)
   }
-  if (guessed.length) notes.unshift(`This PI's layout is not one the reader knows, so ${guessed.length === 1 ? 'one value was' : `${guessed.length} values were`} read by general rules (${guessed.join(', ')}): check ${guessed.length === 1 ? 'it' : 'them'} against the PI. They are marked "Check".`)
+  if (guessed.length) notes.unshift(`This PI's layout is not one the reader knows, so ${guessed.length === 1 ? 'one value was' : `${fmtNum(guessed.length)} values were`} read by general rules (${guessed.join(', ')}): check ${guessed.length === 1 ? 'it' : 'them'} against the PI. They are marked "Check".`)
   for (const gn of general.notes) {
     const show = gn.used ? !!found[gn.key]?.guess : !found[gn.key]?.value
     if (show && !notes.includes(gn.text)) notes.push(gn.text)
@@ -971,7 +972,7 @@ export async function readPdf(data: ArrayBuffer, onPage?: PageProgress, stallMs 
     clearTimeout(timer)
     timer = setTimeout(() => {
       task?.destroy?.()
-      fail(new Error(`nothing happened for ${Math.round(stallMs / 1000)} seconds. Reload the page and try again, or type the values in by hand`))
+      fail(new Error(`nothing happened for ${fmtNum(Math.round(stallMs / 1000))} seconds. Reload the page and try again, or type the values in by hand`))
     }, stallMs)
   }
   arm()

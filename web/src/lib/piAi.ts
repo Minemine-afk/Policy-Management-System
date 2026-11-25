@@ -11,6 +11,7 @@
 // Anything that fails a check is dropped (the cell stays blank). Values it fills are tagged "AI" for ops to check.
 // This file holds the prompt and the checks, shared by the browser (aiModel.ts) and the Node tests.
 import { KNOWN_INSURERS, detectInsurer, type Found, type Page } from './piExtract.ts'
+import { fmtNum, plain } from './num.ts'
 
 /** The fields the AI is asked about. Client particulars (name, date of birth, gender, smoker, residency) are not:
  *  the request form fills those when the PI lacks them. Benefit covers and campaigns are not either: their rules
@@ -212,7 +213,7 @@ export function checkAnswer(answer: Record<string, unknown> | null, pages: Page[
       if (f.key === 'annual_premium' && !/total/i.test(line.text) && lines.some((x) => /^\s*total\b[^\d]*\d/i.test(x.text) || /total\s+(?:annual\s+)?premium/i.test(x.text))) { dropped.push(f.key); continue }
       const value = (Math.round(n * times * 100) / 100).toFixed(2)
       put(f.key, value, line)
-      if (times > 1) found[f.key].line = `${line!.text} (${show(n)} × ${times} a year)`
+      if (times > 1) found[f.key].line = `${line!.text} (${fmtNum(n)} × ${plain(times)} a year)`
     }
   }
   // A rider value must sit next to the rider's name (TPD / critical illness) in the PI, and a rider premium can't be

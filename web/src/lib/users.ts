@@ -1,12 +1,13 @@
 import { supabase } from './supabase'
 import { says } from './options'
 import type { Role } from './types'
+import { plain } from './num.ts'
 
 /** A readable temporary password, e.g. "Kite-7342-Moss". */
 export function tempPassword() {
   const words = ['Kite', 'Moss', 'Reef', 'Pine', 'Lark', 'Opal', 'Fern', 'Dune', 'Cove', 'Teal', 'Wren', 'Jade']
   const n = new Uint32Array(3); crypto.getRandomValues(n)
-  return `${words[n[0] % words.length]}-${1000 + (n[1] % 9000)}-${words[n[2] % words.length]}`
+  return `${words[n[0] % words.length]}-${plain(1000 + (n[1] % 9000))}-${words[n[2] % words.length]}`
 }
 
 export interface NewUser { full_name: string; email: string; role: Role; company: string; password: string }

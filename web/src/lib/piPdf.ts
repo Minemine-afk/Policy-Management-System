@@ -9,6 +9,7 @@ import { FIELDS, labelWith, type FieldDef } from './piExtract.ts'
 import { commonCurrency, headerValue, type ExportColumn } from './piExcel.ts'
 import { issueDateHeading, showDate, todayDmy } from './piIssueDate.ts'
 import type { RequestDocument } from './types.ts'
+import { fmtNum, plain } from './num.ts'
 
 type PdfLib = typeof import('@cantoo/pdf-lib')
 let pdfLoad: Promise<PdfLib> | null = null
@@ -43,7 +44,7 @@ const toNumber = (v: string): number | null => {
   const s = v.replace(/,/g, '').trim()
   return s !== '' && !isNaN(Number(s)) ? Number(s) : null
 }
-const commas = (n: number, dp: number) => n.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+const commas = (n: number, dp: number) => fmtNum(n, dp)
 
 /** A value as the Excel shows it: "$2,478.51" under "Annual Premium (SGD)", "SGD 500,000" for a sum assured. */
 export function cellText(f: FieldDef, raw: string, cur: string, common: string): string {
@@ -114,7 +115,7 @@ export async function buildPack(cols: ExportColumn[], pis: PiFile[], ref: string
     text(`${f.label}:`, M, y, 9.5, bold)
     text(h.value + (h.fromForm ? ' †' : ''), M + 120, y, 9.5)
     if (h.fromForm) fromForm = true
-    for (const [i, x] of h.differs) notes.push(`PI${i + 1}: ${f.label} is "${x}" in this PI (the header shows "${h.value}").`)
+    for (const [i, x] of h.differs) notes.push(`PI${plain(i + 1)}: ${f.label} is "${x}" in this PI (the header shows "${h.value}").`)
     y -= 14
   }
   y -= 6
@@ -175,7 +176,7 @@ export async function buildPack(cols: ExportColumn[], pis: PiFile[], ref: string
   }
 
   // Notes and the key.
-  const all = [...cols.flatMap((c, i) => c.notes.map((n) => `PI${i + 1}: ${n}`)), ...notes]
+  const all = [...cols.flatMap((c, i) => c.notes.map((n) => `PI${plain(i + 1)}: ${n}`)), ...notes]
   if (fromForm) all.unshift('† Not shown in the PI, so taken from the request form.')
   y -= 10
   for (const n of all) {
@@ -196,7 +197,7 @@ export async function buildPack(cols: ExportColumn[], pis: PiFile[], ref: string
     try { src = await PDFDocument.load(pi.data, { password: '' }) }
     catch {
       try { src = await PDFDocument.load(pi.data) }
-      catch { throw new Error(`PI ${i + 1} (${pi.name}) is password-protected or damaged, so it can't go into the PI pack. Ask the insurer for a copy without a password and upload that instead.`) }
+      catch { throw new Error(`PI ${plain(i + 1)} (${pi.name}) is password-protected or damaged, so it can't go into the PI pack. Ask the insurer for a copy without a password and upload that instead.`) }
     }
     for (const p of await doc.copyPages(src, src.getPageIndices())) doc.addPage(p)
   }
@@ -204,7 +205,7 @@ export async function buildPack(cols: ExportColumn[], pis: PiFile[], ref: string
   // Footer on the comparison pages.
   const total = doc.getPageCount()
   pages.forEach((p, i) => {
-    const s = safe(`Prepared by PWS Service Hub on ${showDate(generated)} · Request ${ref} · Comparison page ${i + 1} of ${pages.length} · ${total} pages in this pack with the PIs`)
+    const s = safe(`Prepared by PWS Service Hub on ${showDate(generated)} · Request ${ref} · Comparison page ${plain(i + 1)} of ${plain(pages.length)} · ${plain(total)} pages in this pack with the PIs`)
     p.drawText(s, { x: M, y: M - 18, size: 7.5, font, color: rgb(GREY[0], GREY[1], GREY[2]) })
   })
 

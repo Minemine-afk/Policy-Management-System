@@ -11,11 +11,12 @@ import {
 } from '../lib/formOptions'
 import { loadKb, productLabel, type Kb, type Needs } from '../lib/kb'
 import type { PiRequest, RequestDocument } from '../lib/types'
-import { Seg } from '../components/ui'
+import { AmountInput, Seg } from '../components/ui'
 import Files from '../components/Files'
 import ProductMatrix from '../components/ProductMatrix'
 import { uploadDocuments } from '../lib/documents'
 import { useAuth } from '../lib/auth'
+import { fmtNum, plain } from '../lib/num'
 
 const DOC_MAX_FILES = 10
 const OTHER = '__other__'
@@ -44,7 +45,7 @@ const pick = (r: PiRequest): FormState => ({
 })
 const withValue = (list: string[], v: string) => (v && !list.includes(v) ? [v, ...list] : list)
 const FIX_FIELDS = 'Please fix the highlighted fields.'
-const fmtSize = (b: number) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`)
+const fmtSize = (b: number) => (b < 1024 * 1024 ? `${fmtNum(Math.max(1, Math.round(b / 1024)))} KB` : `${fmtNum(b / 1024 / 1024, 1)} MB`)
 const num = (s: string) => Number(s.replace(/,/g, ''))
 
 interface PastClient { client_name: string; contact: string; request: PiRequest }
@@ -195,12 +196,12 @@ export default function RequestForm() {
     for (const file of Array.from(list)) {
       const ext = file.name.toLowerCase().replace(/^.*(\.[^.]+)$/, '$1')
       if (!allowed.includes(ext)) { setFileError(`${file.name}: only PDF, image, Word or Excel files`); continue }
-      if (file.size > DOC_MAX_MB * 1024 * 1024) { setFileError(`${file.name} is over ${DOC_MAX_MB} MB`); continue }
+      if (file.size > DOC_MAX_MB * 1024 * 1024) { setFileError(`${file.name} is over ${fmtNum(DOC_MAX_MB)} MB`); continue }
       ok.push(file)
     }
     setFiles((cur) => {
       const next = [...cur, ...ok.filter((n) => !cur.some((c) => c.name === n.name && c.size === n.size))]
-      if (next.length > DOC_MAX_FILES) setFileError(`At most ${DOC_MAX_FILES} files`)
+      if (next.length > DOC_MAX_FILES) setFileError(`At most ${fmtNum(DOC_MAX_FILES)} files`)
       return next.slice(0, DOC_MAX_FILES)
     })
     if (fileInput.current) fileInput.current.value = ''
@@ -324,7 +325,7 @@ export default function RequestForm() {
       ['Gender', f.gender],
       ['Client name', `${client.client_name} (ops and BSD see "${vipName(f.gender)}")`], ['Client contact', client.contact || '—'],
       ['Client type', f.client_type], ['Residency', f.residency], ['Nationality', f.nationality],
-      ['Date of birth', `${dobDmy(f.date_of_birth)} (age ${age})`], ['Insurer', f.insurer], ['Product', productText],
+      ['Date of birth', `${dobDmy(f.date_of_birth)} (age ${plain(age)})`], ['Insurer', f.insurer], ['Product', productText],
       ['Currency', f.currency],
       [f.amount_basis === 'premium' ? 'Premium (a year)' : 'Sum assured', fmtMoney(num(f.amount), f.currency)],
       ['Smoker status', f.smoker ? 'Smoker' : 'Non-smoker'], ['Coverage term', f.coverage_term],
@@ -389,7 +390,7 @@ export default function RequestForm() {
             <datalist id="nationalities">{NATIONALITIES.map((x) => <option key={x} value={x} />)}</datalist>
           </> })}
           {F({ k: 'date_of_birth', n: 7, label: 'Date of birth',
-            hint: age != null && age >= 0 && f.date_of_birth <= isoToday() ? `Age ${age} today` : undefined, children:
+            hint: age != null && age >= 0 && f.date_of_birth <= isoToday() ? `Age ${plain(age)} today` : undefined, children:
             <input id="f-date_of_birth" type="date" max={isoToday()} min="1900-01-01" value={f.date_of_birth} aria-invalid={!!errors.date_of_birth}
               onChange={(e) => set('date_of_birth', e.target.value)} /> })}
           {F({ k: 'insurer', n: 8, label: 'Insurer', hint: 'Required', children:
@@ -420,8 +421,8 @@ export default function RequestForm() {
               onChange={(e) => set('amount_basis', e.target.value as FormState['amount_basis'])}>
               {AMOUNT_BASES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <input id="f-amount" style={{ minWidth: 0, flex: 1 }} type="text" inputMode="decimal" placeholder="Numeric" value={f.amount} aria-invalid={!!errors.amount}
-              onChange={(e) => set('amount', e.target.value.replace(/[^\d.,]/g, ''))} />
+            <AmountInput id="f-amount" style={{ minWidth: 0, flex: 1 }} placeholder="Numeric" value={f.amount} aria-invalid={!!errors.amount}
+              onValue={(v) => set('amount', v)} />
           </div> })}
           <div className={`field${errors.smoker ? ' has-error' : ''}`} data-field="smoker">
             <Seg label="Smoker status" value={f.smoker as boolean} onChange={(v) => set('smoker', v)}
@@ -478,7 +479,7 @@ export default function RequestForm() {
               <button type="button" className="linkbtn" onClick={() => fileInput.current?.click()}>browse</button>
               <input ref={fileInput} type="file" multiple accept={DOC_ACCEPT} hidden aria-label="Upload supporting documents"
                 onChange={(e) => addFiles(e.target.files)} />
-              <span className="small muted" style={{ width: '100%' }}>PDF, image, Word or Excel, up to {DOC_MAX_MB} MB each, {DOC_MAX_FILES} files at most. Stored privately; only you, ops and BSD can open them.</span>
+              <span className="small muted" style={{ width: '100%' }}>PDF, image, Word or Excel, up to {fmtNum(DOC_MAX_MB)} MB each, {fmtNum(DOC_MAX_FILES)} files at most. Stored privately; only you, ops and BSD can open them.</span>
             </div>
             {fileError && <span className="error" role="alert">{fileError}</span>}
             {files.length > 0 && (

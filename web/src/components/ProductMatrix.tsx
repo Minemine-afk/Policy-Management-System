@@ -1,20 +1,26 @@
 // The "Find and compare products" pop-up on the PI request form.
-// Step 1 (wireframe 4): filters filled in from the form, and the checked Knowledge Bank term products that match.
+// Step 1 (wireframe 4): filters filled in from the form, and the Knowledge Bank term products in search that match.
+// "Exclude sample products" leaves out the made-up "(sample)" products (Kumar, 25 Nov 2026).
 // Step 2 (wireframe 5): the chosen 2 or 3 side by side, by category, with the source of each value.
 // Factual only: the list is sorted by premium or insurer, never by a "best match" (no advice, MAS).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CLIENT_TYPES, CURRENCIES, RESIDENCIES } from '../lib/formOptions'
 import {
-  DISCLAIMER, NOT_AVAILABLE, comparisonRows, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
+  AUTO_NOTE, AUTO_TAG, DISCLAIMER, blankText, comparisonRows, withoutSamples, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
 } from '../lib/kb'
 import { buildComparisonPdf } from '../lib/kbPdf'
+import { AmountInput } from './ui'
+import { fmtNum } from '../lib/num'
 
 export const MAX_COMPARE = 3
 
-const fmt = (cur: string, x: number) => `${cur} ${Math.round(x).toLocaleString('en-SG')}`
+const fmt = (cur: string, x: number) => `${cur} ${fmtNum(Math.round(x))}`
 const COL_HEAD = ['Product (9)', '1st Product (12)', '2nd Product (13)']
 
-export default function ProductMatrix({ kb, initial, mainId, selected, onUse, onClose, standalone, footer }: {
+const NO_SAMPLES_KEY = 'kb.excludeSamples'
+function savedNoSamples() { try { return localStorage.getItem(NO_SAMPLES_KEY) === '1' } catch { return false } }
+
+export default function ProductMatrix({ kb: allKb, initial, mainId, selected, onUse, onClose, standalone, footer }: {
   kb: Kb
   initial: Needs
   mainId: string | null          // the product on the form (field 9), if it is from the Knowledge Bank
@@ -27,7 +33,11 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
   footer?: (products: KbProduct[], needs: Needs) => ReactNode
 }) {
   const [n, setN] = useState<Needs>(initial)
-  const [sel, setSel] = useState<string[]>(() => selected.filter((id) => kb.products.some((p) => p.id === id)).slice(0, MAX_COMPARE))
+  const [noSamples, setNoSamples] = useState(savedNoSamples)
+  const kb = useMemo(() => withoutSamples(allKb, noSamples), [allKb, noSamples])
+  const samples = allKb.products.filter((p) => p.is_sample).length
+  const switchSamples = (on: boolean) => { setNoSamples(on); try { localStorage.setItem(NO_SAMPLES_KEY, on ? '1' : '0') } catch { /* private window */ } }
+  const [sel, setSel] = useState<string[]>(() => selected.filter((id) => allKb.products.some((p) => p.id === id)).slice(0, MAX_COMPARE))
   const [sort, setSort] = useState<'premium' | 'insurer'>('premium')
   const [step, setStep] = useState<'results' | 'table'>('results')
   const [diffOnly, setDiffOnly] = useState(false)
@@ -93,7 +103,7 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
 
         {step === 'results' ? <>
           <p className="small muted" style={{ margin: 0 }}>{standalone
-            ? "Fill in the client's needs to see the checked Knowledge Bank term products that fit. Pick 2 or 3 to compare side by side."
+            ? "Fill in the client's needs to see the Knowledge Bank term products that fit. Pick 2 or 3 to compare side by side."
             : "Filled in from the request form. Change any filter to see other products. Changes here don't change the form."}</p>
           <div className="matrix-filters">
             <div className="field wf"><span className="wf-head">{badge(1)}<label htmlFor="m-f1">Client profile</label></span>
@@ -121,8 +131,8 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
                   onChange={(e) => set('mode', e.target.value as Needs['mode'])}>
                   <option value="coverage">Coverage</option><option value="budget">Budget a year</option>
                 </select>
-                <input aria-label={n.mode === 'coverage' ? 'Sum assured' : 'Budget a year'} type="number" min={0} style={{ minWidth: 0, flex: 1 }} value={n.amount || ''}
-                  onChange={(e) => set('amount', Number(e.target.value) || 0)} />
+                <AmountInput aria-label={n.mode === 'coverage' ? 'Sum assured' : 'Budget a year'} style={{ minWidth: 0, flex: 1 }} value={n.amount || ''}
+                  onValue={(v) => set('amount', Number(v) || 0)} />
               </div>{hint('From sum assured / premium (11)')}</div>
             <div className="field wf"><span className="wf-head">{badge(7)}<label htmlFor="m-f7">Insurer</label></span>
               <select id="m-f7" value={n.insurer} onChange={(e) => set('insurer', e.target.value)}>
@@ -146,8 +156,15 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
             </>}
           </div>
 
+          {samples > 0 && (
+            <div className="row" style={{ gap: 10 }}>
+              <button type="button" className={`btn small${noSamples ? ' primary' : ''}`} aria-pressed={noSamples} onClick={() => switchSamples(!noSamples)}>
+                {noSamples ? '✓ Sample products excluded' : 'Exclude sample products'}</button>
+              <span className="small muted">{noSamples ? `${fmtNum(samples)} made-up "(sample)" product${samples === 1 ? ' is' : 's are'} left out of the search.` : `Includes ${fmtNum(samples)} made-up "(sample)" product${samples === 1 ? '' : 's'}.`}</span>
+            </div>
+          )}
           <div className="row between">
-            <h3 style={{ margin: 0 }} aria-live="polite">{ok.length} matching term product{ok.length === 1 ? '' : 's'}</h3>
+            <h3 style={{ margin: 0 }} aria-live="polite">{fmtNum(ok.length)} matching term product{ok.length === 1 ? '' : 's'}</h3>
             <label className="row small" style={{ gap: 8 }}>Sort by
               <select value={sort} style={{ width: 'auto' }} onChange={(e) => setSort(e.target.value as 'premium' | 'insurer')}>
                 <option value="premium">{n.mode === 'coverage' ? 'Min premium' : 'Cover the budget buys'}</option><option value="insurer">Insurer</option>
@@ -166,7 +183,8 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
                         <td><input type="checkbox" checked={on} disabled={!on && picked.length >= MAX_COMPARE}
                           aria-label={`Select ${productLabel(p)}`} onChange={(e) => toggle(p.id, e.target.checked)} /></td>
                         <td>{p.insurer}</td>
-                        <td><strong>{p.name}</strong>{p.id === mainId && <span className="pill info" style={{ marginLeft: 6 }}>On your form (9)</span>}</td>
+                        <td><strong>{p.name}</strong>{p.id === mainId && <span className="pill info" style={{ marginLeft: 6 }}>On your form (9)</span>}
+                          {p.auto_read && <span className="pill warn" style={{ marginLeft: 6 }} title="Read from the insurer's documents by the system; no one has checked the values yet">{AUTO_TAG}</span>}</td>
                         <td className="small">{p.category} · {p.product_type}{p.dpi ? ' (DPI)' : ''}</td>
                         <td className="small">{p.jurisdiction}</td>
                         <td className="num">{n.mode === 'coverage'
@@ -175,28 +193,28 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
                       </tr>
                     )
                   })}
-                  {!ok.length && <tr><td colSpan={6} className="muted">No checked product matches. Change a filter above.</td></tr>}
+                  {!ok.length && <tr><td colSpan={6} className="muted">No product matches. Change a filter above.</td></tr>}
                 </tbody>
               </table>
             </div>
           </div>
           {out.length > 0 && (
             <details className="small">
-              <summary style={{ cursor: 'pointer' }}>{out.length} product{out.length === 1 ? " doesn't" : "s don't"} match</summary>
+              <summary style={{ cursor: 'pointer' }}>{fmtNum(out.length)} product{out.length === 1 ? " doesn't" : "s don't"} match</summary>
               <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
                 {out.map((r) => <li key={r.p.id}>{productLabel(r.p)}: {r.why.join(', ')}</li>)}
               </ul>
             </details>
           )}
           <p className="small muted" style={{ margin: 0 }}>
-            Only checked Knowledge Bank products appear. Premiums are indicative, for the gender and smoker status on the form
+            Knowledge Bank products appear as soon as their documents are uploaded; those marked "{AUTO_TAG}" were read by the system and not yet checked by a person. Premiums are indicative, for the gender and smoker status on the form
             {n.ci ? ', with a critical illness rider' : ''}, paying to age 65. Plans without critical illness cover are left out when the form asks for it.
           </p>
           <div className="matrix-foot row between">
-            <span className="small muted">Selected {picked.length} of {MAX_COMPARE} (pick at least 2)</span>
+            <span className="small muted">Selected {fmtNum(picked.length)} of {fmtNum(MAX_COMPARE)} (pick at least 2)</span>
             <div className="wf-row">{badge(10)}
               <button type="button" className="btn primary" disabled={picked.length < 2} onClick={() => { setStep('table'); setError('') }}>
-                Compare selected ({picked.length})</button>
+                Compare selected ({fmtNum(picked.length)})</button>
             </div>
           </div>
         </> : <>
@@ -206,12 +224,12 @@ export default function ProductMatrix({ kb, initial, mainId, selected, onUse, on
               <input type="checkbox" checked={diffOnly} onChange={(e) => setDiffOnly(e.target.checked)} /> Show only rows that differ</label>
           </div>
           <CompareTable kb={kb} products={ordered} needs={n} diffOnly={diffOnly} />
-          <div className="disclaimer small">{DISCLAIMER}</div>
+          <div className="disclaimer small">{DISCLAIMER}{ordered.some((p) => p.auto_read) && <><br /><strong>{AUTO_NOTE}</strong></>}</div>
           {error && <div className="error" role="alert">{error}</div>}
           <div className="matrix-foot row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" onClick={download} disabled={busy}>{busy ? 'Making the PDF…' : 'Download summary (PDF)'}</button>
             {!footer && <button type="button" className="btn primary" onClick={() => onUse?.(ordered.map((p) => p.id))}>
-              Use these {ordered.length} products in the PI request</button>}
+              Use these {fmtNum(ordered.length)} products in the PI request</button>}
           </div>
           {footer?.(ordered, n)}
         </>}
@@ -233,7 +251,8 @@ function CompareTable({ kb, products, needs, diffOnly }: { kb: Kb; products: KbP
     <div className="tablewrap">
       <table className="compare-table">
         <thead><tr><th scope="col" className="lbl">Category</th>
-          {products.map((p, i) => <th key={p.id} scope="col"><span className="small muted">{COL_HEAD[i]} · {p.insurer}</span><br />{p.name}</th>)}
+          {products.map((p, i) => <th key={p.id} scope="col"><span className="small muted">{COL_HEAD[i]} · {p.insurer}</span><br />{p.name}
+            {p.auto_read && <><br /><span className="pill warn">{AUTO_TAG}</span></>}</th>)}
         </tr></thead>
         <tbody>
           {rows.flatMap((r, i) => {
@@ -244,7 +263,7 @@ function CompareTable({ kb, products, needs, diffOnly }: { kb: Kb; products: KbP
                 <th scope="row" className="lbl">{r.label}</th>
                 {r.cells.map((c, i) => (
                   <td key={products[i].id} className={r.differ && r.key !== '_insurer' ? 'differ' : ''}>
-                    {c.text ? c.text : <span className="muted">{NOT_AVAILABLE}</span>}
+                    {c.text ? c.text : <span className="muted">{blankText(products[i])}</span>}
                     {c.source && <span className="src">Source: {c.source}</span>}
                   </td>
                 ))}

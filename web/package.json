@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && node scripts/check-number-format.mjs && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "predev": "node scripts/copy-ocr.mjs",
-    "prebuild": "node scripts/copy-ocr.mjs"
+    "prebuild": "node scripts/copy-ocr.mjs",
+    "check:numbers": "node scripts/check-number-format.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.1",
@@ -29,6 +30,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "^1.89.0",
     "typescript": "~7.0.2",
+    "typescript-api": "npm:typescript@^5.9.3",
     "vite": "^8.3.5"
   }
 }
