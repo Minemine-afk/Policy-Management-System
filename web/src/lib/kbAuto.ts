@@ -8,7 +8,9 @@ import { readFile, readRates, readSummary, readableName, type ReadDoc, type Rate
 import { blankOf, checkKbAnswers, kbQuestions, mergeKbFill, parseAnswer } from './kbAi'
 import { fmtNum, plain } from './num'
 import { missingText } from './kbAdmin'
+import { TERM, planLabel } from './families'
 
+/** Document types read into a product record on upload. */
 export const READ_TYPES = ['Product Summary', 'Rate sheet']
 export const readsInto = (docType: string, fileName: string | null | undefined) => READ_TYPES.includes(docType) && readableName(fileName)
 
@@ -38,7 +40,7 @@ export async function readUpload(data: ArrayBuffer, name: string, docType: strin
 }
 
 /** What the reading sends to kb_auto_product (only the values found). */
-export function autoPayload(r: Reading, target: { product_id?: string | null; insurer: string; name: string }) {
+export function autoPayload(r: Reading, target: Target) {
   const found: string[] = []
   const record: Record<string, unknown> = {}
   const facts: Record<string, { v: string; page?: number }> = {}
@@ -54,13 +56,15 @@ export function autoPayload(r: Reading, target: { product_id?: string | null; in
   const rates = r.rates && !r.rates.error ? r.rates.rates : []
   if (rates.length) found.push('_rates')
   const notes = [...(r.summary?.notes ?? []), ...(r.rates?.notes ?? []), ...(r.error ? [r.error] : [])].join(' ')
-  return { product_id: target.product_id || null, insurer: target.insurer.trim(), name: target.name.trim(), record, facts, rates, found: [...new Set(found)], notes }
+  // The plan type: the one chosen on the upload form, else the one the document says (never guessed: left out when neither).
+  const product_type = target.product_type || r.summary?.planType || undefined
+  return { product_id: target.product_id || null, insurer: target.insurer.trim(), name: target.name.trim(), product_type, record, facts, rates, found: [...new Set(found)], notes }
 }
 
-/** How many things the AI helper would be asked about (what the rules left blank); 0 for rate sheets, other
- *  plans than term plans, and documents with nothing on them to ask. */
+/** How many things the AI helper would be asked about (what the rules left blank); 0 for rate sheets and documents
+ *  with nothing on them to ask. Any plan type. */
 export function aiAskCount(r: Reading | null): number {
-  if (!r?.summary || !r.doc || r.ai || notTermLine(r)) return 0
+  if (!r?.summary || !r.doc || r.ai) return 0
   return kbQuestions(r.doc, blankOf(r.summary)).reduce((n, q) => n + q.keys.length, 0)
 }
 
@@ -86,18 +90,28 @@ export async function fillWithAi(r: Reading, onText?: (t: string) => void): Prom
   return { ...r, summary, ai: aiKeys }
 }
 
-/** Products are term plans only for now (Kumar): a Product Summary for another kind of plan (universal life,
- *  investment-linked, whole life ...) is kept as a document but makes no product record, so it never shows up in
- *  Compare products as a term plan. Empty when the reading can go on a record. */
-export function notTermLine(r: Reading): string {
-  const k = r.summary?.kind
-  return k ? `This Product Summary is for ${k}, not a term plan. Only term plans go into Compare products for now, so no product record was made from it. The document is kept in the Knowledge Bank.` : ''
+/** Where a reading goes: a product record (by id, or insurer and name), and its plan type (families.ts key). */
+export interface Target { product_id?: string | null; insurer: string; name: string; product_type?: string }
+
+/** Every plan type can be a searchable product (Kumar, 25 Nov 2026), once 1v-upgrade.sql has run. Before that the
+ *  database knows only term plans: another plan type is kept as a document and makes no product record, so it never
+ *  shows up in Compare products as a term plan. */
+let plansReady: Promise<boolean> | null = null
+export function allPlanTypesReady(): Promise<boolean> {
+  plansReady ??= Promise.resolve(supabase.rpc('kb_plan_types')).then(({ error }) => !error, () => false)
+  return plansReady
+}
+/** Empty when the reading can go on a record; else why not (only before 1v-upgrade.sql). */
+export async function notSavedLine(r: Reading, type: string | undefined): Promise<string> {
+  const t = type || r.summary?.planType || ''
+  if (!t || t === TERM || await allPlanTypesReady()) return ''
+  return `This Product Summary is for ${planLabel(t)}. The database still takes term plans only (1v-upgrade.sql has not been run), so no product record was made from it. The document is kept in the Knowledge Bank.`
 }
 
-/** Puts the reading on a product record. Returns the record's id, and whether it can be found in search; or,
- *  for a plan that is not a term plan, `skipped` with the reason (nothing is saved). */
-export async function saveReading(docId: string, r: Reading, target: { product_id?: string | null; insurer: string; name: string }) {
-  const skip = notTermLine(r)
+/** Puts the reading on a product record. Returns the record's id, and whether it can be found in search; or
+ *  `skipped` with the reason (nothing is saved). */
+export async function saveReading(docId: string, r: Reading, target: Target) {
+  const skip = await notSavedLine(r, target.product_type)
   if (skip) return { skipped: skip }
   const { data, error } = await supabase.rpc('kb_auto_product', { p_doc: docId, p: autoPayload(r, target) })
   if (error) return { error: error.message }

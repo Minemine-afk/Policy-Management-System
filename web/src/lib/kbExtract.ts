@@ -5,6 +5,7 @@
 import { detectInsurer, readPdf, toLines, type Line, type Page, type TextItem } from './piExtract.ts'
 import type { ProductRecord, Rate } from './kbAdmin'
 import { fmtNum, plain } from './num.ts'
+import { planLabel } from './families.ts'
 
 export interface Row { page: number; cells: string[] }
 export interface ReadDoc { pages: Page[]; rows: Row[]; kind: 'pdf' | 'excel' }
@@ -142,29 +143,58 @@ export function columnLines(p: Page): Line[] {
   return out
 }
 
-/** What kind of plan the document describes, when it says it is not a term plan (whichever it names first). */
-const NOT_TERM: [RegExp, string][] = [
-  [/\bindexed universal life\b/i, 'Indexed Universal Life'],
-  [/\b(?:variable )?universal life\b/i, 'Universal Life'],
-  [/\binvestment[- ]linked\b/i, 'Investment-linked'],
-  [/\bwhole[- ]life (?:insurance )?(?:plan|policy|product)\b/i, 'Whole life'],
-  [/\bendowment (?:insurance )?(?:plan|policy|product)\b/i, 'Endowment'],
-  [/\bannuity (?:plan|policy|product)\b|\bretirement income (?:plan|policy)\b/i, 'Annuity / retirement income'],
+/** The plan types a Product Summary can say it is (families.ts keys), with the words that say so, and the kind
+ *  as the document names it (kept for notes). Term life is matched last: other kinds are told apart first. */
+const PLAN_WORDS: [RegExp, string, string][] = [
+  [/\bindexed universal life\b/i, 'Universal life', 'Indexed Universal Life'],
+  [/\b(?:variable )?universal life\b/i, 'Universal life', 'Universal Life'],
+  [/\binvestment[- ]linked\b|\(ILP\)/i, 'Investment-linked', 'Investment-linked'],
+  [/\bwhole[- ]life (?:insurance |assurance )?(?:plan|policy|product)\b|\bwhole[- ]life (?:insurance|assurance)\b/i, 'Whole life', 'Whole life'],
+  [/\bendowment (?:insurance |assurance )?(?:plan|policy|product)\b|\bendowment (?:insurance|assurance)\b/i, 'Endowment', 'Endowment'],
+  [/\bannuity (?:plan|policy|product)\b|\b(?:deferred|immediate|life) annuity\b|\bretirement (?:income )?(?:plan|policy)\b/i, 'Retirement and annuity', 'Annuity / retirement income'],
+  [/\bintegrated shield\b|\bmedishield\b|\bhospital(?:isation)?(?: and surgical)? (?:insurance|plan|policy)\b|\bhealth insurance (?:plan|policy)\b|\bmedical (?:expense )?insurance (?:plan|policy)\b/i, 'Health', 'Health / hospital'],
+  [/\bpersonal accident (?:insurance |plan|policy|product)|\bpersonal accident insurance\b/i, 'Personal accident', 'Personal accident'],
+  [/\bdisability income\b|\bincome (?:protection|replacement) (?:insurance|plan|policy)\b/i, 'Disability income', 'Disability income'],
+  [/\blong[- ]term care\b|\bcareshield\b|\beldershield\b|\bsevere disability (?:insurance|plan|policy)\b/i, 'Long-term care', 'Long-term care'],
+  [/\bmortgage (?:reducing term|insurance|protection|cover|plan)\b|\b(?:decreasing|reducing) term (?:life )?(?:insurance |assurance )?(?:plan|policy|cover)\b/i, 'Mortgage cover', 'Mortgage cover'],
+  [/\b(?:early(?:[- ]stage)? |multi[- ]?stage )?critical illness (?:insurance |plan|policy|product)|\bcritical illness insurance\b|\bdread disease (?:plan|policy|insurance)\b/i, 'Critical illness', 'Critical illness'],
 ]
 const TERM = /\bterm (?:life )?(?:insurance |assurance )?(?:plan|policy|product|cover)\b|\bterm (?:life )?(?:insurance|assurance)\b/i
+/** Words just before a plan word that make it another plan, not this one: "convert to a whole life plan", a CI rider. */
+const NOT_THIS = /conver|switch|change to|exchange|rider|supplementary|attach|add(?:ed)? (?:on|to)|optional|together with|with (?:an? )?$/i
 
-/** Empty for a term plan (or when the document does not say); else the kind of plan it says it is. Only the first
- *  pages are looked at, where the product is described (later pages talk about converting to other plans). */
-export function planKind(doc: ReadDoc): string {
+/** The plan type a Product Summary describes (a families.ts key), or '' when it does not say. Only the first pages
+ *  are looked at, where the product is described (later pages talk about converting to other plans and riders).
+ *  The plan named first wins; a whole life plan that says it is universal life ("whole life non-participating
+ *  universal life") is universal life. `named` is the kind as the document words it. */
+export function planType(doc: ReadDoc): { type: string; named: string } {
   const text = doc.pages.slice(0, 3).flatMap((p) => p.lines.map((l) => l.text)).join('\n')
-  const t = text.search(TERM)
-  let first: { at: number; kind: string } | null = null
-  for (const [re, kind] of NOT_TERM) {
-    // "Convert to a whole life plan" (a term plan's conversion option) does not make the plan a whole life plan.
-    const at = [...text.matchAll(new RegExp(re.source, 'gi'))].map((m) => m.index!).find((i) => !/conver|switch|change to|exchange/i.test(text.slice(Math.max(0, i - 50), i)))
-    if (at !== undefined && (!first || at < first.at)) first = { at, kind }
+  const hits: { at: number; type: string; named: string }[] = []
+  for (const [re, type, named] of PLAN_WORDS) {
+    const at = [...text.matchAll(new RegExp(re.source, 'gi'))].map((m) => m.index!).find((i) => !NOT_THIS.test(text.slice(Math.max(0, i - 50), i)))
+    if (at !== undefined) hits.push({ at, type, named })
   }
-  return first && (t < 0 || first.at < t) ? first.kind : ''
+  const t = [...text.matchAll(new RegExp(TERM.source, 'gi'))].map((m) => m.index!).find((i) => !NOT_THIS.test(text.slice(Math.max(0, i - 50), i)))
+  if (t !== undefined) hits.push({ at: t, type: 'Term life', named: '' })
+  if (!hits.length) return { type: '', named: '' }
+  hits.sort((a, b) => a.at - b.at)
+  let first = hits[0]
+  if (first.type === 'Whole life') {
+    const inv = hits.find((h) => (h.type === 'Universal life' || h.type === 'Investment-linked') && h.at - first.at < 120)
+    if (inv) first = inv
+  }
+  // A mortgage (reducing) term plan says "term plan" too: the mortgage words win when they come with it.
+  if (first.type === 'Term life') {
+    const m = hits.find((h) => h.type === 'Mortgage cover' && Math.abs(h.at - first.at) < 40)
+    if (m) first = m
+  }
+  return { type: first.type, named: first.named }
+}
+
+/** Empty for a term plan (or when the document does not say); else the kind of plan as the document names it. */
+export function planKind(doc: ReadDoc): string {
+  const p = planType(doc)
+  return p.type && p.type !== 'Term life' ? p.named : ''
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -189,6 +219,18 @@ export const FACT_RULES: { key: string; re: RegExp }[] = [
   { key: 'inc', re: /^(?:guaranteed (?:insurability|issuance) option(?: for life stage events?)?|guaranteed insurability|can i increase the sum (?:insured|assured)|life (?:event|stage) (?:option|benefit)|increase (?:in )?cover)/i },
   { key: 'invest', re: /^(?:investment (?:component|element|feature)s?|participating|is this a participating)/i },
   { key: 'cash', re: /^(?:cash value|surrender value|cash (?:and|&) surrender value)s?\b/i },
+  // Facts of other plan types (universal life, investment-linked, endowment, health, accident, disability).
+  { key: 'minRate', re: /^(?:guaranteed minimum crediting (?:interest )?rate|minimum guaranteed crediting (?:interest )?rate)\b/i },
+  { key: 'account', re: /^(?:policy|account) value\b/i },
+  { key: 'surrCharge', re: /^surrender charges?\b/i },
+  { key: 'funds', re: /^(?:fund (?:choices?|options?|selection)|choice of funds|available funds|investment funds?)\b/i },
+  { key: 'bonus', re: /^(?:(?:reversionary|terminal|non-guaranteed|cash) )?bonus(?:es)?\b/i },
+  { key: 'maturity', re: /^maturity benefit\b/i },
+  { key: 'payout', re: /^(?:income (?:payout|benefit)s?|monthly income(?: benefit)?|lifetime income benefit|annuity (?:payouts?|income|payments?)|retirement income(?: benefit)?|payout (?:options?|period))\b/i },
+  { key: 'hospital', re: /^(?:hospital(?:isation)?(?: and surgical)? benefits?|ward (?:class|entitlement)|room and board|inpatient (?:hospital )?benefits?)\b/i },
+  { key: 'deduct', re: /^(?:deductibles?(?: and co-?insurance)?|co-?insurance)\b/i },
+  { key: 'paBen', re: /^(?:accidental medical (?:expenses?|reimbursement)|medical expenses? (?:due to|from) (?:an )?accident|fractures?(?: benefit)?)\b/i },
+  { key: 'income', re: /^(?:monthly (?:disability )?(?:income )?benefit|disability income benefit)\b/i },
   { key: 'dist', re: /^(?:total )?distribution cost/i },
   { key: 'fees', re: /^(?:other )?(?:fees(?: and charges)?|charges)\b/i },
   { key: 'freelook', re: /^free[- ]?look(?: period)?\b/i },
@@ -232,6 +274,9 @@ const QUESTION = /^(?:can|what|is|are|will|how|when|do|does)\b/i
 const BULLET = /^[•·▪]/
 const ITEM = /^[-–]\s*/
 const HEADING = /^\d{1,2}(?:\.\d{1,2})*\.\s+\S/
+/** A sentence cut off just before a number ("before reaching age" / "80."). */
+const WANTS_NUMBER = /\b(?:age|ages|of|than|to|on page|page|is|are|at|by|within|up to)$/i
+const DANGLING = /\b(?:the|a|an|and|or|of|to|from|with|by|last|first)$/i
 const ends = (s: string) => /[.!?;]["”’)]?$/.test(s)
 const joinText = (a: string, b: string) => (!a ? b : /[A-Za-z]-$/.test(a) && /^[a-z]/.test(b) ? a + b : `${a} ${b}`)
 
@@ -282,11 +327,23 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
       if (!list && /^[a-z.,;)&/]/.test(rest)) continue
       if (list) rest = rest.replace(/^of\s+/i, '')
       // Read on while the sentence (or the list) goes on.
+      let bullets = false
       for (let n = 0; n < 6 && k < lines.length && lines[k].page === lines[i].page && rest.length < 240; n++, k++) {
         const t = lines[k].text.trim(), ps = rawPieces(lines[k])
         // "(Applicable to Policy Term of 5 years and 10 years only)" then "What is it?  This option allows ...".
         if (/^\(.*\)$/.test(rest) && /^what is it\?/i.test(t)) { rest = joinText(rest, t.replace(/^what is it\?\s*/i, '')); mine.push(k); continue }
-        if (isLabel(lines[k]) || HEADING.test(t) || SUBHEAD.test(t) || QUESTION.test(t) && /\?/.test(t)) break
+        // "... before reaching age" / "80. We'll only ...": a number that ends the sentence, not a numbered heading.
+        // "... from the latest of the Issue Date ... and the last" / "Reinstatement Date (if any), then ...": a sentence cut
+        // off after "the" or "and" goes on, even when the next line starts with a word that is also a label.
+        const numGoesOn = (WANTS_NUMBER.test(rest) && /^\d{1,3}(?:\.\d+)?[.,;]?(?:\s|$)/.test(t)) || (!list && DANGLING.test(rest) && ps.length === 1 && !HEADING.test(t) && !BULLET.test(t) && !ITEM.test(t))
+        if (!numGoesOn && (isLabel(lines[k]) || HEADING.test(t) || SUBHEAD.test(t) || QUESTION.test(t) && /\?/.test(t))) break
+        if (numGoesOn) { rest = joinText(rest, t); mine.push(k); continue }
+        // "The Death Benefit is the higher of:" then bullets: the bullets are the value.
+        if (!list && (bullets || /:$/.test(rest)) && BULLET.test(t)) { bullets = true; rest = joinText(rest, clean(t)); mine.push(k); continue }
+        if (bullets) {
+          if (ps.length === 1 && /^[a-z]/.test(t)) { rest = joinText(rest, t); mine.push(k); continue }
+          break
+        }
         if (list) {
           if (BULLET.test(t)) break
           if (ITEM.test(t)) { rest = joinText(rest, clean(t).replace(/^of\s+/i, '')); mine.push(k); continue }
@@ -295,9 +352,11 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
         }
         if (ends(rest) || BULLET.test(t) || ITEM.test(t)) break
         if (cell) {
-          // The label cell and the value cell both wrap: "Terminal Illness  100% ... terminal" / "benefit  illness and ...".
-          if (ps.length === 2 && ps[0].length <= 30 && /^[a-z]/.test(ps[1])) { rest = joinText(rest, ps[1]); mine.push(k); continue }
-          if (ps.length === 1 && /^[a-z]/.test(ps[0])) { rest = joinText(rest, ps[0]); mine.push(k); continue }
+          // The label cell and the value cell both wrap: "Terminal Illness  100% ... terminal" / "benefit  illness and ...",
+          // or "Terminal illness (TI)  ... we may pay the TI" / "Benefit  Benefit in a lump sum ...".
+          if (ps.length === 2 && ps[0].length <= 30 && (/^[a-z]/.test(ps[1]) || /^[A-Za-z]+(?: [A-Za-z]+)?$/.test(ps[0]) && /\b(?:the|a|an|of|to|and|or)\s*$|[a-z]$/i.test(rest) && !/[.:;]$/.test(rest))) { rest = joinText(rest, ps[1]); mine.push(k); continue }
+          // The value wraps onto a short line ("... on page" / "23.") or one that opens with a bracket ("(less any Policy Loan):").
+          if (ps.length === 1 && (/^[a-z]/.test(ps[0]) || /^\d[\d,.]*[.;]?$/.test(ps[0]) || /^\(/.test(ps[0]))) { rest = joinText(rest, ps[0]); mine.push(k); continue }
           break
         }
         if (ps.length > 1) break
@@ -330,11 +389,16 @@ function sentencesOf(lines: Line[]): { s: string; page: number }[] {
   return out
 }
 
+/** Facts of the other plan types (not term). */
+const OTHER_PLAN_FACTS = new Set(['minRate', 'account', 'surrCharge', 'funds', 'bonus', 'maturity', 'payout', 'hospital', 'deduct', 'paBen', 'income'])
+
 /** Facts a Product Summary often says in a sentence instead of under a label. Used only when no label was found. */
 const SENTENCE_RULES: { key: string; re: RegExp }[] = [
   { key: 'guaranteed', re: /^(?:the )?premiums?(?: rates?)?\b[^.]{0,60}?\b(?:are|is|will be)\s+(?:level\s+(?:and|but)\s+)?(?:(?:are\s+)?not\s+)?guaranteed\b/i },
   { key: 'modes', re: /\b(?:premiums?\b[^.]{0,40}\b(?:pay|paid|payable)|(?:choose|choice|option) to pay)\b[^.]{0,30}\b(?:monthly|quarterly|half[- ]yearly|yearly|annually)\b[^.]*\b(?:monthly|quarterly|half[- ]yearly|yearly|annually)\b/i },
   { key: 'cash', re: /\b(?:no|not have any|does not have(?: any)?)\s+cash (?:surrender )?values?\b/i },
+  { key: 'minRate', re: /\b(?:guaranteed minimum|minimum guaranteed) crediting (?:interest )?rate\b[^.]{0,20}?\b(?:is|of)\s+\d+(?:\.\d+)?\s*%/i },
+  { key: 'account', re: /^(?:the |your )?(?:policy|account) value (?:at any time )?is the sum of\b/i },
 ]
 
 export const ints = (s: string) => [...s.replace(/\b\d+\s*(?:days?|weeks?|months?)\b/gi, '0').matchAll(/\b(\d{1,3})\b/g)].map((m) => +m[1]).filter((n) => n <= 100)
@@ -377,6 +441,8 @@ export interface SummaryResult {
   notes: string[]
   /** Empty for a term plan; else the kind of plan the document says it is ("Indexed Universal Life"). */
   kind: string
+  /** The plan type (families.ts key) the document says it is; '' when it does not say. */
+  planType: string
 }
 
 /** "(Regular Pay)" and the like after a plan's name: how it is paid, not part of the name. */
@@ -483,7 +549,8 @@ export function readSummary(doc: ReadDoc): SummaryResult {
   const filled: string[] = []
   const notes: string[] = []
   const facts: SummaryResult['facts'] = {}
-  const kind = planKind(cdoc)
+  const pt = planType(cdoc)
+  const kind = pt.type && pt.type !== 'Term life' ? pt.named : ''
 
   // The plan's own fields come first, so their lines are not read as facts.
   const name = find(lines, REC.name, used)
@@ -499,7 +566,9 @@ export function readSummary(doc: ReadDoc): SummaryResult {
 
   const age = find(lines, REC.age, used)
   const aMin = find(lines, REC.ageMin, used), aMax = find(lines, REC.ageMax, used)
-  const ageNums = age ? ints(age.value) : []
+  // Numbers in brackets are not ages ("15 days - 80 (Region 1S & Region 1)"); several ranges (by region) are not guessed.
+  const ageNums0 = age ? ints(age.value.replace(/\([^)]*\)/g, ' ')) : []
+  const ageNums = !aMin && !aMax && ageNums0.length > 2 ? [] : ageNums0
   const min = aMin ? ints(aMin.value)[0] : ageNums[0]
   const max = aMax ? ints(aMax.value)[0] : ageNums.length > 1 ? ageNums[ageNums.length - 1] : undefined
   if (min != null && max != null && min < max) { record.entry_age_min = min; record.entry_age_max = max; filled.push('entry age') }
@@ -534,10 +603,15 @@ export function readSummary(doc: ReadDoc): SummaryResult {
   const from = riderLabel(cdoc, record.name ?? '')
   for (const r of FACT_RULES) {
     const h = find(lines, r.re, used)
+    // The other plan types' labels also turn up in diagrams ("Account Value" / "Less  Less"): their value must read
+    // as a phrase (three words or more) or hold a number.
+    if (h && OTHER_PLAN_FACTS.has(r.key) && !(h.value.match(/[A-Za-z]{2,}/g)?.length! >= 3 || /\d/.test(h.value))) continue
     if (h) facts[r.key] = { v: from(h.page, h.value), page: h.page }
   }
   for (const r of SENTENCE_RULES) {
-    if (facts[r.key]) continue
+    // A rate given as a definition ("Minimum interest rate used to ... shown in the Policy Schedule") gives way to a
+    // sentence that states it ("The Guaranteed Minimum Crediting Rate is 2.00%").
+    if (facts[r.key] && !(r.key === 'minRate' && !/\d/.test(facts[r.key].v))) continue
     const h = sentences.find((x) => r.re.test(x.s) && x.s.length <= 300)
     if (h) facts[r.key] = { v: from(h.page, h.s), page: h.page }
   }
@@ -546,8 +620,9 @@ export function readSummary(doc: ReadDoc): SummaryResult {
   if (facts.ci || facts.eci) record.has_ci = yes('ci') || yes('eci')
   const n = Object.keys(facts).length
   if (n) filled.push(`${fmtNum(n)} fact${n === 1 ? '' : 's'}`)
-  if (kind) notes.push(`This Product Summary is for ${kind}, not a term plan.`)
-  return { record, facts, filled, notes, kind }
+  if (pt.type) filled.push(`plan type (${planLabel(pt.type)})`)
+  else notes.push('The document does not say what kind of plan it is. Choose the plan type.')
+  return { record, facts, filled, notes, kind, planType: pt.type }
 }
 
 const CUR_WORD = String.raw`(?:SGD|USD|AUD|GBP|EUR|HKD|S\$|US\$|singapore dollars?|us dollars?|united states dollars?|australian dollars?|pounds? sterling|euros?|hong kong dollars?)`

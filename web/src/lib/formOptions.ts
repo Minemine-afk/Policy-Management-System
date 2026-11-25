@@ -19,7 +19,7 @@ export const STANDARD_INSURERS = [
   'Singlife', 'Tokio Marine',
 ]
 /** Field 9, for a plan that is not (yet) in the Knowledge Bank. */
-export const OTHER_PLAN = 'Other term plan (name it in the remarks)'
+export const OTHER_PLAN = 'Other plan (name it in the remarks)'
 
 /** Field 10. */
 export const CURRENCIES = ['SGD', 'USD', 'AUD', 'GBP', 'EUR', 'HKD']

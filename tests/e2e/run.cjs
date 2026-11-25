@@ -74,7 +74,7 @@ const SG_LABELS = {
   await check(sam.getByLabel('Insurer').locator('option').allTextContents().then((t) => t[1] === 'Bayfront Life (sample)' && t.includes('Great Eastern') && !t.includes('Lion Gate Assurance (sample)')),
     'insurers: checked Knowledge Bank insurers first, then the standard list (no draft products)')
   await sam.getByLabel('Insurer').selectOption('Harbour Life (sample)')
-  await check(sam.getByLabel('Product', { exact: true }).locator('option').allTextContents().then((t) => t.join('|') === 'Select|Harbour Term Secure|Other term plan (name it in the remarks)'), 'the product list has only that insurer\'s plans')
+  await check(sam.getByLabel('Product', { exact: true }).locator('option').allTextContents().then((t) => t.join('|') === 'Select|Harbour Term Secure|Other plan (name it in the remarks)'), 'the product list has only that insurer\'s plans')
   await sam.getByLabel('Product', { exact: true }).selectOption({ label: 'Harbour Term Secure' })
   await sam.locator('#f-amount').fill('1000000')
   await check(sam.locator('#f-amount').inputValue().then((v) => v === '1,000,000'), 'the amount box shows thousands commas as you type')
@@ -362,7 +362,7 @@ const SG_LABELS = {
   await dana.getByLabel('Nationality').fill('Malaysian')
   await dana.getByLabel('Insurer').selectOption('Great Eastern')
   await check(dana.getByText('No checked plans for this insurer in the Knowledge Bank yet.', { exact: false }).isVisible(), 'an insurer without Knowledge Bank plans says to name the plan')
-  await dana.getByLabel('Product', { exact: true }).selectOption({ label: 'Other term plan (name it in the remarks)' })
+  await dana.getByLabel('Product', { exact: true }).selectOption({ label: 'Other plan (name it in the remarks)' })
   await dana.getByLabel('Plan name').fill('GREAT Term Plan')
   await dana.locator('#f-amount').fill('500000')
   await check(dana.getByLabel('Upload supporting documents').isVisible(), 'sent-back edit page allows attachments and all fields')

@@ -984,4 +984,44 @@ begin
 end $$;
 select pg_temp.expect_error($$select kb_add_document('{"title":"Note","doc_type":"Others","doc_type_name":"a very long name that goes on and on past the sixty character limit","effective_from":"2026-01-01","storage_path":"f9/a.pdf"}')$$, '60 characters');
 
+-- Product categories (plan types), insurance / investment, and every plan type searchable (1v)
+select pg_temp.as_user('00000000-0000-0000-0000-000000000003');
+do $$
+declare d uuid; p uuid; b uuid; tr uuid; x uuid; old uuid; pf uuid;
+begin
+  if exists (select 1 from kb_products where product_type not in (select k ->> 'key' from jsonb_array_elements(kb_plan_types()) k)) then raise exception 'old plan type left'; end if;
+  if exists (select 1 from kb_products where category <> kb_plan_group(product_type)) then raise exception 'category does not follow the plan type'; end if;
+  if jsonb_array_length(kb_plan_types()) <> 12 then raise exception 'not 12 plan types'; end if;
+  -- an upload read as universal life becomes a searchable Investment product
+  d := kb_add_document('{"insurer":"Cedar Life","title":"Cedar IUL PS","doc_type":"Product Summary","effective_from":"2026-01-01","storage_path":"f10/iul.pdf"}');
+  p := kb_auto_product(d, '{"insurer":"Cedar Life","name":"Cedar Indexed UL","product_type":"Universal life","record":{"currencies":["USD"]},"facts":{"minRate":{"v":"The minimum guaranteed crediting rate is 2.00% per annum.","page":3}},"found":["currencies","minRate"]}');
+  if not exists (select 1 from kb_checked_products where id = p and product_type = 'Universal life' and category = 'Investment') then raise exception 'universal life upload not searchable as investment'; end if;
+  if (select facts -> 'minRate' ->> 'v' from kb_products where id = p) is null then raise exception 'universal life fact not kept'; end if;
+  -- no plan type sent (older screens): Term life, Insurance, as before
+  x := kb_add_document('{"insurer":"Cedar Life","title":"Cedar Term PS","doc_type":"Product Summary","effective_from":"2026-01-01","storage_path":"f10/t.pdf"}');
+  tr := kb_auto_product(x, '{"insurer":"Cedar Life","name":"Cedar Term","record":{"currencies":["SGD"]},"found":["currencies"]}');
+  if not exists (select 1 from kb_products where id = tr and product_type = 'Term life' and category = 'Insurance') then raise exception 'default plan type not Term life'; end if;
+  -- a person changes the plan type: the group follows; a made-up type is refused; "Term" is read as Term life
+  perform kb_save_product(tr, kb_record(tr) || '{"product_type":"Endowment","category":"Insurance","residency":["Singapore citizen"]}');
+  if not exists (select 1 from kb_products where id = tr and product_type = 'Endowment' and category = 'Investment') then raise exception 'saved plan type or group wrong'; end if;
+  perform kb_save_product(tr, kb_record(tr) || '{"product_type":"Term","residency":["Singapore citizen"]}');
+  if (select product_type from kb_products where id = tr) <> 'Term life' then raise exception 'Term not read as Term life'; end if;
+  -- the reader's plan type replaces the record's only when one is sent
+  perform kb_auto_product(d, '{"insurer":"Cedar Life","name":"Cedar Indexed UL","record":{},"found":[]}');
+  if (select product_type from kb_products where id = p) <> 'Universal life' then raise exception 'plan type lost on a re-read'; end if;
+  -- only Product Summary, Rate sheet, Brochure and Product Financing documents belong to a product
+  b := kb_add_document(jsonb_build_object('insurer', 'Cedar Life', 'title', 'Cedar UL brochure', 'doc_type', 'Brochure', 'product_id', p, 'effective_from', '2026-01-01', 'storage_path', 'f10/b.pdf'));
+  pf := kb_add_document(jsonb_build_object('title', 'UL financing', 'doc_type', 'Product Financing', 'product_id', p, 'effective_from', '2026-01-01', 'storage_path', 'f10/f.pdf'));
+  old := kb_add_document(jsonb_build_object('insurer', 'Cedar Life', 'title', 'Cedar training', 'doc_type', 'Training material', 'product_id', p, 'effective_from', '2026-01-01', 'storage_path', 'f10/x.pdf'));
+  if (select product_id from kb_documents where id = b) is distinct from p or (select product_id from kb_documents where id = pf) is distinct from p then raise exception 'brochure / financing lost its product'; end if;
+  if (select product_id from kb_documents where id = old) is not null then raise exception 'training material kept a product'; end if;
+  perform kb_update_document(b, jsonb_build_object('insurer', 'Cedar Life', 'title', 'Cedar UL brochure', 'doc_type', 'Regulatory', 'product_id', p, 'effective_from', '2026-01-01'));
+  if (select product_id from kb_documents where id = b) is not null then raise exception 'regulatory document kept a product'; end if;
+  raise notice 'ok: plan types, insurance / investment, every plan type searchable, product only for 4 document types';
+end $$;
+select pg_temp.expect_error($$select kb_save_product(null, '{"insurer":"Cedar Life","name":"Bad","product_type":"Lottery","jurisdiction":"Onshore","currencies":["SGD"],"residency":["Singapore citizen"],"entry_age_min":1,"entry_age_max":60}')$$, 'Choose the product category');
+reset role;
+select pg_temp.expect_error($$update kb_products set product_type = 'Term' where name = 'Cedar Term'$$, 'violates check constraint');
+set role authenticated;
+
 do $$ begin raise notice 'ALL ACCESS RULE TESTS PASSED'; end $$;
