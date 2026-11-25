@@ -1,16 +1,18 @@
 // The "Find and compare products" pop-up on the PI request form.
-// Step 1 (wireframe 4): filters filled in from the form, and the Knowledge Bank term products in search that match.
+// Step 1 (wireframe 4): filters filled in from the form, and the Knowledge Bank products in search that match
+// (every plan type; filter by plan type and by insurance / investment).
 // "Exclude sample products" leaves out the made-up "(sample)" products (Kumar, 25 Nov 2026).
 // Step 2 (wireframe 5): the chosen 2 or 3 side by side, by category, with the source of each value.
 // Factual only: the list is sorted by premium or insurer, never by a "best match" (no advice, MAS).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CLIENT_TYPES, CURRENCIES, RESIDENCIES } from '../lib/formOptions'
 import {
-  AGES_NOT_STATED, AGES_NOTE, AUTO_NOTE, AUTO_TAG, DISCLAIMER, blankText, comparisonRows, withoutSamples, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
+  AGES_NOT_STATED, AGES_NOTE, AUTO_NOTE, AUTO_TAG, DISCLAIMER, blankText, compareNotes, comparisonRows, withoutSamples, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
 } from '../lib/kb'
 import { buildComparisonPdf } from '../lib/kbPdf'
 import { AmountInput } from './ui'
 import { fmtNum } from '../lib/num'
+import { GROUPS, groupLabel, groupOf, planLabel, plansIn } from '../lib/families'
 
 export const MAX_COMPARE = 3
 
@@ -32,7 +34,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
   /** What to offer under the side-by-side table instead of "Use these products" (the page's "Add to PI request"). */
   footer?: (products: KbProduct[], needs: Needs) => ReactNode
 }) {
-  const [n, setN] = useState<Needs>(initial)
+  const [n, setN] = useState<Needs>(() => ({ family: 'All', ...initial }))
   const [noSamples, setNoSamples] = useState(savedNoSamples)
   const kb = useMemo(() => withoutSamples(allKb, noSamples), [allKb, noSamples])
   const samples = allKb.products.filter((p) => p.is_sample).length
@@ -80,7 +82,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
       const blob = await buildComparisonPdf(kb, ordered, n)
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = `Term product comparison ${new Date().toISOString().slice(0, 10)}.pdf`
+      a.download = `Product comparison ${new Date().toISOString().slice(0, 10)}.pdf`
       a.click()
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000)
     } catch (e) { setError(`The summary could not be made: ${(e as Error).message}`) }
@@ -90,7 +92,9 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
   const badge = (i: number | string) => <span className="wf-badge" aria-hidden="true">{i}</span>
 
   const hint = (t: string) => (standalone ? null : <span className="small muted">{t}</span>)
-  const title = step === 'results' ? 'Find term products to compare' : 'Side-by-side comparison'
+  const title = step === 'results' ? 'Find products to compare' : 'Side-by-side comparison'
+  const hasRates = (id: string) => kb.rates.some((r) => r.product_id === id)
+  const noRate = (id: string) => <span className="muted small">{hasRates(id) ? 'No rate for this age' : 'No rate sheet'}</span>
   const body = (
       <>
         <div className="row between">
@@ -103,7 +107,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
 
         {step === 'results' ? <>
           <p className="small muted" style={{ margin: 0 }}>{standalone
-            ? "Fill in the client's needs to see the Knowledge Bank term products that fit. Pick 2 or 3 to compare side by side."
+            ? "Fill in the client's needs to see the Knowledge Bank products that fit. Pick 2 or 3 to compare side by side."
             : "Filled in from the request form. Change any filter to see other products. Changes here don't change the form."}</p>
           <div className="matrix-filters">
             <div className="field wf"><span className="wf-head">{badge(1)}<label htmlFor="m-f1">Client profile</label></span>
@@ -121,10 +125,13 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
               <select id="m-f4" value={n.currency} onChange={(e) => set('currency', e.target.value)}>
                 {CURRENCIES.map((x) => <option key={x}>{x}</option>)}
               </select>{hint('From currency (10)')}</div>
-            <div className="field wf"><span className="wf-head">{badge(5)}<label htmlFor="m-f5">Objective</label></span>
-              <select id="m-f5" value="Protection" onChange={() => undefined}>
-                <option>Protection</option><option disabled>Estate (later)</option><option disabled>Wealth (later)</option>
-              </select><span className="small muted">Term plans only for now</span></div>
+            <div className="field wf"><span className="wf-head">{badge(5)}<label htmlFor="m-f5">Plan type</label></span>
+              <select id="m-f5" value={n.family ?? 'All'} onChange={(e) => setN((s) => ({ ...s, family: e.target.value,
+                category: e.target.value !== 'All' && s.category !== 'All' && groupOf(e.target.value) !== s.category ? 'All' : s.category }))}>
+                <option value="All">All plan types</option>
+                {GROUPS.filter((g) => n.category === 'All' || g === n.category).map((g) => <optgroup key={g} label={groupLabel(g)}>
+                  {plansIn(g).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}</optgroup>)}
+              </select></div>
             <div className="field wf"><span className="wf-head">{badge(6)}Budget or coverage</span>
               <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
                 <select aria-label="Budget or coverage" value={n.mode} style={{ width: 'auto', flex: '0 0 auto' }}
@@ -138,9 +145,11 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
               <select id="m-f7" value={n.insurer} onChange={(e) => set('insurer', e.target.value)}>
                 {['All', ...insurers].map((x) => <option key={x}>{x}</option>)}
               </select></div>
-            <div className="field wf"><span className="wf-head">{badge(8)}<label htmlFor="m-f8">Category</label></span>
-              <select id="m-f8" value={n.category} onChange={(e) => set('category', e.target.value)}>
-                {['All', 'Insurance', 'Investment'].map((x) => <option key={x}>{x}</option>)}
+            <div className="field wf"><span className="wf-head">{badge(8)}<label htmlFor="m-f8">Insurance or investment</label></span>
+              <select id="m-f8" value={n.category} onChange={(e) => setN((s) => ({ ...s, category: e.target.value,
+                family: s.family && s.family !== 'All' && e.target.value !== 'All' && groupOf(s.family) !== e.target.value ? 'All' : s.family }))}>
+                <option value="All">All</option>
+                {GROUPS.map((g) => <option key={g} value={g}>{groupLabel(g)}</option>)}
               </select></div>
             <div className="field wf"><span className="wf-head"><span className="wf-badge blank" aria-hidden="true" /><label htmlFor="m-fj">Onshore / offshore</label></span>
               <select id="m-fj" value={n.jurisdiction} onChange={(e) => set('jurisdiction', e.target.value)}>
@@ -164,7 +173,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
             </div>
           )}
           <div className="row between">
-            <h3 style={{ margin: 0 }} aria-live="polite">{fmtNum(ok.length)} matching term product{ok.length === 1 ? '' : 's'}</h3>
+            <h3 style={{ margin: 0 }} aria-live="polite">{fmtNum(ok.length)} matching product{ok.length === 1 ? '' : 's'}</h3>
             <label className="row small" style={{ gap: 8 }}>Sort by
               <select value={sort} style={{ width: 'auto' }} onChange={(e) => setSort(e.target.value as 'premium' | 'insurer')}>
                 <option value="premium">{n.mode === 'coverage' ? 'Min premium' : 'Cover the budget buys'}</option><option value="insurer">Insurer</option>
@@ -173,7 +182,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
           <div className="wf-row">{badge(9)}
             <div className="tablewrap">
               <table className="matrix-results">
-                <thead><tr><th>Select</th><th>Insurer</th><th>Product</th><th>Category</th><th>Jurisdiction</th>
+                <thead><tr><th>Select</th><th>Insurer</th><th>Product</th><th>Product category</th><th>Jurisdiction</th>
                   <th className="num">{n.mode === 'coverage' ? 'Min premium a year' : 'Cover for the budget'}</th></tr></thead>
                 <tbody>
                   {ok.map(({ p, sa, prem }) => {
@@ -186,11 +195,11 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
                         <td><strong>{p.name}</strong>{p.id === mainId && <span className="pill info" style={{ marginLeft: 6 }}>On your form (9)</span>}
                           {p.auto_read && <span className="pill warn" style={{ marginLeft: 6 }} title="Read from the insurer's documents by the system; no one has checked the values yet">{AUTO_TAG}</span>}
                           {p.ages_stated === false && <span className="pill warn" style={{ marginLeft: 6 }} title="The age filter skips this product: check the entry ages with the insurer">{AGES_NOT_STATED}</span>}</td>
-                        <td className="small">{p.category} · {p.product_type}{p.dpi ? ' (DPI)' : ''}</td>
+                        <td className="small">{planLabel(p.product_type)}{p.dpi ? ' (DPI)' : ''}</td>
                         <td className="small">{p.jurisdiction}</td>
                         <td className="num">{n.mode === 'coverage'
-                          ? (prem != null ? <strong>{fmt(n.currency, prem)}</strong> : <span className="muted small">No rate for this age</span>)
-                          : (sa ? <><strong>{fmt(n.currency, sa)}</strong><br /><span className="small muted">{prem != null ? `${fmt(n.currency, prem)} a year` : ''}</span></> : <span className="muted small">No rate for this age</span>)}</td>
+                          ? (prem != null ? <strong>{fmt(n.currency, prem)}</strong> : noRate(p.id))
+                          : (sa ? <><strong>{fmt(n.currency, sa)}</strong><br /><span className="small muted">{prem != null ? `${fmt(n.currency, prem)} a year` : ''}</span></> : noRate(p.id))}</td>
                       </tr>
                     )
                   })}
@@ -209,7 +218,8 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
           )}
           <p className="small muted" style={{ margin: 0 }}>
             Knowledge Bank products appear as soon as their documents are uploaded; those marked "{AUTO_TAG}" were read by the system and not yet checked by a person. Premiums are indicative, for the gender and smoker status on the form
-            {n.ci ? ', with a critical illness rider' : ''}, paying to age 65. Plans without critical illness cover are left out when the form asks for it.
+            {n.ci ? ', with a critical illness rider' : ''}, paying to age 65, for products with a rate sheet. Plans without critical illness cover are left out when the form asks for it.
+            The list is sorted, not ranked: it does not say which product suits the client.
           </p>
           <div className="matrix-foot row between">
             <span className="small muted">Selected {fmtNum(picked.length)} of {fmtNum(MAX_COMPARE)} (pick at least 2)</span>
@@ -224,6 +234,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
             <label className="row small" style={{ gap: 8 }}>
               <input type="checkbox" checked={diffOnly} onChange={(e) => setDiffOnly(e.target.checked)} /> Show only rows that differ</label>
           </div>
+          {compareNotes(ordered).map((t) => <div key={t} className="notice warn" role="note">{t}</div>)}
           <CompareTable kb={kb} products={ordered} needs={n} diffOnly={diffOnly} />
           <div className="disclaimer small">{DISCLAIMER}{ordered.some((p) => p.auto_read) && <><br /><strong>{AUTO_NOTE}</strong></>}{ordered.some((p) => p.ages_stated === false) && <><br /><strong>{AGES_NOTE}</strong></>}</div>
           {error && <div className="error" role="alert">{error}</div>}
@@ -253,6 +264,7 @@ function CompareTable({ kb, products, needs, diffOnly }: { kb: Kb; products: KbP
       <table className="compare-table">
         <thead><tr><th scope="col" className="lbl">Category</th>
           {products.map((p, i) => <th key={p.id} scope="col"><span className="small muted">{COL_HEAD[i]} · {p.insurer}</span><br />{p.name}
+            <br /><span className="small muted">{planLabel(p.product_type)}</span>
             {p.auto_read && <><br /><span className="pill warn">{AUTO_TAG}</span></>}
             {p.ages_stated === false && <><br /><span className="pill warn">{AGES_NOT_STATED}</span></>}</th>)}
         </tr></thead>

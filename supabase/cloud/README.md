@@ -63,6 +63,10 @@ the old approval-flow setup on it, run `0-clear-old-prototype.sql` once, which d
      them; such a product is marked "Entry ages not stated in the document" and the age filter skips it instead of
      leaving it out. Only the policy currency is still needed). Run it after 1t. Until you run it, those products stay
      out of search.
+   - `1v-upgrade.sql` (25 Nov: 12 product categories, each Insurance (ins) or Investment (inv); every kind of plan,
+     not only term plans, is read from an upload into a searchable product; only Product Summary, Rate sheet, Brochure
+     and Product Financing documents are linked to a product). Run it after 1u. Until you run it, uploads of other
+     plan types are kept as documents but make no product record, and the category lists show but are not saved.
    - `1h-undo-new-form.sql`: **only if you ran the withdrawn `1h-upgrade.sql`** (11-12 Nov). Never needed otherwise:
      it now stops without changing anything when 1h never ran.
 

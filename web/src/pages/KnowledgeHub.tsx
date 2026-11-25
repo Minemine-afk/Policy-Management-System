@@ -8,9 +8,10 @@ import { useAuth } from '../lib/auth'
 import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, says } from '../lib/options'
 import { STANDARD_INSURERS } from '../lib/formOptions'
-import { afterRead, aiAskCount, fillWithAi, notTermLine, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
+import { afterRead, aiAskCount, fillWithAi, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
+import { GROUPS, groupLabel, groupOf, planKey, planLabel, plansIn } from '../lib/families'
 import {
-  DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
+  DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, hasProduct, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
   type KbDoc, type KbProductRow,
 } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
@@ -57,6 +58,8 @@ export function KbDocuments() {
   const [q, setQ] = useState('')
   const [type, setType] = useState('')
   const [older, setOlder] = useState(false)
+  const [grp, setGrp] = useState('All')     // Insurance / Investment
+  const [ptype, setPtype] = useState('All') // plan type
   const [dialog, setDialog] = useState<{ mode: 'new' | 'version' | 'edit'; doc?: KbDoc } | null>(null)
   const [made, setMade] = useState<{ id: string; searchable: boolean } | null>(null)
   const [msg, setMsg] = useState('')
@@ -67,10 +70,14 @@ export function KbDocuments() {
   }, [member])
   useEffect(() => { reload() }, [reload])
 
-  const productName = (d: KbDoc) => (d.product_id ? products.find((p) => p.id === d.product_id)?.name ?? '—' : needsInsurer(d.doc_type) ? 'All products' : '—')
+  const productOf = (d: KbDoc) => (d.product_id ? products.find((p) => p.id === d.product_id) : undefined)
+  const productName = (d: KbDoc) => (productOf(d)?.name ?? (d.product_id ? '—' : hasProduct(d.doc_type) ? 'All products' : '—'))
   const ownNames = customTypeNames(docs)
   const typeMatch = (d: KbDoc) => !type || (type === ANY_OTHERS ? d.doc_type === OTHERS : docTypeName(d) === type)
-  const shown = docs.filter((d) => (older || !d.replaced_by) && typeMatch(d)
+  // Insurance / investment and plan type filters keep only documents of a product of that kind.
+  const planMatch = (d: KbDoc) => (grp === 'All' && ptype === 'All') || (!!productOf(d) && (grp === 'All' || groupOf(productOf(d)!.product_type) === grp)
+    && (ptype === 'All' || planKey(productOf(d)!.product_type) === ptype))
+  const shown = docs.filter((d) => (older || !d.replaced_by) && typeMatch(d) && planMatch(d)
     && (!q || `${d.title} ${d.insurer} ${productName(d)} ${docTypeName(d)} ${d.file_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
 
   const [busyRead, setBusyRead] = useState('')
@@ -81,7 +88,7 @@ export function KbDocuments() {
     if (!dl?.data) { setBusyRead(''); setError(dl?.error?.message ?? 'This document has no file.'); return }
     const r = await readUpload(await dl.data.arrayBuffer(), d.file_name ?? '', d.doc_type)
     const name = products.find((p) => p.id === d.product_id)?.name || readName(r) || d.title
-    const res = await saveReading(d.id, r, { product_id: d.product_id, insurer: d.insurer, name })
+    const res = await saveReading(d.id, r, { product_id: d.product_id, insurer: d.insurer, name, product_type: productOf(d) ? planKey(productOf(d)!.product_type) : undefined })
     setBusyRead('')
     if ('error' in res && res.error) { setError(says(res.error)); return }
     if ('skipped' in res && res.skipped) { setMsg(res.skipped); return }
@@ -109,6 +116,7 @@ export function KbDocuments() {
             {ownNames.filter((n) => !DOC_TYPES.includes(n)).map((n) => <option key={`o:${n}`} value={n}>{n}</option>)}
             {ownNames.length > 0 && <option value={ANY_OTHERS}>Others (any name)</option>}
           </select>
+          {member && <PlanFilters grp={grp} ptype={ptype} setGrp={setGrp} setPtype={setPtype} />}
           {member && <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={older} onChange={(e) => setOlder(e.target.checked)} /> Show older versions</label>}
         </div>
         {msg && <div className={`notice ${made && !made.searchable ? 'warn' : 'ok'}`} role="status">{msg}
@@ -126,7 +134,7 @@ export function KbDocuments() {
                     <td><button className="linkbtn" style={{ textAlign: 'left' }} onClick={async () => { const e = await openDoc(d); if (e) setError(e) }}>{docLabel(d)}</button>
                       {d.file_name && <div className="small muted">{d.file_name}</div>}</td>
                     <td>{d.insurer || <span className="muted">—</span>}</td>
-                    <td className="small">{productName(d)}</td>
+                    <td className="small">{productName(d)}{productOf(d) && <div className="muted">{planLabel(productOf(d)!.product_type)}</div>}</td>
                     <td className="small">{docTypeName(d)}</td>
                     <td className="small">{fmtDate(d.effective_from)}</td>
                     <td className="small">{d.valid_until ? fmtDate(d.valid_until) : 'No end date'}</td>
@@ -157,6 +165,21 @@ export function KbDocuments() {
         onClose={() => setDialog(null)} onDone={(m, c) => { setDialog(null); setMsg(m); setMade(c?.product ? { id: c.product, searchable: !!c.searchable } : null); setError(''); reload() }} />}
     </main>
   )
+}
+
+/** Insurance (ins) / Investment (inv) and plan type filters, shared by the Documents and Product records tabs. */
+export function PlanFilters({ grp, ptype, setGrp, setPtype }: { grp: string; ptype: string; setGrp: (g: string) => void; setPtype: (t: string) => void }) {
+  return <>
+    <select aria-label="Insurance or investment" value={grp} style={{ flex: '0 1 190px', width: 'auto' }}
+      onChange={(e) => { setGrp(e.target.value); if (e.target.value !== 'All' && ptype !== 'All' && groupOf(ptype) !== e.target.value) setPtype('All') }}>
+      <option value="All">Insurance and investment</option>
+      {GROUPS.map((g) => <option key={g} value={g}>{groupLabel(g)}</option>)}
+    </select>
+    <select aria-label="Plan type" value={ptype} style={{ flex: '0 1 240px', width: 'auto' }} onChange={(e) => setPtype(e.target.value)}>
+      <option value="All">All plan types</option>
+      {plansIn(grp).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}
+    </select>
+  </>
 }
 
 /** The filter value for every "Others" document, whatever its name. */
@@ -193,6 +216,10 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
     valid_until: mode === 'edit' ? doc?.valid_until ?? '' : '',
   })
   const [newName, setNewName] = useState('')        // the product name for a new product record
+  // The plan type (product category): the chosen product's, else what the reader found, else what the person picks.
+  const startProduct = products.find((p) => p.id === (doc?.product_id ?? preset?.product_id))
+  const [plan, setPlan] = useState(startProduct ? planKey(startProduct.product_type) : '')
+  const [planTouched, setPlanTouched] = useState(false)
   const [reading, setReading] = useState<Reading | null>(null)
   const [progress, setProgress] = useState('')
   const [aiError, setAiError] = useState('')
@@ -202,7 +229,10 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const [error, setError] = useState('')
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }))
   const insurers = useMemo(() => [...new Set([...products.map((p) => p.insurer), ...docs.map((d) => d.insurer), ...STANDARD_INSURERS])], [products, docs])
-  const plans = products.filter((p) => p.insurer.toLowerCase() === f.insurer.trim().toLowerCase())
+  // The product field shows only for document types that belong to a product.
+  const withProduct = hasProduct(f.doc_type)
+  const plans = products.filter((p) => (!f.insurer.trim() || p.insurer.toLowerCase() === f.insurer.trim().toLowerCase())
+    && (!plan || planKey(p.product_type) === plan || p.id === f.product_id))
   const others = f.doc_type === OTHERS
   const ownNames = useMemo(() => customTypeNames(docs), [docs])
   const title = mode === 'new' ? 'Upload document' : mode === 'version' ? `New version of ${doc!.title}` : `Edit ${doc!.title}`
@@ -241,6 +271,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
       if (match && !next.product_id) next.product_id = match.id
       return next
     })
+    if (r.summary?.planType) setPlan((p) => (planTouched && p ? p : r.summary!.planType))
     setNewName((n) => n || nm || x.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').replace(/\s*(product summary|rates?|rate sheet)\s*$/i, '').trim())
   }
 
@@ -265,9 +296,10 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
     if (mode !== 'edit' && !file) { setError('Choose a file'); return }
     if (others && !f.doc_type_name.trim()) { setError('Type a name for the document type'); return }
     if (needName && !newName.trim()) { setError('Fill in the product name (or choose the product record it belongs to)'); return }
+    if (needName && !plan) { setError('Choose the product category (plan type) for the new product record'); return }
     if (progress) { setError('Wait until the file has been read'); return }
     setBusy(true)
-    const p = { ...f, product_id: f.product_id || null, valid_until: f.valid_until || null, doc_type_name: others ? f.doc_type_name.trim() : null }
+    const p = { ...f, product_id: (withProduct && f.product_id) || null, valid_until: f.valid_until || null, doc_type_name: others ? f.doc_type_name.trim() : null }
     if (mode === 'edit') {
       const { error } = await supabase.rpc('kb_update_document', { p_id: doc!.id, p })
       setBusy(false)
@@ -286,7 +318,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
     if (reads) {
       const r = reading ?? await readUpload(await file!.arrayBuffer(), file!.name, f.doc_type)
       const name = products.find((x) => x.id === target)?.name || newName.trim() || readName(r) || f.title
-      const res = await saveReading(id, r, { product_id: target || null, insurer: f.insurer || doc?.insurer || '', name })
+      const res = await saveReading(id, r, { product_id: target || null, insurer: f.insurer || doc?.insurer || '', name, product_type: plan || undefined })
       if ('error' in res && res.error) msg += ` It could not be read into a product record: ${says(res.error)}`
       else if ('skipped' in res && res.skipped) msg += ` ${res.skipped}`
       else {
@@ -306,6 +338,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
         {mode !== 'edit' && (
           <label className="field">File
             <input type="file" accept={KB_ACCEPT} onChange={(e) => pick(e.target.files)} />
+            {file && <span className="small filename">{file.name}</span>}
             <span className="small muted">PDF, image, Word or Excel, up to {fmtNum(KB_MAX_MB)} MB. Stored privately.</span>
           </label>
         )}
@@ -313,22 +346,6 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
           <label className="field">{needsInsurer(f.doc_type) ? 'Insurer' : 'Insurer (optional)'}
             <input type="text" list="kb-insurers" value={f.insurer} onChange={(e) => set('insurer', e.target.value)} disabled={mode === 'version'} />
             <datalist id="kb-insurers">{insurers.map((x) => <option key={x} value={x} />)}</datalist>
-          </label>
-          <label className="field">Product
-            <select aria-label="Product" value={f.product_id} onChange={(e) => set('product_id', e.target.value)} disabled={mode === 'version' && reads}>
-              <option value="">{reads && mode === 'new' ? 'New product record' : 'All products / not one product'}</option>
-              {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </label>
-          {needName && (
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
-              <label htmlFor="kb-new-name">Product name (new product record)</label>
-              <input id="kb-new-name" type="text" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <span className="small muted">Read from the file where it says so. A record with the same insurer and name is updated instead of making a second one.</span>
-            </div>
-          )}
-          <label className="field">Document name
-            <input type="text" value={f.title} onChange={(e) => set('title', e.target.value)} />
           </label>
           <label className="field">Document type
             <select value={f.doc_type} onChange={(e) => setType(e.target.value)}>
@@ -343,10 +360,35 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
               <span className="small muted">Shown as the document's type in the list and the type filter.</span>
             </label>
           )}
+          {withProduct && <>
+            <label className="field">{needName ? 'Product category' : 'Product category (optional)'}
+              <select aria-label="Product category" value={plan} disabled={mode === 'version' && reads}
+                onChange={(e) => { setPlan(e.target.value); setPlanTouched(true); const cur = products.find((p) => p.id === f.product_id); if (cur && e.target.value && planKey(cur.product_type) !== e.target.value) set('product_id', '') }}>
+                <option value="">{needName ? 'Choose the plan type' : 'Any plan type'}</option>
+                {GROUPS.map((g) => <optgroup key={g} label={groupLabel(g)}>{plansIn(g).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}</optgroup>)}
+              </select>
+              {plan && <span className="small muted">{groupOf(plan)} product{reads && readName(reading) && reading?.summary?.planType === plan && !planTouched ? ', as the document says' : ''}</span>}
+            </label>
+            <label className="field">Product
+              <select aria-label="Product" value={f.product_id} onChange={(e) => { set('product_id', e.target.value); const p = products.find((x) => x.id === e.target.value); if (p) setPlan(planKey(p.product_type)) }} disabled={mode === 'version' && reads}>
+                <option value="">{reads && mode === 'new' ? 'New product record' : 'All products / not one product'}</option>
+                {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+            {needName && (
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label htmlFor="kb-new-name">Product name (new product record)</label>
+                <input id="kb-new-name" type="text" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                <span className="small muted">Read from the file where it says so. A record with the same insurer and name is updated instead of making a second one.</span>
+              </div>
+            )}
+          </>}
+          <label className="field">Document name
+            <input type="text" value={f.title} onChange={(e) => set('title', e.target.value)} />
+          </label>
           <label className="field">Version (optional)
             <input type="text" placeholder="e.g. v4.2" value={f.version} onChange={(e) => set('version', e.target.value)} />
           </label>
-          <span />
           <label className="field">Effective from
             <input type="date" value={f.effective_from} onChange={(e) => set('effective_from', e.target.value)} />
           </label>
@@ -355,7 +397,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
           </label>
         </div>
         {progress && <div className="notice" role="status">{progress}</div>}
-        {reads && reading && !progress && <div className={`notice${notTermLine(reading) ? ' warn' : ''}`} role="status">{notTermLine(reading) || readingLine(reading)}</div>}
+        {reads && reading && !progress && <div className="notice filename" role="status">{readingLine(reading)}</div>}
         {reads && reading && !progress && aiAskCount(reading) > 0 && (
           <div className="row small" style={{ gap: 8 }}>
             <button type="button" className="btn small" onClick={askAi} disabled={busy}
@@ -372,7 +414,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
             : 'The document is in use as soon as it is uploaded.'}
         </p>
         {error && <div className="error" role="alert">{error}</div>}
-        <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <div className="row dialog-foot" style={{ justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn primary" onClick={save} disabled={busy || !!progress}>{busy ? 'Saving…' : mode === 'edit' ? 'Save' : 'Upload'}</button>
         </div>
@@ -391,6 +433,8 @@ export function KbProducts() {
   const [docs, setDocs] = useState<KbDoc[]>([])
   const [usable, setUsable] = useState<Set<string>>(new Set())
   const [loaded, setLoaded] = useState(false)
+  const [grp, setGrp] = useState('All')
+  const [ptype, setPtype] = useState('All')
   useEffect(() => {
     Promise.all([loadProducts(), loadDocs(), loadUsable()]).then(([p, d, u]) => { setProducts(p); setDocs(d); setUsable(u); setLoaded(true) })
   }, [])
@@ -400,6 +444,7 @@ export function KbProducts() {
   const soon = products.filter((p) => usable.has(p.id) && Object.values(p.facts ?? {}).some((f) => {
     const d = docs.find((x) => x.id === f?.doc); const left = daysLeft(d?.valid_until ?? null); return left != null && left <= 40
   })).length
+  const listed = products.filter((p) => (grp === 'All' || groupOf(p.product_type) === grp) && (ptype === 'All' || planKey(p.product_type) === ptype))
   const docName = (id?: string) => { const d = docs.find((x) => x.id === id); return d ? docLabel(d) : '—' }
 
   return (
@@ -412,17 +457,22 @@ export function KbProducts() {
         <div className="card stat"><strong>{fmtNum(soon)}</strong><span className="pill warn">Source document expires within 40 days</span></div>
       </div>
       <section className="card" aria-label="Product records">
+        <div className="row" style={{ gap: 12 }}>
+          <PlanFilters grp={grp} ptype={ptype} setGrp={setGrp} setPtype={setPtype} />
+          <span className="small muted" aria-live="polite">{fmtNum(listed.length)} of {fmtNum(products.length)} product record{products.length === 1 ? '' : 's'}</span>
+        </div>
         <div className="tablewrap">
           <table aria-label="Product records">
-            <thead><tr><th>Insurer</th><th>Product</th><th>Status</th><th className="num">Version</th><th>Facts taken from</th><th>Last saved by</th><th><span className="sr-only">Open</span></th></tr></thead>
+            <thead><tr><th>Insurer</th><th>Product</th><th>Product category</th><th>Status</th><th className="num">Version</th><th>Facts taken from</th><th>Last saved by</th><th><span className="sr-only">Open</span></th></tr></thead>
             <tbody>
-              {products.map((p) => {
+              {listed.map((p) => {
                 const st = productState(p, usable.has(p.id))
                 const why = whyNotSearchable(p, usable.has(p.id))
                 return (
                   <tr key={p.id}>
                     <td>{p.insurer}</td>
                     <td><strong>{p.name}</strong>{p.is_sample && <span className="small muted"> (sample)</span>}</td>
+                    <td className="small">{planLabel(p.product_type)}</td>
                     <td><span className={`pill ${st.tone}`}>{st.text}</span>{why && p.status !== 'withdrawn' && <div className="small muted" style={{ maxWidth: 320 }}>{why}</div>}</td>
                     <td className="num">{p.verified_at ? `v${plain(p.version)}` : '—'}</td>
                     <td className="small">{docName(p.facts?._ps?.doc)}<br />{docName(p.facts?._rs?.doc)}</td>
@@ -431,7 +481,8 @@ export function KbProducts() {
                   </tr>
                 )
               })}
-              {loaded && !products.length && <tr><td colSpan={7} className="muted">No product records yet. Upload a Product Summary on the Documents tab: it is read into a product record for you.</td></tr>}
+              {loaded && !products.length && <tr><td colSpan={8} className="muted">No product records yet. Upload a Product Summary on the Documents tab: it is read into a product record for you.</td></tr>}
+              {loaded && products.length > 0 && !listed.length && <tr><td colSpan={8} className="muted">No product records of this kind.</td></tr>}
             </tbody>
           </table>
         </div>

@@ -18,6 +18,8 @@ import { loadProducts } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
 import { aiAskCount, aiKeysOf, fillWithAi, type Reading } from '../lib/kbAuto'
 import { AI_MODELS } from '../lib/aiConfig'
+import { GROUPS, groupLabel, groupOf, planLabel, plansIn } from '../lib/families'
+import { rowApplies } from '../lib/kb'
 
 const HOW: Record<string, string> = { edit: 'saved', read: 'read from an upload', migrated: 'put live when checks were removed', checked: 'checked' }
 
@@ -118,6 +120,8 @@ export default function KbProduct() {
             keys.add(k)
           }
           for (const [k, f] of Object.entries(r.facts)) { next.facts[k] = { v: f.v, doc: docId, page: doc.kind === 'pdf' ? f.page : undefined }; keys.add(k) }
+          // The plan type the document says it is, when the record has none yet.
+          if (r.planType && !s.product_type) { next.product_type = r.planType; next.category = groupOf(r.planType); keys.add('product_type') }
           return next
         })
         setFromDoc((x) => new Set([...x, ...keys]))
@@ -206,6 +210,7 @@ export default function KbProduct() {
   async function save() {
     setError(''); setMsg('')
     if (parsed.error) { setError(parsed.error); return }
+    if (!rec.product_type) { setError('Choose the product category (plan type)'); return }
     // A fact typed without a source names the Product Summary.
     const facts: Record<string, Fact> = {}
     for (const [k, f] of Object.entries(rec.facts)) {
@@ -240,6 +245,8 @@ export default function KbProduct() {
   const st = row ? productState(row, usable.has(row.id)) : { text: 'New record', tone: 'info' as const }
   const why = row ? whyNotSearchable(row, usable.has(row.id)) : ''
   const title = rec.name || 'New product record'
+  // The facts this plan type has (and any that hold a value); every fact while no plan type is chosen.
+  const factRows = FACT_FIELDS.filter((r) => !rec.product_type || rowApplies(r, rec.product_type) || rec.facts[r.key]?.v)
   const docSelect = (value: string | undefined, onChange: (v: string) => void, label: string, blank = 'Choose a document', elId?: string) => (
     <select id={elId} aria-label={elId ? undefined : label} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       <option value="">{blank}</option>
@@ -315,8 +322,12 @@ export default function KbProduct() {
                 <datalist id="kb-ins">{insurers.map((x) => <option key={x} value={x} />)}</datalist>
               </label>
               <label className="field">Product name<input type="text" value={rec.name} onChange={(e) => set('name', e.target.value)} /></label>
-              <label className="field">Category
-                <select value={rec.category} onChange={(e) => set('category', e.target.value)}><option>Insurance</option><option>Investment</option></select>
+              <label className="field">Product category{fromDoc.has('product_type') && <span className="pill info tag">From document</span>}
+                <select value={rec.product_type} onChange={(e) => setRec((s) => ({ ...s, product_type: e.target.value, category: groupOf(e.target.value) }))}>
+                  {!rec.product_type && <option value="">Choose the plan type</option>}
+                  {GROUPS.map((g) => <optgroup key={g} label={groupLabel(g)}>{plansIn(g).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}</optgroup>)}
+                </select>
+                {rec.product_type && <span className="small muted">{groupLabel(groupOf(rec.product_type))} product</span>}
               </label>
               <label className="field">Onshore / offshore
                 <select value={rec.jurisdiction} onChange={(e) => set('jurisdiction', e.target.value)}><option>Onshore</option><option>Offshore</option></select>
@@ -344,14 +355,15 @@ export default function KbProduct() {
 
           <section className="card" aria-labelledby="kb-facts">
             <h3 id="kb-facts" className="eyebrow">Product facts (as Compare products shows them)</h3>
-            <p className="small muted" style={{ margin: 0 }}>Write each fact as the document says it, and name the page. Leave a fact empty when the document doesn't mention it: Compare products then shows "Not available".</p>
+            <p className="small muted" style={{ margin: 0 }}>Write each fact as the document says it, and name the page. Leave a fact empty when the document doesn't mention it: Compare products then shows "Not available".
+              {rec.product_type ? ` Only the facts a ${planLabel(rec.product_type)} plan has are listed.` : ''}</p>
             <div className="tablewrap">
               <table className="kb-facts">
                 <thead><tr><th style={{ width: '24%' }}>Fact</th><th>Value</th><th style={{ width: '26%' }}>Source</th><th style={{ width: 80 }}>Page</th></tr></thead>
                 <tbody>
-                  {FACT_FIELDS.flatMap((r, i) => {
+                  {factRows.flatMap((r, i) => {
                     const out = []
-                    if (i === 0 || FACT_FIELDS[i - 1].cat !== r.cat) { out.push(<tr key={`c-${r.cat}`} className="cat"><th colSpan={4}>{r.cat}</th></tr>) }
+                    if (i === 0 || factRows[i - 1].cat !== r.cat) { out.push(<tr key={`c-${r.cat}`} className="cat"><th colSpan={4}>{r.cat}</th></tr>) }
                     const f = rec.facts[r.key]
                     out.push(
                       <tr key={r.key}>
@@ -429,7 +441,7 @@ export default function KbProduct() {
           <div className="card dialog" role="dialog" aria-modal="true" aria-label="Delete this product record" style={{ maxWidth: 480 }}>
             <h2>Delete {row!.name}?</h2>
             <p className="small">The record, its rates and history are deleted and it leaves Compare products. Its documents stay in the Knowledge Bank; PI requests keep the product's name.</p>
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
+            <div className="row dialog-foot" style={{ justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setDialog(null)}>Cancel</button>
               <button className="btn danger" onClick={() => call('kb_delete_product', { p_id: row!.id }, '')}>Delete</button>
             </div>

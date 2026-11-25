@@ -62,7 +62,7 @@ export function ReasonDialog({ title, confirmLabel, onConfirm, onCancel, fieldLa
         <label className="field">{fieldLabel}
           <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
         </label>
-        <div className="row">
+        <div className="row dialog-foot">
           <button className="btn primary" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>{confirmLabel}</button>
           <button className="btn" onClick={onCancel}>Cancel</button>
         </div>
