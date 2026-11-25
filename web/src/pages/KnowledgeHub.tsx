@@ -11,7 +11,7 @@ import { STANDARD_INSURERS } from '../lib/formOptions'
 import { FINANCING_DOC, afterRead, aiAskCount, fillWithAi, readUpload, readingLine, readName, readInsurer, readsInto, saveReading, READ_TYPES, type Reading } from '../lib/kbAuto'
 import { FINANCING, GROUPS, PLAN_TYPES, groupLabel, groupOf, isFinancing, planKey, planLabel, plansIn } from '../lib/families'
 import {
-  DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, hasProduct, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
+  DOC_TYPES, DOC_TYPE_NAME_MAX, KB_ACCEPT, OTHERS, docTypeName, hasProduct, needsInsurer, KB_MAX_MB, daysLeft, docLabel, docInSearch, docState, loadDocs, loadProducts, loadUsable, openDoc, productState, whyNotSearchable,
   type KbDoc, type KbProductRow,
 } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
@@ -54,6 +54,7 @@ export function KbDocuments() {
   const checker = has('bsd')
   const [docs, setDocs] = useState<KbDoc[]>([])
   const [products, setProducts] = useState<KbProductRow[]>([])
+  const [usable, setUsable] = useState<Set<string>>(new Set())
   const [loaded, setLoaded] = useState(false)
   const [q, setQ] = useState('')
   const [type, setType] = useState('')
@@ -65,12 +66,14 @@ export function KbDocuments() {
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const reload = useCallback(async () => {
-    const [d, p] = await Promise.all([loadDocs(), member ? loadProducts() : Promise.resolve([])])
-    setDocs(d); setProducts(p); setLoaded(true)
+    const [d, p, u] = await Promise.all([loadDocs(), member ? loadProducts() : Promise.resolve([]), member ? loadUsable() : Promise.resolve(new Set<string>())])
+    setDocs(d); setProducts(p); setUsable(u); setLoaded(true)
   }, [member])
   useEffect(() => { reload() }, [reload])
 
-  const productOf = (d: KbDoc) => (d.product_id ? products.find((p) => p.id === d.product_id) : undefined)
+  // A document's product record: the one it was filed with, else the one its facts were read into.
+  const productOf = (d: KbDoc) => (d.product_id ? products.find((p) => p.id === d.product_id)
+    : products.find((p) => Object.values(p.facts ?? {}).some((f) => f?.doc === d.id)))
   const planOfDoc = (d: KbDoc) => (productOf(d) ? planKey(productOf(d)!.product_type) : d.plan_type && hasProduct(d.doc_type) ? planKey(d.plan_type) : '')
   const productName = (d: KbDoc) => (productOf(d)?.name ?? (d.product_id ? '—' : !hasProduct(d.doc_type) ? '—' : d.plan_type ? `All ${planLabel(d.plan_type)} products` : 'All products'))
   const ownNames = customTypeNames(docs)
@@ -141,7 +144,12 @@ export function KbDocuments() {
                     <td className="small">{docTypeName(d)}</td>
                     <td className="small">{fmtDate(d.effective_from)}</td>
                     <td className="small">{d.valid_until ? fmtDate(d.valid_until) : 'No end date'}</td>
-                    <td><span className={`pill ${st.tone}`}>{st.text}</span></td>
+                    <td><span className={`pill ${st.tone}`}>{st.text}</span>
+                      {member && (() => {
+                        const m = docInSearch(d, productOf(d), !!productOf(d) && usable.has(productOf(d)!.id), readsInto(d.doc_type, d.file_name))
+                        return m && <div style={{ marginTop: 4 }} aria-label="In the matrix?"><span className={`pill ${m.tone}`}>{m.text}</span>
+                          {m.why && <div className="small muted" style={{ maxWidth: 260 }}>{m.why}</div>}</div>
+                      })()}</td>
                     {member && <td className="small">{d.uploaded_by ? nameOf(people, d.uploaded_by) : 'Sample'}</td>}
                     {member && (
                       <td><div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>

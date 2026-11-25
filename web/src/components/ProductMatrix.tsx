@@ -7,11 +7,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CLIENT_TYPES, CURRENCIES, RESIDENCIES } from '../lib/formOptions'
 import {
-  AGES_NOT_STATED, AGES_NOTE, AUTO_NOTE, AUTO_TAG, DISCLAIMER, blankText, compareNotes, comparisonRows, withoutSamples, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
+  AGES_NOT_STATED, AGES_NOTE, AUTO_NOTE, AUTO_TAG, DISCLAIMER, ANY, blankText, clearedNeeds, compareNotes, comparisonRows, curOf, hiddenBy, withoutSamples, coverFor, premiumFor, productLabel, whyNot, type Kb, type KbProduct, type Needs,
 } from '../lib/kb'
 import { buildComparisonPdf } from '../lib/kbPdf'
 import { AmountInput } from './ui'
-import { fmtNum } from '../lib/num'
+import { fmtNum, plain } from '../lib/num'
 import { GROUPS, comparedIn, groupLabel, groupOf, planLabel } from '../lib/families'
 
 export const MAX_COMPARE = 3
@@ -68,6 +68,11 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
       : (a.prem ?? Infinity) - (b.prem ?? Infinity) || a.p.insurer.localeCompare(b.p.insurer))
     return { ok, out: rows.filter((r) => r.why.length) }
   }, [kb, n, sort])
+  // Which filters hide how many products ("4 by Currency (SGD)"), so a short list never looks like missing uploads.
+  const hidden = useMemo(() => hiddenBy(kb, n), [kb, n])
+  const filterValue = (f: string) => f === 'Currency' ? n.currency : f === 'Age' ? `age ${plain(n.age ?? 0)}` : f === 'Residency' ? n.residency.toLowerCase()
+    : f === 'Sum assured' || f === 'Budget' ? fmtNum(n.amount) : f === 'Insurer' ? n.insurer : f === 'Plan type' ? planLabel(n.family ?? '') : f === 'Insurance or investment' ? n.category
+    : f === 'Onshore / offshore' ? n.jurisdiction.toLowerCase() : f === 'Critical illness cover' ? 'needed' : ''
   // Only products that still match can be compared (a filter change can take one out).
   const picked = sel.filter((id) => ok.some((r) => r.p.id === id))
   const chosen = picked.map((id) => kb.products.find((p) => p.id === id)!)
@@ -94,7 +99,7 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
   const hint = (t: string) => (standalone ? null : <span className="small muted">{t}</span>)
   const title = step === 'results' ? 'Find products to compare' : 'Side-by-side comparison'
   const hasRates = (id: string) => kb.rates.some((r) => r.product_id === id)
-  const noRate = (id: string) => <span className="muted small">{hasRates(id) ? 'No rate for this age' : 'No rate sheet'}</span>
+  const noRate = (id: string) => <span className="muted small">{!hasRates(id) ? 'No rate sheet' : n.age == null || !n.amount ? `Enter the age and ${n.mode === 'coverage' ? 'sum assured' : 'budget'}` : 'No rate for this age'}</span>
   const body = (
       <>
         <div className="row between">
@@ -119,10 +124,12 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
               {hint('From date of birth (7)')}</div>
             <div className="field wf"><span className="wf-head">{badge(3)}<label htmlFor="m-f3">Residency</label></span>
               <select id="m-f3" value={n.residency} onChange={(e) => set('residency', e.target.value)}>
+                <option value={ANY}>Any residency</option>
                 {RESIDENCIES.map((x) => <option key={x}>{x}</option>)}
               </select>{hint('From residency (5)')}</div>
             <div className="field wf"><span className="wf-head">{badge(4)}<label htmlFor="m-f4">Currency</label></span>
               <select id="m-f4" value={n.currency} onChange={(e) => set('currency', e.target.value)}>
+                <option value={ANY}>Any currency</option>
                 {CURRENCIES.map((x) => <option key={x}>{x}</option>)}
               </select>{hint('From currency (10)')}</div>
             <div className="field wf"><span className="wf-head">{badge(5)}<label htmlFor="m-f5">Plan type</label></span>
@@ -198,8 +205,8 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
                         <td className="small">{planLabel(p.product_type)}{p.dpi ? ' (DPI)' : ''}</td>
                         <td className="small">{p.jurisdiction}</td>
                         <td className="num">{n.mode === 'coverage'
-                          ? (prem != null ? <strong>{fmt(n.currency, prem)}</strong> : noRate(p.id))
-                          : (sa ? <><strong>{fmt(n.currency, sa)}</strong><br /><span className="small muted">{prem != null ? `${fmt(n.currency, prem)} a year` : ''}</span></> : noRate(p.id))}</td>
+                          ? (prem != null ? <strong>{fmt(curOf(p, n), prem)}</strong> : noRate(p.id))
+                          : (sa ? <><strong>{fmt(curOf(p, n), sa)}</strong><br /><span className="small muted">{prem != null ? `${fmt(curOf(p, n), prem)} a year` : ''}</span></> : noRate(p.id))}</td>
                       </tr>
                     )
                   })}
@@ -209,8 +216,15 @@ export default function ProductMatrix({ kb: allKb, initial, mainId, selected, on
             </div>
           </div>
           {out.length > 0 && (
+            <div className="notice warn row between" role="status" aria-label="Hidden by filters" style={{ gap: 8 }}>
+              <span>{fmtNum(out.length)} product{out.length === 1 ? ' is' : 's are'} hidden by your filters: {hidden.map((h) =>
+                `${fmtNum(h.count)} by ${h.filter}${filterValue(h.filter) ? ` (${filterValue(h.filter)})` : ''}`).join(', ')}.</span>
+              <button type="button" className="btn small" onClick={() => setN((s) => clearedNeeds(s))}>Show all products (clear filters)</button>
+            </div>
+          )}
+          {out.length > 0 && (
             <details className="small">
-              <summary style={{ cursor: 'pointer' }}>{fmtNum(out.length)} product{out.length === 1 ? " doesn't" : "s don't"} match</summary>
+              <summary style={{ cursor: 'pointer' }}>Why each hidden product doesn't match ({fmtNum(out.length)})</summary>
               <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
                 {out.map((r) => <li key={r.p.id}>{productLabel(r.p)}: {r.why.join(', ')}</li>)}
               </ul>

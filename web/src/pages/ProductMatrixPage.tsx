@@ -26,9 +26,10 @@ export default function ProductMatrixPage() {
         <p className="small muted" style={{ margin: '4px 0 0' }}>Factual comparison of Knowledge Bank products. Add the ones you pick to a PI request by its PI number.</p>
       </div>
       {error && <div className="error" role="alert">{error}</div>}
+      {/* Every searchable product shows until a filter is set (Kumar, 25 Nov 2026: uploads must never look missing). */}
       {!kb ? <div className="empty">Loading…</div> : !kb.products.length ? <div className="card">No products in the Knowledge Bank yet. Upload a Product Summary on the Knowledge Hub.</div> : (
         <ProductMatrix kb={kb} standalone mainId={null} selected={[]}
-          initial={{ profile: 'Family', age: 35, residency: 'Singapore citizen', currency: 'SGD', mode: 'coverage', amount: 500_000,
+          initial={{ profile: 'Family', age: null, residency: 'All', currency: 'All', mode: 'coverage', amount: 0,
             insurer: 'All', category: 'All', family: 'All', jurisdiction: 'All', gender: 'Male', smoker: false, ci: false }}
           footer={(products) => <AddToRequest products={products} />} />
       )}

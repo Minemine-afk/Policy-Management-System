@@ -52,7 +52,8 @@ export async function buildComparisonPdf(kb: Kb, products: KbProduct[], n: Needs
   text(`Made ${date}`, W - M - width(`Made ${date}`, 9), y - 12, 9, font, GREY)
   y -= 30
   const who = [n.age != null ? `age ${plain(n.age)} next birthday` : '', n.gender.toLowerCase(), n.smoker ? 'smoker' : 'non-smoker',
-    n.residency.toLowerCase(), n.currency, n.mode === 'coverage' ? `cover ${n.currency} ${fmtNum(n.amount)}` : `budget ${n.currency} ${fmtNum(n.amount)} a year`,
+    n.residency === 'All' ? '' : n.residency.toLowerCase(), n.currency === 'All' ? '' : n.currency,
+    !n.amount ? '' : n.mode === 'coverage' ? `cover ${n.currency === 'All' ? '' : n.currency + ' '}${fmtNum(n.amount)}` : `budget ${n.currency === 'All' ? '' : n.currency + ' '}${fmtNum(n.amount)} a year`,
     n.ci ? 'with critical illness' : ''].filter(Boolean).join(', ')
   for (const l of wrap(`Client profile used: ${who}.`, 9, W - 2 * M)) { text(l, M, y, 9, font, GREY); y -= 12 }
   y -= 6
