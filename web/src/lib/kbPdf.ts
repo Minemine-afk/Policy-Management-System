@@ -1,7 +1,8 @@
 // "Download summary (PDF)" from the product comparison pop-up: the wireframe 5 table, with each value's source,
 // and the disclaimer. Made in the browser; nothing is uploaded. No client name on it (only the profile used).
-import { AUTO_NOTE, DISCLAIMER, blankText, comparisonRows, type Kb, type KbProduct, type Needs } from './kb'
+import { AUTO_NOTE, DISCLAIMER, blankText, compareNotes, comparisonRows, type Kb, type KbProduct, type Needs } from './kb'
 import { fmtNum, plain } from './num.ts'
+import { planLabel } from './families.ts'
 
 const NAVY = [0.06, 0.16, 0.3] as const
 const GREY = [0.42, 0.45, 0.5] as const
@@ -40,13 +41,13 @@ export async function buildComparisonPdf(kb: Kb, products: KbProduct[], n: Needs
     text('Product', M + 6, y - 19, 9, bold, [1, 1, 1])
     products.forEach((p, i) => {
       const x = M + labelW + i * colW + 6
-      text(wrap(p.auto_read ? `${p.insurer} · AUTO-READ, NOT REVIEWED` : p.insurer, 8, colW - 12)[0], x, y - 12, 8, font, [1, 1, 1])
+      text(wrap(`${p.insurer} · ${planLabel(p.product_type)}${p.auto_read ? ' · AUTO-READ, NOT REVIEWED' : ''}`, 8, colW - 12)[0], x, y - 12, 8, font, [1, 1, 1])
       text(wrap(p.name, 9.5, colW - 12, bold)[0], x, y - 24, 9.5, bold, [1, 1, 1])
     })
     y -= 34
   }
 
-  text('Term product comparison', M, y - 14, 16, bold, NAVY)
+  text('Product comparison', M, y - 14, 16, bold, NAVY)
   const date = now.toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' })
   text(`Made ${date}`, W - M - width(`Made ${date}`, 9), y - 12, 9, font, GREY)
   y -= 30
@@ -84,7 +85,7 @@ export async function buildComparisonPdf(kb: Kb, products: KbProduct[], n: Needs
     page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.4, color: rgb(0.85, 0.87, 0.9) })
   }
 
-  const dis = wrap(products.some((p) => p.auto_read) ? `${DISCLAIMER} ${AUTO_NOTE}` : DISCLAIMER, 8.5, W - 2 * M - 12)
+  const dis = wrap([...compareNotes(products), DISCLAIMER, ...(products.some((p) => p.auto_read) ? [AUTO_NOTE] : [])].join(' '), 8.5, W - 2 * M - 12)
   if (y - dis.length * 11 - 20 < M) { page = doc.addPage([W, H]); y = H - M }
   y -= 14
   rect(M, y - dis.length * 11 - 8, W - 2 * M, dis.length * 11 + 8, BAND)

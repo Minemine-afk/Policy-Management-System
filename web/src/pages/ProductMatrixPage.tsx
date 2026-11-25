@@ -22,14 +22,14 @@ export default function ProductMatrixPage() {
     <main className="page">
       <div>
         <p className="muted small" style={{ margin: 0 }}>Product Comparison Matrix</p>
-        <h2 style={{ fontSize: 22, margin: 0 }}>Compare term products</h2>
+        <h2 style={{ fontSize: 22, margin: 0 }}>Compare products</h2>
         <p className="small muted" style={{ margin: '4px 0 0' }}>Factual comparison of Knowledge Bank products. Add the ones you pick to a PI request by its PI number.</p>
       </div>
       {error && <div className="error" role="alert">{error}</div>}
       {!kb ? <div className="empty">Loading…</div> : !kb.products.length ? <div className="card">No products in the Knowledge Bank yet. Upload a Product Summary on the Knowledge Hub.</div> : (
         <ProductMatrix kb={kb} standalone mainId={null} selected={[]}
           initial={{ profile: 'Family', age: 35, residency: 'Singapore citizen', currency: 'SGD', mode: 'coverage', amount: 500_000,
-            insurer: 'All', category: 'All', jurisdiction: 'All', gender: 'Male', smoker: false, ci: false }}
+            insurer: 'All', category: 'All', family: 'All', jurisdiction: 'All', gender: 'Male', smoker: false, ci: false }}
           footer={(products) => <AddToRequest products={products} />} />
       )}
     </main>

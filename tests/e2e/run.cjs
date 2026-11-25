@@ -74,8 +74,8 @@ const SG_LABELS = {
   await check(sam.getByLabel('Insurer').locator('option').allTextContents().then((t) => t[1] === 'Bayfront Life (sample)' && t.includes('Great Eastern') && !t.includes('Lion Gate Assurance (sample)')),
     'insurers: checked Knowledge Bank insurers first, then the standard list (no draft products)')
   await sam.getByLabel('Insurer').selectOption('Harbour Life (sample)')
-  await check(sam.getByLabel('Product', { exact: true }).locator('option').allTextContents().then((t) => t.join('|') === 'Select|Harbour Term Secure|Other term plan (name it in the remarks)'), 'the product list has only that insurer\'s plans')
-  await sam.getByLabel('Product', { exact: true }).selectOption({ label: 'Harbour Term Secure' })
+  await check(sam.getByLabel('Product', { exact: true }).locator('option').allTextContents().then((t) => t.join('|') === 'Select|Harbour Term Secure · Term life (ins)|Other plan (name it in the remarks)'), 'the product list has only that insurer\'s plans')
+  await sam.getByLabel('Product', { exact: true }).selectOption({ label: 'Harbour Term Secure · Term life (ins)' })
   await sam.locator('#f-amount').fill('1000000')
   await check(sam.locator('#f-amount').inputValue().then((v) => v === '1,000,000'), 'the amount box shows thousands commas as you type')
   await sam.getByRole('group', { name: 'Smoker status' }).getByRole('button', { name: 'Non-smoker' }).click()
@@ -83,13 +83,13 @@ const SG_LABELS = {
   await sam.getByRole('group', { name: 'Critical illness benefit' }).getByRole('button', { name: 'Yes' }).click()
   await sam.getByLabel('Term Product Comparison Request').check()
   await sam.getByRole('button', { name: 'Find and compare products' }).click()
-  const mx = sam.getByRole('dialog', { name: 'Find term products to compare' })
+  const mx = sam.getByRole('dialog', { name: 'Find products to compare' })
   await mx.waitFor()
   const anb = Number(await mx.getByLabel('Age next birthday').inputValue())
   await check(Promise.resolve(anb >= 38 && anb <= 40), 'the pop-up fills the age (next birthday) from the date of birth')
   await check(mx.getByLabel('Sum assured').inputValue().then((v) => v === '1,000,000'), 'and the sum assured, with thousands commas')
   await check(mx.getByLabel('Client profile').inputValue().then((v) => v === 'Family'), 'and the client profile from the client type')
-  await check(mx.getByRole('heading', { name: '3 matching term products' }).isVisible(), 'lists the checked products that fit (3 with CI cover in SGD)')
+  await check(mx.getByRole('heading', { name: '3 matching products' }).isVisible(), 'lists the checked products that fit (3 with CI cover in SGD)')
   await check(mx.getByLabel('Select Harbour Life (sample) · Harbour Term Secure').isChecked(), 'the product on the form is ticked already')
   await check(mx.getByText('On your form (9)').isVisible(), 'and marked as the form\'s product')
   await check(mx.getByText(/Orchid Life \(sample\) · Orchid Essential Term: .*no critical illness cover/).count().then((n) => n === 1), 'says why a product does not match')
@@ -116,8 +116,8 @@ const SG_LABELS = {
   await check(Promise.resolve(fs.readFileSync(cmpPdf).subarray(0, 5).toString() === '%PDF-'), 'Download summary gives a PDF')
   await ct.getByRole('button', { name: 'Use these 3 products in the PI request' }).click()
   await check(sam.getByText('Fields 8, 9, 12 and 13 are filled in with the 3 products.').isVisible(), 'using the products closes the pop-up and says what was filled in')
-  await check(sam.getByLabel('Term Product Name – 1st Product').locator('option:checked').textContent().then((t) => t === 'Kallang Mutual (sample) · Kallang FamilyTerm'), 'the 1st product to compare is filled in')
-  await check(sam.getByLabel('Term Product Name – 2nd Product (optional)').locator('option:checked').textContent().then((t) => t === 'Straits Assurance (sample) · Straits LifeGuard Term'), 'and the 2nd')
+  await check(sam.getByLabel('Term Product Name – 1st Product').locator('option:checked').textContent().then((t) => t === 'Kallang Mutual (sample) · Kallang FamilyTerm · Term life (ins)'), 'the 1st product to compare is filled in')
+  await check(sam.getByLabel('Term Product Name – 2nd Product (optional)').locator('option:checked').textContent().then((t) => t === 'Straits Assurance (sample) · Straits LifeGuard Term · Term life (ins)'), 'and the 2nd')
   await sam.getByLabel('Remarks for ops (optional)').fill('Wants quotes from three insurers')
   await sam.getByRole('button', { name: 'Review and submit' }).click()
   await sam.getByRole('heading', { name: 'Review and submit' }).waitFor()
@@ -362,7 +362,7 @@ const SG_LABELS = {
   await dana.getByLabel('Nationality').fill('Malaysian')
   await dana.getByLabel('Insurer').selectOption('Great Eastern')
   await check(dana.getByText('No checked plans for this insurer in the Knowledge Bank yet.', { exact: false }).isVisible(), 'an insurer without Knowledge Bank plans says to name the plan')
-  await dana.getByLabel('Product', { exact: true }).selectOption({ label: 'Other term plan (name it in the remarks)' })
+  await dana.getByLabel('Product', { exact: true }).selectOption({ label: 'Other plan (name it in the remarks)' })
   await dana.getByLabel('Plan name').fill('GREAT Term Plan')
   await dana.locator('#f-amount').fill('500000')
   await check(dana.getByLabel('Upload supporting documents').isVisible(), 'sent-back edit page allows attachments and all fields')
@@ -718,7 +718,8 @@ const SG_LABELS = {
       for (const [k, label] of Object.entries(labels)) {
         const got = (await olivia.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()).replace(/(\d),(?=\d{3})/g, '$1')   // shown with thousands commas
         // PI-00003's request form has a date of birth (set by the introducer above): it fills a PI that has none
-        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
+        // and its residency (also set above) fills a PI that states none
+        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : k === 'residency' && !expected[n][k] ? 'Foreigner living in Singapore' : expected[n][k]
         await check(Promise.resolve(got === want), `real sample ${n}: ${label} = ${got || '(blank)'}`)
       }
     }
@@ -746,7 +747,8 @@ const SG_LABELS = {
     for (const [i, n] of names.entries()) {
       for (const [k, label] of Object.entries(labels)) {
         const got = (await cmp.getByLabel(`${label} for PI ${i + 1}`, { exact: true }).inputValue()).replace(/(\d),(?=\d{3})/g, '$1')
-        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : expected[n][k]
+        // and its residency (also set above) fills a PI that states none
+        const want = k === 'date_of_birth' && !expected[n][k] ? '10/02/1994' : k === 'residency' && !expected[n][k] ? 'Foreigner living in Singapore' : expected[n][k]
         await check(Promise.resolve(got === want), `scanned ${n} (OCR): ${label} = ${got || '(blank)'}`)
       }
     }
@@ -934,6 +936,12 @@ const SG_LABELS = {
   await up.getByLabel('File').setInputFiles(file('Maple_Term_Product_Summary.pdf'))
   await up.getByLabel('Insurer').fill('Maple Life')
   await check(up.getByLabel('Product name (new product record)').evaluate((el) => new Promise((ok) => { const t = Date.now(); const f = () => (el.value === 'Maple Term' || Date.now() - t > 15000 ? ok(el.value === 'Maple Term') : setTimeout(f, 200)); f() })), 'a Product Summary upload offers a new product record, named from the file')
+  // Product categories (Kumar, 25 Nov 2026): 12 plan types, each "(ins)" or "(inv)"; a new record needs one
+  await check(up.getByLabel('Product category').locator('option').allTextContents().then((t) => t.includes('Term life (ins)') && t.includes('Universal life incl. indexed (inv)') && t.includes('Health: hospital / Integrated Shield (ins)') && t.filter((x) => / \((ins|inv)\)$/.test(x)).length === 12), 'the product field offers the 12 categories, each marked (ins) or (inv)')
+  await up.getByLabel('Effective from').fill('2026-01-01')
+  await up.getByRole('button', { name: 'Upload' }).click()
+  await check(seen(up.getByText('Choose the product category (plan type) for the new product record')), 'a new product record needs its category')
+  await up.getByLabel('Product category').selectOption('Term life')
   await up.getByLabel('Document name').fill('Maple Term Product Summary')
   await up.getByLabel('Version (optional)').fill('v1')
   await up.getByLabel('Effective from').fill('2026-01-01')
@@ -952,6 +960,16 @@ const SG_LABELS = {
   await upt.getByLabel('Document type').selectOption('Training material')
   await check(upt.getByLabel('Insurer (optional)').isVisible(), 'the insurer is optional for training material')
   await check(upt.getByLabel('Product name (new product record)').count().then((n) => n === 0), 'training material does not make a product record')
+  await check(Promise.all([upt.getByLabel('Product', { exact: true }).count(), upt.getByLabel('Product category').count()]).then(([a, b]) => a === 0 && b === 0), 'training material does not ask for a product or category')
+  for (const t of ['Regulatory', 'Circulars', 'Policy wording']) {
+    await upt.getByLabel('Document type').selectOption(t)
+    await check(upt.getByLabel('Product', { exact: true }).count().then((n) => n === 0), `${t} does not ask for a product`)
+  }
+  for (const t of ['Brochure', 'Product Financing', 'Rate sheet', 'Product Summary']) {
+    await upt.getByLabel('Document type').selectOption(t)
+    await check(Promise.all([upt.getByLabel('Product', { exact: true }).isVisible(), upt.getByLabel('Product category').isVisible()]).then(([a, b]) => a && b), `${t} asks for the product and its category`)
+  }
+  await upt.getByLabel('Document type').selectOption('Training material')
   await upt.getByLabel('Document name').fill('Term basics for introducers')
   await upt.getByLabel('Effective from').fill('2026-01-01')
   await upt.getByRole('button', { name: 'Upload' }).click()
@@ -977,7 +995,7 @@ const SG_LABELS = {
   // The record that was made: fill in what is missing and save; it is in search at once
   await olivia.getByRole('link', { name: 'Product records' }).click()
   const mapleRow = olivia.locator('tr', { hasText: 'Maple Term' })
-  await check(seen(mapleRow.getByText(/^Not searchable: no policy currency and entry ages$/)), 'the product records list says why a record is not searchable')
+  await check(seen(mapleRow.getByText(/^Not searchable: no policy currency$/)), 'the product records list says why a record is not searchable')
   await mapleRow.getByRole('link', { name: 'Open Maple Term' }).click()
   await olivia.waitForURL(/\/kb\/products\/[0-9a-f-]{36}$/)
   const mapleUrl = olivia.url()
@@ -1017,6 +1035,7 @@ const SG_LABELS = {
   const ups = olivia.getByRole('dialog', { name: 'Upload document' })
   await ups.getByLabel('File').setInputFiles(kbFile('Orchard_TermShield_Product_Summary.pdf', 'application/pdf'))
   await check(seen(ups.getByText(/^Read: product name, insurer, entry age/)), 'the upload form reads the Product Summary when it is picked')
+  await check(ups.getByRole('button', { name: /Ask the free AI helper/ }).count().then((n) => n === 0), 'no AI helper button when the reader left nothing it could ask about')
   await check(ups.getByLabel('Insurer').inputValue().then((v) => v === 'Marina Life Assurance'), 'and fills in the insurer read')
   await check(ups.getByLabel('Product name (new product record)').inputValue().then((v) => v === 'Orchard TermShield'), 'and the product name read')
   await ups.getByLabel('Effective from').fill('2026-01-01')
@@ -1074,7 +1093,7 @@ const SG_LABELS = {
   const samRef = (await db.query(`update pi_requests set status = 'sent_back' where id = (select id from pi_requests where introducer_id = '00000000-0000-0000-0000-000000000001' order by submitted_at limit 1) returning ref`)).rows[0].ref
   await sam.goto(BASE + '/home')
   await sam.locator('a.tile', { hasText: 'Product Comparison Matrix' }).click()
-  await check(sam.getByRole('heading', { name: 'Find term products to compare' }).waitFor().then(() => true, () => false), 'the Product Comparison Matrix tile opens the finder as a page')
+  await check(sam.getByRole('heading', { name: 'Find products to compare' }).waitFor().then(() => true, () => false), 'the Product Comparison Matrix tile opens the finder as a page')
   await check(sam.getByRole('link', { name: 'Compare products' }).isVisible(), 'and it has a link in the top bar')
   await sam.getByLabel('Smoker', { exact: true }).selectOption('yes')
   // Exclude sample products (the made-up "(sample)" ones)
@@ -1104,7 +1123,7 @@ const SG_LABELS = {
   // Ops can only change requests assigned to them
   const notOlivia = (await db.query(`select ref from pi_requests where status not in ('completed', 'removed') and (assignee_id is null or assignee_id <> '00000000-0000-0000-0000-000000000003') limit 1`)).rows[0].ref
   await olivia.goto(BASE + '/matrix')
-  await olivia.getByRole('heading', { name: 'Find term products to compare' }).waitFor()
+  await olivia.getByRole('heading', { name: 'Find products to compare' }).waitFor()
   const oboxes = olivia.locator('table input[type=checkbox]')
   await oboxes.nth(0).check(); await oboxes.nth(1).check()
   await olivia.getByRole('button', { name: 'Compare selected (2)' }).click()
@@ -1113,6 +1132,133 @@ const SG_LABELS = {
   await check(olivia.getByRole('alert').filter({ hasText: /cannot change the products on|No PI request/ }).waitFor().then(() => true, () => false), 'ops cannot change a request that is not assigned to them')
   await alex.goto(BASE + '/admin/audit')
   await check(alex.locator('td', { hasText: new RegExp(`^Added .+ to request ${samRef} from the Product Comparison Matrix$`) }).first().waitFor().then(() => true, () => false), 'adding products is in the audit log in plain English')
+  // Every plan type is searchable, filtered by insurance / investment and by plan type (Kumar, 25 Nov 2026).
+  // A universal life product as the reader makes it from an upload (auto-read, USD, with its own facts).
+  const ulDoc = (await db.query(`insert into kb_documents (insurer, title, doc_type, effective_from, status) values ('Cedar Life', 'Cedar Indexed UL Product Summary', 'Product Summary', '2026-01-01', 'checked') returning id`)).rows[0].id
+  const ul = (await db.query(`insert into kb_products (insurer, name, product_type, status, version, verified_at, auto_read, currencies, residency, missing, facts)
+    values ('Cedar Life', 'Cedar Indexed UL', 'Universal life', 'verified', 1, now(), true, '{USD}', '{}', '{entry_age}',
+            jsonb_build_object('_ps', jsonb_build_object('doc', $1::text), 'minRate', jsonb_build_object('v', 'The minimum guaranteed crediting rate is 2.00% per annum.', 'doc', $1::text, 'page', 3),
+                               'death', jsonb_build_object('v', 'The higher of the face amount or the policy value.', 'doc', $1::text, 'page', 2))) returning id, category`, [ulDoc])).rows[0]
+  await db.query(`update kb_documents set product_id = $1 where id = $2`, [ul.id, ulDoc])
+  await check(Promise.resolve(ul.category === 'Investment'), 'a universal life product is an investment product (group follows the category)')
+  await sam.goto(BASE + '/matrix')
+  await sam.getByRole('heading', { name: 'Find products to compare' }).waitFor()
+  await sam.getByLabel('Currency').selectOption('USD')
+  await check(seen(resultRows.filter({ hasText: 'Cedar Indexed UL' })), 'a universal life product is searchable')
+  await check(seen(resultRows.filter({ hasText: 'Cedar Indexed UL' }).getByText('Universal life incl. indexed (inv)')), 'the results show its category with (inv)')
+  await sam.getByLabel('Insurance or investment').selectOption('Insurance')
+  await check(resultRows.filter({ hasText: 'Cedar Indexed UL' }).count().then((n) => n === 0), 'filtering by insurance leaves investment products out')
+  await check(sam.getByLabel('Plan type').locator('option').allTextContents().then((t) => !t.some((x) => x.endsWith('(inv)')) && t.includes('Term life (ins)')), 'the plan type list follows the insurance / investment filter')
+  await sam.getByLabel('Insurance or investment').selectOption('Investment')
+  await check(resultRows.filter({ hasText: 'Cedar Indexed UL' }).count().then((n) => n === 1), 'filtering by investment shows it')
+  await check(resultRows.filter({ hasText: '(ins)' }).count().then((n) => n === 0), 'and no insurance products')
+  await sam.getByLabel('Insurance or investment').selectOption('All')
+  await sam.getByLabel('Plan type').selectOption('Universal life')
+  await check(resultRows.filter({ hasText: /\((ins|inv)\)/ }).allTextContents().then((t) => t.length === 1 && /Cedar Indexed UL/.test(t[0])), 'the plan type filter shows only that kind')
+  await sam.getByLabel('Plan type').selectOption('All')
+  // Compare a universal life plan with a term plan: notes, "Not applicable", the universal life rows
+  await sam.getByLabel('Currency').selectOption('SGD')
+  await sam.getByLabel('Currency').selectOption('USD')
+  const mixBoxes = sam.locator('table.matrix-results tbody tr')
+  const termRow = mixBoxes.filter({ hasText: '(ins)' }).first()
+  await check(seen(termRow), 'a USD term product is listed too')
+  await mixBoxes.filter({ hasText: 'Cedar Indexed UL' }).locator('input[type=checkbox]').check()
+  await termRow.locator('input[type=checkbox]').check()
+  await sam.getByRole('button', { name: 'Compare selected (2)' }).click()
+  await sam.getByRole('heading', { name: 'Side-by-side comparison' }).waitFor()
+  await check(seen(sam.getByText(/^These products are of different kinds \(.*\)\. They work differently/)), 'comparing different kinds of plan shows a warning')
+  const minRow = sam.locator('table.compare-table tr', { hasText: 'Guaranteed minimum crediting rate' })
+  await check(seen(minRow.getByText('The minimum guaranteed crediting rate is 2.00% per annum.')), 'the universal life row shows its value')
+  await check(seen(minRow.getByText(/^Not applicable \(Term life \(ins\)\)$/)), 'and says "Not applicable" for the term plan')
+  await check(sam.locator('table.compare-table tr', { hasText: 'Hospital and surgical benefits' }).count().then((n) => n === 0), 'rows no compared product has are left out')
+  await check(seen(sam.locator('table.compare-table th', { hasText: 'Cedar Indexed UL' }).getByText('Universal life incl. indexed (inv)')), 'each column says its category')
+  await sam.screenshot({ path: SHOTS + '/29-compare-term-and-universal-life.png', fullPage: true })
+  // The Knowledge Bank lists filter by insurance / investment and by category
+  await olivia.goto(BASE + '/kb/products')
+  await olivia.getByLabel('Insurance or investment').selectOption('Investment')
+  const recRows = olivia.locator('table[aria-label="Product records"] tbody tr')
+  await recRows.filter({ hasText: 'Cedar Indexed UL' }).first().waitFor()
+  await check(recRows.allTextContents().then((t) => t.length === 1 && /Cedar Indexed UL/.test(t[0]) && /Universal life incl\. indexed \(inv\)/.test(t[0])), 'product records filter by investment')
+  await olivia.getByLabel('Insurance or investment').selectOption('Insurance')
+  await check(recRows.allTextContents().then((t) => t.length > 1 && t.every((x) => !/Cedar Indexed UL/.test(x))), 'and by insurance')
+  await olivia.goto(BASE + '/kb')
+  await olivia.getByLabel('Insurance or investment').selectOption('Investment')
+  const docRows = olivia.locator('table[aria-label="Knowledge Bank documents"] tbody tr')
+  await check(docRows.allTextContents().then((t) => t.length === 1 && /Cedar Indexed UL Product Summary/.test(t[0])), 'documents filter by the category of their product')
+  await olivia.getByLabel('Insurance or investment').selectOption('All')
+  // The product record page: the category is a list of the 12, and the facts follow it
+  await olivia.goto(BASE + '/kb/products/' + ul.id)
+  await check(olivia.getByLabel('Product category').inputValue().then((v) => v === 'Universal life'), 'the record shows its category')
+  await check(seen(olivia.getByLabel('Guaranteed minimum crediting rate', { exact: true })), 'a universal life record lists the universal life facts')
+  await check(olivia.getByLabel('Conversion option', { exact: true }).count().then((n) => n === 0), 'and not the term-only ones')
+  // The pop-ups fit a short laptop screen and a phone: the body scrolls, the buttons stay in view (Kumar, 25 Nov 2026)
+  for (const [w, h, what] of [[1280, 560, 'a short laptop screen'], [390, 700, 'a phone']]) {
+    await olivia.setViewportSize({ width: w, height: h })
+    await olivia.goto(BASE + '/kb')
+    await olivia.getByRole('button', { name: 'Upload document' }).click()
+    const upd = olivia.getByRole('dialog', { name: 'Upload document' })
+    await upd.getByLabel('File').setInputFiles(file('CIMB_Premium Financing Factsheet COF as of 2 Nov 2026 + 3rd Party Special Promo rates with a very long name indeed.pdf'))
+    await upd.getByLabel('Document type').selectOption('Product Summary')
+    await upd.getByLabel('Product name (new product record)').waitFor()
+    const box = await upd.getByRole('button', { name: 'Upload' }).boundingBox()
+    await check(Promise.resolve(!!box && box.y >= 0 && box.y + box.height <= h), `the Upload button is in view on ${what}`)
+    await check(upd.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= window.innerWidth + 1), `a long file name does not widen the pop-up on ${what}`)
+    await upd.getByLabel('Valid until (optional)').scrollIntoViewIfNeeded()
+    await check(upd.getByLabel('Valid until (optional)').isVisible(), `the lowest field can be reached on ${what}`)
+    if (w === 1280) await olivia.screenshot({ path: SHOTS + '/30-upload-short-screen.png' })
+    await upd.getByRole('button', { name: 'Cancel' }).click()
+  }
+  await olivia.setViewportSize({ width: 1280, height: 900 })
+  await sam.setViewportSize({ width: 1280, height: 560 })
+  await sam.goto(BASE + '/requests/new')
+  await sam.getByLabel('Term Product Comparison Request').check().catch(() => {})
+  if (await sam.getByRole('button', { name: 'Find and compare products' }).isEnabled().catch(() => false)) {
+    await sam.getByRole('button', { name: 'Find and compare products' }).click()
+    const mb = await sam.getByRole('button', { name: /^Compare selected/ }).boundingBox()
+    await check(Promise.resolve(!!mb && mb.y + mb.height <= 560), 'the compare pop-up keeps its buttons in view on a short screen')
+    await sam.keyboard.press('Escape')
+  }
+  await sam.setViewportSize({ width: 1280, height: 900 })
+
+  // The free AI helper on a real Product Summary (KB_REAL=folder with FWD_Future_First_Term_Product_Summary.pdf).
+  // It runs the model in this browser (first time: downloads it from Hugging Face). The FWD summary states no entry
+  // ages, so they must stay blank and the product unsearchable; nothing the AI is given may leave the page.
+  if (process.env.KB_REAL) {
+    // A real universal life summary is read as Universal life (inv) and is searchable
+    await olivia.goto(BASE + '/kb')
+    await olivia.getByRole('button', { name: 'Upload document' }).click()
+    const upu = olivia.getByRole('dialog', { name: 'Upload document' })
+    await upu.getByLabel('File').setInputFiles(process.env.KB_REAL + '/Manulife_Signature_IUL_Select_III_Product_Summary.pdf')
+    await check(upu.getByLabel('Product category').evaluate((el) => new Promise((ok) => { const t = Date.now(); const f = () => (el.value === 'Universal life' || Date.now() - t > 60000 ? ok(el.value === 'Universal life') : setTimeout(f, 300)); f() })), 'a real universal life summary is read as Universal life')
+    await upu.getByLabel('Effective from').fill('2026-01-01')
+    await upu.getByRole('button', { name: 'Upload' }).click()
+    await check(seen(olivia.getByText(/The product is in search now/)), 'and is in search straight away')
+    await check(q1(`select product_type, category, facts ? 'minRate' m from kb_products where name = 'Signature Indexed Universal Life Select (III)'`).then((r) => r[0]?.product_type === 'Universal life' && r[0].category === 'Investment' && r[0].m), 'saved as an investment product with its crediting rate')
+  }
+  if (process.env.KB_REAL && !process.env.NO_AI) {
+    await olivia.goto(BASE + '/kb')
+    await olivia.getByRole('button', { name: 'Upload document' }).click()
+    const upa = olivia.getByRole('dialog', { name: 'Upload document' })
+    await upa.getByLabel('File').setInputFiles(process.env.KB_REAL + '/FWD_Future_First_Term_Product_Summary.pdf')
+    const aiBtn = upa.getByRole('button', { name: /^Ask the free AI helper about \d+ details? the reader missed$/ })
+    await check(seen(aiBtn), 'a real Product Summary with blanks offers the free AI helper')
+    const sent = []
+    olivia.on('request', (r) => { let d = ''; try { d = r.postData() ?? '' } catch { d = '' } if (!/^http:\/\/127\.0\.0\.1/.test(r.url()) && /Future First|sum insured/i.test(d + r.url())) sent.push(r.url()) })
+    await aiBtn.click()
+    const t0 = Date.now()
+    const tick = setInterval(async () => console.log('  (AI helper:', (await upa.getByRole('status').allInnerTexts().catch(() => [])).join(' | ').slice(0, 160), ')'), 60_000)
+    await upa.getByText(/^The AI helper found nothing more|^Read: .*by the AI helper|could not run/).waitFor({ timeout: 30 * 60_000 })
+      .finally(() => clearInterval(tick)).catch(async (e) => { await olivia.screenshot({ path: SHOTS + '/28-kb-ai-helper-timeout.png', fullPage: true }); throw e })
+    console.log(`  (AI helper ran in ${Math.round((Date.now() - t0) / 1000)} s)`)
+    await check(upa.getByText(/could not run/).count().then((n) => n === 0), 'the AI helper ran in the browser')
+    await check(Promise.resolve(sent.length === 0), 'no document text was sent out of the page' + (sent.length ? ': ' + sent[0] : ''))
+    await upa.getByLabel('Effective from').fill('2026-01-01')
+    await upa.getByRole('button', { name: 'Upload' }).click()
+    await check(seen(olivia.getByText(/^Uploaded FWD Future First Term Product Summary\./)), 'the summary is uploaded after the AI helper ran')
+    const fwd = (await db.query(`select missing, auto_fields from kb_products where name = 'FWD Future First'`)).rows[0]
+    await check(Promise.resolve(!!fwd && fwd.missing.includes('entry_age') && !fwd.auto_fields.some((x) => x === 'ai:entry_age')), 'entry ages the document does not state stay blank (none filled by the AI)')
+    await olivia.screenshot({ path: SHOTS + '/28-kb-ai-helper.png', fullPage: true })
+  }
   await db.end()
 
   await check(Promise.resolve(errors.length === 0), 'no uncaught page errors' + (errors.length ? ': ' + errors[0] : ''))

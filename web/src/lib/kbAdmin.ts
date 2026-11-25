@@ -4,6 +4,7 @@
 import { supabase } from './supabase'
 import { FACT_ROWS } from './kb'
 import { fmtNum, plain } from './num.ts'
+import { groupOf, planKey } from './families.ts'
 
 export const DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Policy wording', 'Guide', 'Training material', 'Product Financing',
   'Circulars', 'Campaign', 'Regulatory', 'Others']
@@ -12,6 +13,10 @@ export const OTHERS = 'Others'
 export const DOC_TYPE_NAME_MAX = 60
 /** Types that need not come from one insurer (the insurer is optional). */
 export const NO_INSURER_TYPES = ['Training material', 'Product Financing', 'Circulars', OTHERS]
+/** Only these document types belong to a product (Kumar, 25 Nov 2026): the upload form asks for the product and its
+ *  plan type for them, and for no other type (training material, circulars, regulatory ... have no product). */
+export const PRODUCT_DOC_TYPES = ['Product Summary', 'Rate sheet', 'Brochure', 'Product Financing']
+export const hasProduct = (type: string) => PRODUCT_DOC_TYPES.includes(type)
 export const needsInsurer = (type: string) => !NO_INSURER_TYPES.includes(type)
 /** The type as people see it: the typed name for "Others". */
 export const docTypeName = (d: { doc_type: string; doc_type_name?: string | null }) =>
@@ -32,13 +37,13 @@ export interface Fact { v?: string; doc?: string; page?: number }
 export interface Rate { age: number; gender: 'Male' | 'Female'; smoker: boolean; rate: number; ci_rate?: number | null }
 /** The editable record (what kb_save_product takes, and what a draft holds). */
 export interface ProductRecord {
-  insurer: string; name: string; category: string; dpi: boolean; jurisdiction: string; currencies: string[]
+  insurer: string; name: string; product_type: string; category: string; dpi: boolean; jurisdiction: string; currencies: string[]
   entry_age_min: number | string; entry_age_max: number | string; residency: string[]
   sa_min: number | string | null; sa_max: number | string | null; has_tpd: boolean; has_ci: boolean
   facts: Record<string, Fact>; rates?: Rate[]
 }
 export interface KbProductRow extends ProductRecord {
-  id: string; product_type: string; status: 'draft' | 'check' | 'verified' | 'withdrawn'; version: number; is_sample: boolean
+  id: string; status: 'draft' | 'check' | 'verified' | 'withdrawn'; version: number; is_sample: boolean
   pending: ProductRecord | null; pending_state: 'draft' | 'check' | null; pending_by: string | null; pending_at: string | null
   pending_note: string | null; submitted_by: string | null; verified_by: string | null; verified_at: string | null
   created_by: string | null; updated_at: string
@@ -49,11 +54,15 @@ export interface HistoryRow { id: number; product_id: string; version: number; r
 /** What a record still needs before it can be found in search, in plain words. */
 export const MISSING_LABEL: Record<string, string> = { currencies: 'policy currency', entry_age: 'entry ages' }
 export const missingText = (m: string[]) => m.map((x) => MISSING_LABEL[x] ?? x).join(' and ')
+/** What a record needs before it is searchable. Entry ages are not needed (Kumar, 25 Nov 2026): a product without
+ *  them is searchable, marked "Entry ages not stated in the document". */
+export const blocking = (m: string[] | null | undefined) => (m ?? []).filter((x) => x !== 'entry_age')
 /** Why a product is not in Compare products (empty = it is). */
 export function whyNotSearchable(p: KbProductRow, usable: boolean): string {
   if (usable) return ''
   if (p.status === 'withdrawn') return 'Withdrawn'
-  if (p.missing?.length) return `Not searchable: the ${missingText(p.missing)} ${p.missing.length > 1 ? 'were' : 'was'} not found in the documents. Open the record and fill ${p.missing.length > 1 ? 'them' : 'it'} in`
+  const m = blocking(p.missing)
+  if (m.length) return `Not searchable: the ${missingText(m)} ${m.length > 1 ? 'were' : 'was'} not found in the documents. Open the record and fill ${m.length > 1 ? 'them' : 'it'} in`
   if (p.status === 'draft') return 'Not saved yet: open it and save it to put it in search'
   return 'Not searchable: a source document is out of date. Upload the new version'
 }
@@ -62,13 +71,13 @@ export function whyNotSearchable(p: KbProductRow, usable: boolean): string {
 export const FACT_FIELDS = FACT_ROWS.filter((r) => !r.key.startsWith('_'))
 
 export const blankRecord = (): ProductRecord => ({
-  insurer: '', name: '', category: 'Insurance', dpi: false, jurisdiction: 'Onshore', currencies: ['SGD'],
+  insurer: '', name: '', product_type: '', category: 'Insurance', dpi: false, jurisdiction: 'Onshore', currencies: ['SGD'],
   entry_age_min: 18, entry_age_max: 65, residency: [], sa_min: null, sa_max: null, has_tpd: false, has_ci: false, facts: {},
 })
 
 /** The checked version as an editable record. */
 export const liveRecord = (p: KbProductRow): ProductRecord => ({
-  insurer: p.insurer, name: p.name, category: p.category, dpi: p.dpi, jurisdiction: p.jurisdiction, currencies: p.currencies,
+  insurer: p.insurer, name: p.name, product_type: planKey(p.product_type), category: groupOf(p.product_type), dpi: p.dpi, jurisdiction: p.jurisdiction, currencies: p.currencies,
   entry_age_min: p.entry_age_min, entry_age_max: p.entry_age_max, residency: p.residency,
   sa_min: p.sa_min == null ? null : Number(p.sa_min), sa_max: p.sa_max == null ? null : Number(p.sa_max),
   has_tpd: p.has_tpd, has_ci: p.has_ci, facts: p.facts ?? {},
@@ -89,8 +98,8 @@ export function docState(d: KbDoc): { text: string; tone: 'ok' | 'warn' | 'bad' 
 /** Where a product record stands. */
 export function productState(p: KbProductRow, usable: boolean): { text: string; tone: 'ok' | 'warn' | 'bad' | 'grey' | 'info' | 'purple' } {
   if (p.status === 'withdrawn') return { text: 'Withdrawn', tone: 'grey' }
-  if (p.status === 'draft' && !p.missing?.length) return { text: 'Not saved yet', tone: 'info' }
-  if (!usable) return { text: p.missing?.length ? `Not searchable: no ${missingText(p.missing)}` : 'A source document is out of date', tone: 'bad' }
+  if (p.status === 'draft' && !blocking(p.missing).length) return { text: 'Not saved yet', tone: 'info' }
+  if (!usable) return { text: blocking(p.missing).length ? `Not searchable: no ${missingText(blocking(p.missing))}` : 'A source document is out of date', tone: 'bad' }
   if (p.auto_read) return { text: 'In search · auto-read, not yet reviewed', tone: 'warn' }
   return { text: 'In search', tone: 'ok' }
 }

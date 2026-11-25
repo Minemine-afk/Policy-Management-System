@@ -1,9 +1,10 @@
-// Runs the AI helper's model off the main thread (started by aiModel.ts). Uses the graphics card through WebGPU
+// Runs the AI helper's model off the main thread (started by aiModel.ts). One model for every reader that uses
+// the AI helper (PI comparison, Knowledge Bank documents): a model change in aiConfig.ts applies to all of them. Uses the graphics card through WebGPU
 // when the browser has it, else the CPU. The PI text stays in this browser: only the model and engine files are
 // downloaded (Hugging Face and jsDelivr), never uploaded to.
 import { AI_MODELS, MAX_NEW_TOKENS } from './aiConfig'
 
-type Ask = { id: number; messages: { role: string; content: string }[]; force?: { device?: string; dtype?: string; model?: string } }
+type Ask = { id: number; messages: { role: string; content: string }[]; maxTokens?: number; force?: { device?: string; dtype?: string; model?: string } }
 type Gen = (messages: Ask['messages'], opts: Record<string, unknown>) => Promise<{ generated_text: { content: string }[] }[]>
 
 let gen: Promise<Gen> | null = null
@@ -38,7 +39,7 @@ async function load(onProgress: (pct: number) => void, force: Ask['force'] = {},
 }
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
-  const { id, messages, force } = e.data
+  const { id, messages, force, maxTokens } = e.data
   try {
     gen ??= load((pct) => self.postMessage({ id, loading: pct }), force).catch((err) => {
       if (force?.device) throw err
@@ -49,14 +50,14 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
     self.postMessage({ id, thinking: true, device, model: label })
     let out
     try {
-      out = await g(messages, { max_new_tokens: MAX_NEW_TOKENS, do_sample: false })
+      out = await g(messages, { max_new_tokens: maxTokens ?? MAX_NEW_TOKENS, do_sample: false })
     } catch (err) {
       // A graphics chip that loads the model but can't run it: once more on the processor.
       if (device !== 'webgpu' || force?.device) throw err
       gen = load((pct) => self.postMessage({ id, loading: pct }), force, true)
       const g2 = await gen
       self.postMessage({ id, thinking: true, device, model: label })
-      out = await g2(messages, { max_new_tokens: MAX_NEW_TOKENS, do_sample: false })
+      out = await g2(messages, { max_new_tokens: maxTokens ?? MAX_NEW_TOKENS, do_sample: false })
     }
     self.postMessage({ id, text: out[0].generated_text.at(-1)?.content ?? '' })
   } catch (err) {

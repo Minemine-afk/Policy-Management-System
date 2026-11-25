@@ -1,6 +1,6 @@
 // One Knowledge Bank product record: its facts (each naming a document and page) and premium rates. No check step
 // (Kumar, 25 Nov 2026): saving puts it in search at once; changing it is optional. What the reader filled in is marked
-// "From document" until someone saves the record or marks it as reviewed.
+// "From document" (or "AI", when the free AI helper filled it) until someone saves the record or marks it as reviewed.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -8,7 +8,7 @@ import { nameOf, usePeople } from '../lib/people'
 import { fmtDate, fmtDateTime, says } from '../lib/options'
 import { CURRENCIES, RESIDENCIES, STANDARD_INSURERS } from '../lib/formOptions'
 import {
-  FACT_FIELDS, RATES_HEADER, blankRecord, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
+  FACT_FIELDS, RATES_HEADER, blankRecord, blocking, docTypeName, docLabel, docState, liveRecord, loadDocs, loadUsable, parseRates, productState, ratesToCsv,
   whyNotSearchable, type Fact, type HistoryRow, type KbDoc, type KbProductRow, type ProductRecord, type Rate,
 } from '../lib/kbAdmin'
 import { AmountInput, ReasonDialog } from '../components/ui'
@@ -16,6 +16,10 @@ import { DocDialog, KbHeader, type Created } from './KnowledgeHub'
 import { ratesCsv, readFile, readRates, readSummary, readableName } from '../lib/kbExtract'
 import { loadProducts } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
+import { aiAskCount, aiKeysOf, fillWithAi, type Reading } from '../lib/kbAuto'
+import { AI_MODELS } from '../lib/aiConfig'
+import { GROUPS, groupLabel, groupOf, planLabel, plansIn } from '../lib/families'
+import { rowApplies } from '../lib/kb'
 
 const HOW: Record<string, string> = { edit: 'saved', read: 'read from an upload', migrated: 'put live when checks were removed', checked: 'checked' }
 
@@ -43,6 +47,10 @@ export default function KbProduct() {
   const [reading, setReading] = useState('')
   const [fromDoc, setFromDoc] = useState<Set<string>>(new Set())   // fact keys and fields filled in by the reader
   const [readNotes, setReadNotes] = useState<string[]>([])
+  const [aiSet, setAiSet] = useState<Set<string>>(new Set())      // what the AI helper filled in
+  const [lastRead, setLastRead] = useState<Reading | null>(null)   // the last Product Summary read, for the AI helper
+  const [aiState, setAiState] = useState('')
+  useEffect(() => () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }, [])
   const [upload, setUpload] = useState<'Product Summary' | 'Rate sheet' | null>(null)
   const [products, setProducts] = useState<KbProductRow[]>([])
 
@@ -64,6 +72,7 @@ export default function KbProduct() {
       setRec({ ...base, facts: base.facts ?? {} }); setSaved(JSON.stringify({ ...base, rates: undefined }))
       setRatesText(ratesToCsv(lr)); setRatesTouched(false)
       setFromDoc(new Set(p.auto_read ? (p.auto_fields ?? []) : []))
+      setAiSet(new Set(p.auto_read ? aiKeysOf(p.auto_fields) : []))
     }
     setReady(true)
   }, [id])
@@ -111,9 +120,13 @@ export default function KbProduct() {
             keys.add(k)
           }
           for (const [k, f] of Object.entries(r.facts)) { next.facts[k] = { v: f.v, doc: docId, page: doc.kind === 'pdf' ? f.page : undefined }; keys.add(k) }
+          // The plan type the document says it is, when the record has none yet.
+          if (r.planType && !s.product_type) { next.product_type = r.planType; next.category = groupOf(r.planType); keys.add('product_type') }
           return next
         })
         setFromDoc((x) => new Set([...x, ...keys]))
+        setAiSet((x) => new Set([...x].filter((k) => !keys.has(k) && !(k === 'entry_age' && keys.has('entry_age_min')))))
+        setLastRead({ kind: 'summary', summary: r, doc })
         setReadNotes(r.notes)
         setMsg(r.filled.length
           ? `Filled in from ${name}: ${r.filled.join(', ')}. Each is marked "From document". Fill in anything missed, then save: it is in search straight away.`
@@ -134,6 +147,44 @@ export default function KbProduct() {
       setReading('')
     }
   }
+
+  /** Asks the free AI helper about what the reader left blank in the last Product Summary read. Only blank facts
+   *  are filled (nothing typed is changed); nothing is saved until Save. */
+  async function askAi() {
+    if (!lastRead) return
+    setError(''); setMsg('')
+    setAiState('Starting the free AI helper…')
+    try {
+      const r = await fillWithAi(lastRead, setAiState)
+      setLastRead(r)
+      const docId = rec.facts._ps?.doc
+      const put = new Set<string>()
+      setRec((s) => {
+        const next: ProductRecord = { ...s, facts: { ...s.facts } }
+        for (const k of r.ai ?? []) {
+          const f = r.summary!.facts[k]
+          if (f) { if (!next.facts[k]?.v?.trim()) { next.facts[k] = { v: f.v, doc: docId, page: r.doc?.kind === 'pdf' ? f.page : undefined }; put.add(k) } continue }
+          const rv = r.summary!.record
+          if (k === 'sum_assured') continue
+          if (k === 'entry_age') { next.entry_age_min = rv.entry_age_min!; next.entry_age_max = rv.entry_age_max!; put.add(k) }
+          else if (k in rv) { (next as unknown as Record<string, unknown>)[k] = (rv as Record<string, unknown>)[k]; put.add(k) }
+        }
+        const rr = r.summary!.record
+        if (put.has('tpd') && rr.has_tpd != null) next.has_tpd = rr.has_tpd
+        if ((put.has('ci') || put.has('eci')) && rr.has_ci != null) next.has_ci = rr.has_ci
+        return next
+      })
+      setAiSet((x) => new Set([...x, ...put]))
+      setMsg(put.size ? `The AI helper filled ${plain(put.size)} more detail${put.size === 1 ? '' : 's'}, marked "AI". Each was checked against the document's own words, but check them before you save.`
+        : 'The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
+    } catch (e) {
+      setError(`The AI helper could not run in this browser: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setAiState('')
+    }
+  }
+  const aiCount = aiAskCount(lastRead)
+  const aiTag = (k: string) => aiSet.has(k) && <span className="pill warn tag" title="Filled by the free AI helper from the document's own words. Check it against the document.">AI</span>
 
   // "New record from it" on the Documents tab: read that document as soon as the documents are loaded.
   const [autoRead, setAutoRead] = useState(false)
@@ -159,6 +210,7 @@ export default function KbProduct() {
   async function save() {
     setError(''); setMsg('')
     if (parsed.error) { setError(parsed.error); return }
+    if (!rec.product_type) { setError('Choose the product category (plan type)'); return }
     // A fact typed without a source names the Product Summary.
     const facts: Record<string, Fact> = {}
     for (const [k, f] of Object.entries(rec.facts)) {
@@ -193,6 +245,8 @@ export default function KbProduct() {
   const st = row ? productState(row, usable.has(row.id)) : { text: 'New record', tone: 'info' as const }
   const why = row ? whyNotSearchable(row, usable.has(row.id)) : ''
   const title = rec.name || 'New product record'
+  // The facts this plan type has (and any that hold a value); every fact while no plan type is chosen.
+  const factRows = FACT_FIELDS.filter((r) => !rec.product_type || rowApplies(r, rec.product_type) || rec.facts[r.key]?.v)
   const docSelect = (value: string | undefined, onChange: (v: string) => void, label: string, blank = 'Choose a document', elId?: string) => (
     <select id={elId} aria-label={elId ? undefined : label} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       <option value="">{blank}</option>
@@ -213,8 +267,20 @@ export default function KbProduct() {
       {why && row?.status !== 'withdrawn' && <div className="notice warn" role="status">{why}.</div>}
       {row?.auto_read && <div className="notice warn" role="status"><strong>Auto-read, not yet reviewed.</strong> The values marked "From document" were read by the system
         and are shown in Compare products as they are. Reviewing them is optional: change anything wrong and save, or mark it as reviewed.{row.read_note ? ` ${row.read_note}` : ''}</div>}
+      {row?.missing?.includes('entry_age') && <div className="notice warn" role="status"><strong>Entry ages not stated in the document.</strong> The product is
+        searchable, but the age filter skips it and Compare products says the ages are not stated. The {plain(18)} and {plain(65)} in the entry age boxes are only
+        a starting point: type the real entry ages before you save, because saving counts them as the product's ages.</div>}
       {reading && <div className="notice" role="status">{reading}</div>}
+      {aiState && <div className="notice" role="status">{aiState}</div>}
       {msg && <div className="notice ok" role="status">{msg}</div>}
+      {aiCount > 0 && !reading && !aiState && (
+        <div className="row small" style={{ gap: 8 }}>
+          <button type="button" className="btn small" onClick={askAi}
+            title={`A free, open AI model runs in this browser: the document never leaves this computer. It is asked only about what the reader missed, must quote the document for every answer, and anything it gives that is not in the document is dropped. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.small.mb / 1000, 1)}–${fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB) and keeps it.`}>
+            Ask the free AI helper about {plain(aiCount)} detail{aiCount === 1 ? '' : 's'} the reader missed</button>
+          <span className="muted">Optional. Runs in your browser, nothing is sent. Values it fills are marked "AI".</span>
+        </div>
+      )}
       {readNotes.map((n) => <div key={n} className="notice warn" role="status">{n}</div>)}
       {error && <div className="error" role="alert">{error}</div>}
 
@@ -256,22 +322,26 @@ export default function KbProduct() {
                 <datalist id="kb-ins">{insurers.map((x) => <option key={x} value={x} />)}</datalist>
               </label>
               <label className="field">Product name<input type="text" value={rec.name} onChange={(e) => set('name', e.target.value)} /></label>
-              <label className="field">Category
-                <select value={rec.category} onChange={(e) => set('category', e.target.value)}><option>Insurance</option><option>Investment</option></select>
+              <label className="field">Product category{fromDoc.has('product_type') && <span className="pill info tag">From document</span>}
+                <select value={rec.product_type} onChange={(e) => setRec((s) => ({ ...s, product_type: e.target.value, category: groupOf(e.target.value) }))}>
+                  {!rec.product_type && <option value="">Choose the plan type</option>}
+                  {GROUPS.map((g) => <optgroup key={g} label={groupLabel(g)}>{plansIn(g).map((t) => <option key={t.key} value={t.key}>{planLabel(t.key)}</option>)}</optgroup>)}
+                </select>
+                {rec.product_type && <span className="small muted">{groupLabel(groupOf(rec.product_type))} product</span>}
               </label>
               <label className="field">Onshore / offshore
                 <select value={rec.jurisdiction} onChange={(e) => set('jurisdiction', e.target.value)}><option>Onshore</option><option>Offshore</option></select>
               </label>
-              <label className="field">Entry age from (next birthday)<input type="number" min={0} max={100} value={rec.entry_age_min} onChange={(e) => set('entry_age_min', e.target.value)} /></label>
-              <label className="field">Entry age to<input type="number" min={0} max={100} value={rec.entry_age_max} onChange={(e) => set('entry_age_max', e.target.value)} /></label>
-              <label className="field">Minimum sum assured (optional)<AmountInput value={rec.sa_min ?? ''} onValue={(v) => set('sa_min', (v || null) as ProductRecord['sa_min'])} /></label>
-              <label className="field">Maximum sum assured (optional)<AmountInput value={rec.sa_max ?? ''} onValue={(v) => set('sa_max', (v || null) as ProductRecord['sa_max'])} /></label>
+              <label className="field">Entry age from (next birthday){aiTag('entry_age')}<input type="number" min={0} max={100} value={rec.entry_age_min} onChange={(e) => set('entry_age_min', e.target.value)} /></label>
+              <label className="field">Entry age to{aiTag('entry_age')}<input type="number" min={0} max={100} value={rec.entry_age_max} onChange={(e) => set('entry_age_max', e.target.value)} /></label>
+              <label className="field">Minimum sum assured (optional){aiTag('sa_min')}<AmountInput value={rec.sa_min ?? ''} onValue={(v) => set('sa_min', (v || null) as ProductRecord['sa_min'])} /></label>
+              <label className="field">Maximum sum assured (optional){aiTag('sa_max')}<AmountInput value={rec.sa_max ?? ''} onValue={(v) => set('sa_max', (v || null) as ProductRecord['sa_max'])} /></label>
             </div>
-            <fieldset className="field"><legend>Policy currencies</legend>
+            <fieldset className="field"><legend>Policy currencies{aiTag('currencies')}</legend>
               <div className="row" style={{ gap: '6px 18px' }}>{CURRENCIES.map((c) => (
                 <label key={c} className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.currencies.includes(c)} onChange={(e) => toggle('currencies', c, e.target.checked)} /> {c}</label>))}</div>
             </fieldset>
-            <fieldset className="field"><legend>Who can apply</legend>
+            <fieldset className="field"><legend>Who can apply{aiTag('residency')}</legend>
               <div className="row" style={{ gap: '6px 18px' }}>{RESIDENCIES.map((c) => (
                 <label key={c} className="row small" style={{ gap: 6 }}><input type="checkbox" checked={rec.residency.includes(c)} onChange={(e) => toggle('residency', c, e.target.checked)} /> {c}</label>))}</div>
             </fieldset>
@@ -285,18 +355,19 @@ export default function KbProduct() {
 
           <section className="card" aria-labelledby="kb-facts">
             <h3 id="kb-facts" className="eyebrow">Product facts (as Compare products shows them)</h3>
-            <p className="small muted" style={{ margin: 0 }}>Write each fact as the document says it, and name the page. Leave a fact empty when the document doesn't mention it: Compare products then shows "Not available".</p>
+            <p className="small muted" style={{ margin: 0 }}>Write each fact as the document says it, and name the page. Leave a fact empty when the document doesn't mention it: Compare products then shows "Not available".
+              {rec.product_type ? ` Only the facts a ${planLabel(rec.product_type)} plan has are listed.` : ''}</p>
             <div className="tablewrap">
               <table className="kb-facts">
                 <thead><tr><th style={{ width: '24%' }}>Fact</th><th>Value</th><th style={{ width: '26%' }}>Source</th><th style={{ width: 80 }}>Page</th></tr></thead>
                 <tbody>
-                  {FACT_FIELDS.flatMap((r, i) => {
+                  {factRows.flatMap((r, i) => {
                     const out = []
-                    if (i === 0 || FACT_FIELDS[i - 1].cat !== r.cat) { out.push(<tr key={`c-${r.cat}`} className="cat"><th colSpan={4}>{r.cat}</th></tr>) }
+                    if (i === 0 || factRows[i - 1].cat !== r.cat) { out.push(<tr key={`c-${r.cat}`} className="cat"><th colSpan={4}>{r.cat}</th></tr>) }
                     const f = rec.facts[r.key]
                     out.push(
                       <tr key={r.key}>
-                        <th scope="row">{r.label}{fromDoc.has(r.key) && <span className="pill info tag">From document</span>}</th>
+                        <th scope="row">{r.label}{aiSet.has(r.key) ? <span className="pill warn tag" title="Filled by the free AI helper from the document's own words. Check it against the document.">AI</span> : fromDoc.has(r.key) && <span className="pill info tag">From document</span>}</th>
                         <td><input type="text" aria-label={r.label} value={f?.v ?? ''} placeholder="Not available" onChange={(e) => setFact(r.key, { v: e.target.value })} /></td>
                         <td>{docSelect(f?.doc, (v) => setFact(r.key, { doc: v }), `Source for ${r.label}`, ps ? 'Product Summary' : 'Choose a document')}</td>
                         <td><input type="number" min={1} aria-label={`Page for ${r.label}`} value={f?.page ?? ''} onChange={(e) => setFact(r.key, { page: e.target.value ? Number(e.target.value) : undefined })} /></td>
@@ -334,7 +405,7 @@ export default function KbProduct() {
             <span className="small muted">{row?.status === 'withdrawn' ? 'Saved changes apply when the product is put back.' : 'Saving puts the record in Compare products straight away. No check is needed.'}</span>
             {row?.auto_read && <button className="btn" onClick={() => call('kb_mark_reviewed', { p_id: row.id }, 'Marked as reviewed. The "Auto-read, not yet reviewed" tag is gone.')} disabled={busy || dirty}>Mark as reviewed (no changes)</button>}
             {row?.status === 'verified' && <button className="linkbtn danger" onClick={() => setDialog('withdraw')} disabled={busy}>Withdraw from Compare products</button>}
-            {row && row.status !== 'verified' && !row.missing?.length && <button className="btn" onClick={() => call('kb_restore_product', { p_id: row.id }, 'Put back. It is in Compare products again.')} disabled={busy}>Put back in Compare products</button>}
+            {row && row.status !== 'verified' && !blocking(row.missing).length && <button className="btn" onClick={() => call('kb_restore_product', { p_id: row.id }, 'Put back. It is in Compare products again.')} disabled={busy}>Put back in Compare products</button>}
             {row && <button className="linkbtn danger" onClick={() => setDialog('delete')} disabled={busy}>Delete this product record</button>}
           </section>
 
@@ -370,7 +441,7 @@ export default function KbProduct() {
           <div className="card dialog" role="dialog" aria-modal="true" aria-label="Delete this product record" style={{ maxWidth: 480 }}>
             <h2>Delete {row!.name}?</h2>
             <p className="small">The record, its rates and history are deleted and it leaves Compare products. Its documents stay in the Knowledge Bank; PI requests keep the product's name.</p>
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
+            <div className="row dialog-foot" style={{ justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setDialog(null)}>Cancel</button>
               <button className="btn danger" onClick={() => call('kb_delete_product', { p_id: row!.id }, '')}>Delete</button>
             </div>

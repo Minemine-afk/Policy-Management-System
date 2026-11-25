@@ -10,6 +10,7 @@ import {
   STANDARD_INSURERS, fmtMoney, vipName,
 } from '../lib/formOptions'
 import { loadKb, productLabel, type Kb, type Needs } from '../lib/kb'
+import { planLabel } from '../lib/families'
 import type { PiRequest, RequestDocument } from '../lib/types'
 import { AmountInput, Seg } from '../components/ui'
 import Files from '../components/Files'
@@ -222,7 +223,7 @@ export default function RequestForm() {
     currency: f.currency || 'SGD',
     mode: f.amount_basis === 'premium' ? 'budget' : 'coverage',
     amount: num(f.amount) || 0,
-    insurer: 'All', category: 'All', jurisdiction: 'All',
+    insurer: 'All', category: 'All', family: 'All', jurisdiction: 'All',
     gender: f.gender || 'Male', smoker: !!f.smoker, ci: f.ci_benefit,
   })
 
@@ -315,7 +316,7 @@ export default function RequestForm() {
     <select id={`f-${k}`} value={f[k]} aria-invalid={!!errors[k]} onChange={(e) => set(k, e.target.value)}>
       <option value="">{k === 'compare_kb_2' ? 'None' : 'Select'}</option>
       {!kbOk(f[k]) && <option value={f[k]}>{nameOf(f[k])}</option>}
-      {kb.products.filter((p) => !others.includes(p.id)).map((p) => <option key={p.id} value={p.id}>{productLabel(p)}</option>)}
+      {kb.products.filter((p) => !others.includes(p.id)).map((p) => <option key={p.id} value={p.id}>{productLabel(p)} · {planLabel(p.product_type)}</option>)}
     </select>
   )
   const yesNo = [{ value: false, label: 'No' }, { value: true, label: 'Yes' }]
@@ -399,7 +400,7 @@ export default function RequestForm() {
               <option value="">Select</option>
               {insurers.map((o) => <option key={o} value={o}>{o}</option>)}
             </select> })}
-          {F({ k: 'product', n: 9, label: 'Product', hint: f.insurer && !plans.length && !f.plan_kb_id ? 'No checked plans for this insurer in the Knowledge Bank yet. Choose "Other" and type the plan name.' : 'Only this insurer\'s term plans', children: <>
+          {F({ k: 'product', n: 9, label: 'Product', hint: f.insurer && !plans.length && !f.plan_kb_id ? 'No checked plans for this insurer in the Knowledge Bank yet. Choose "Other" and type the plan name.' : 'This insurer\'s Knowledge Bank products (every product category)', children: <>
             <select id="f-product" value={f.other_plan ? OTHER : f.plan_kb_id} disabled={!f.insurer} aria-invalid={!!errors.product}
               onChange={(e) => {
                 const v = e.target.value
@@ -409,7 +410,7 @@ export default function RequestForm() {
               }}>
               <option value="">{f.insurer ? 'Select' : 'Choose the insurer first'}</option>
               {!kbOk(f.plan_kb_id) && <option value={f.plan_kb_id}>{nameOf(f.plan_kb_id)}</option>}
-              {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {plans.map((p) => <option key={p.id} value={p.id}>{p.name} · {planLabel(p.product_type)}</option>)}
               <option value={OTHER}>{OTHER_PLAN}</option>
             </select>
             {f.other_plan && <input type="text" aria-label="Plan name" placeholder="Plan name" maxLength={160} value={f.plan_name}
@@ -440,7 +441,7 @@ export default function RequestForm() {
             <input type="checkbox" checked={f.compare_term} onChange={(e) => { set('compare_term', e.target.checked); setNotice('') }} />
             Term Product Comparison Request
           </label>
-          <span className="small muted">Optional. Compare 2 or 3 term plans from the Knowledge Bank. Ops send back a PI for each.</span>
+          <span className="small muted">Optional. Compare 2 or 3 products from the Knowledge Bank (any product category). Ops send back a PI for each.</span>
           {f.compare_term && <>
             <div className="row">
               <button type="button" className="btn primary" onClick={() => { setMatrix(true); setNotice('') }} disabled={!kb.products.length}>
