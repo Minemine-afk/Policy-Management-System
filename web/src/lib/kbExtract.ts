@@ -204,10 +204,10 @@ export function planKind(doc: ReadDoc): string {
 /** Labels that start a fact in a Product Summary (at the start of a line or a table cell). First match wins. */
 export const FACT_RULES: { key: string; re: RegExp }[] = [
   { key: 'uw', re: /^(?:type of )?underwriting(?: requirements?| type)?\b/i },
-  { key: 'premTerm', re: /^(?:premium (?:payment |paying )?term|premium payment (?:period|duration)|premiums? (?:are )?payable (?:for|until))\b/i },
+  { key: 'premTerm', re: /^(?:premium (?:payment |paying )?term|premium payment options?|premium payment (?:period|duration)|premiums? (?:are )?payable (?:for|until))\b/i },
   { key: 'guaranteed', re: /^(?:are (?:the )?premium rates? guaranteed\??|premium rates?(?: guarantee)?|guaranteed premiums?|premiums? guarantee)\b/i },
   { key: 'modes', re: /^(?:(?:premium )?payment (?:modes?|frequenc(?:y|ies))|premium (?:modes?|frequenc(?:y|ies))|modes? of payment)\b/i },
-  { key: 'coverTo', re: /^(?:choice of (?:coverage|policy) terms?|(?:coverage|policy) term options?|policy term|coverage term|cover(?:age)? (?:until|up to|period)|term of (?:cover|policy)|expiry age|maturity age)\b/i },
+  { key: 'coverTo', re: /^(?:maturity date|choice of (?:coverage|policy) terms?|(?:coverage|policy) term options?|policy term|coverage term|cover(?:age)? (?:until|up to|period)|term of (?:cover|policy)|expiry age|maturity age)\b/i },
   { key: 'eci', re: /^(?:early(?:[- ]stage)? critical illness|multi[- ]?stage critical illness|eci)\b/i },
   { key: 'ci', re: /^(?:critical illness|dread disease|ci)(?: benefit| cover| rider)?\b/i },
   { key: 'tpd', re: /^(?:total (?:and|&) permanent disability|tpd)(?: benefit| cover)?\b/i },
@@ -232,8 +232,8 @@ export const FACT_RULES: { key: string; re: RegExp }[] = [
   { key: 'paBen', re: /^(?:accidental medical (?:expenses?|reimbursement)|medical expenses? (?:due to|from) (?:an )?accident|fractures?(?: benefit)?)\b/i },
   { key: 'income', re: /^(?:monthly (?:disability )?(?:income )?benefit|disability income benefit)\b/i },
   { key: 'dist', re: /^(?:total )?distribution cost/i },
-  { key: 'fees', re: /^(?:other )?(?:fees(?: and charges)?|charges)\b/i },
-  { key: 'freelook', re: /^free[- ]?look(?: period)?\b/i },
+  { key: 'fees', re: /^(?:(?:other )?(?:fees(?: and charges)?|charges)|premium charges?)\b/i },
+  { key: 'freelook', re: /^(?:free[- ]?look(?: period)?|right to cancel(?: the policy)?|cancellation rights?|cooling[- ]off(?: period)?)\b/i },
   { key: 'grace', re: /^grace period\b/i },
   { key: 'reinstate', re: /^reinstate(?:ment)?\b/i },
   { key: 'excl', re: /^(?:main |key |general )?exclusions?\b/i },
@@ -284,16 +284,31 @@ const joinText = (a: string, b: string) => (!a ? b : /[A-Za-z]-$/.test(a) && /^[
  *  only when it stands alone (a heading or a table cell) or is followed by a colon, so words in the middle of
  *  a paragraph ("contact the insurer directly") are not read as labels. A value that wraps onto the next lines
  *  (a sentence that has not ended, or a list after "...:") is read on to its end. */
-function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
+function find(lines: Line[], re: RegExp, used: Set<number>, ok?: (h: Hit) => boolean): Hit | null {
   for (let i = 0; i < lines.length; i++) {
     if (used.has(i)) continue
     const raw = rawPieces(lines[i])
     for (let j = 0; j < raw.length; j++) {
-      const part = clean(raw[j])
-      const m = part.match(re)
+      let part = clean(raw[j])
+      let m = part.match(re)
+      // A table row whose label wraps onto the next line, under itself: "Right to cancel | You have the right ..." then
+      // "the policy", or "Premium payment | ..." then "options". The two halves are read as one label.
+      let wrap: string[] | null = null
+      const next = lines[i + 1]
+      if (j === 0 && raw.length === 2 && next && next.page === lines[i].page && !used.has(i + 1) && part.length <= 30 && !/[.:;?]$/.test(part)) {
+        const np = rawPieces(next)
+        const tail = clean(np[0] ?? '')
+        if (tail && tail.length <= 30 && np.length <= 2 && /^[A-Za-z(][A-Za-z ()\-/&]*$/.test(tail) && tail.split(' ').length <= 3) {
+          const both = `${part} ${tail}`
+          const m2 = both.match(re)
+          // Only when the whole of both halves is the label, and it reads better than the first half alone.
+          if (m2 && m2[0].length > part.length && /^\s*(?:benefits?|\(s\)|\([^)]{1,40}\))?\s*$/i.test(both.slice(m2[0].length)) && (!m || m[0].length < part.length)) { part = both; m = m2; wrap = np.slice(1).map(clean) }
+        }
+      }
       if (!m) continue
       const after = part.slice(m[0].length)
-      let alone = /^\s*(?:benefits?|\(s\)|\([^)]{1,40}\))?\s*[:?]?\s*$/i.test(after)
+      // "Terminal Illness (“TI”) Benefit": a short name in brackets, then "Benefit", still ends the label.
+      let alone = /^\s*(?:\([^)]{1,40}\)\s*)?(?:benefits?|\(s\))?\s*[:?]?\s*$/i.test(after)
       // A question heading, maybe running onto the next line: "Can I increase the sum insured ... a / life event?"
       let skip = 0
       if (!alone && QUESTION.test(part) && j === raw.length - 1) {
@@ -312,6 +327,7 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
       let list = false
       const mine = [i]
       for (let s = 0; s < skip; s++) mine.push(i + 1 + s)
+      if (wrap) { if (wrap.length) rest = joinText(rest, wrap.join(' ')); mine.push(k); k++ }
       while (!rest && k < lines.length && k <= i + 3 + skip && lines[k].page === lines[i].page) {
         const t = lines[k].text.trim()
         if (isLabel(lines[k])) break
@@ -327,7 +343,7 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
       if (!list && /^[a-z.,;)&/]/.test(rest)) continue
       if (list) rest = rest.replace(/^of\s+/i, '')
       // Read on while the sentence (or the list) goes on.
-      let bullets = false
+      let bullets = false, numberedList = false
       for (let n = 0; n < 6 && k < lines.length && lines[k].page === lines[i].page && rest.length < 240; n++, k++) {
         const t = lines[k].text.trim(), ps = rawPieces(lines[k])
         // "(Applicable to Policy Term of 5 years and 10 years only)" then "What is it?  This option allows ...".
@@ -336,6 +352,14 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
         // "... from the latest of the Issue Date ... and the last" / "Reinstatement Date (if any), then ...": a sentence cut
         // off after "the" or "and" goes on, even when the next line starts with a word that is also a label.
         const numGoesOn = (WANTS_NUMBER.test(rest) && /^\d{1,3}(?:\.\d+)?[.,;]?(?:\s|$)/.test(t)) || (!list && DANGLING.test(rest) && ps.length === 1 && !HEADING.test(t) && !BULLET.test(t) && !ITEM.test(t))
+        // "... offers two premium payment options:" then "1. Single Premium ..." / "2. Planned premiums ...": a numbered
+        // list right after a colon is the value, not the next headings.
+        const numbered = /^\d{1,2}[.)]\s+\S/.test(t) && ps.length === 1
+        if (!list && !bullets && numbered && (/:$/.test(rest) || numberedList)) { numberedList = true; rest = joinText(rest, t); mine.push(k); continue }
+        if (numberedList) {
+          if (ps.length === 1 && /^[a-z(]/.test(t)) { rest = joinText(rest, t); mine.push(k); continue }
+          break
+        }
         if (!numGoesOn && (isLabel(lines[k]) || HEADING.test(t) || SUBHEAD.test(t) || QUESTION.test(t) && /\?/.test(t))) break
         if (numGoesOn) { rest = joinText(rest, t); mine.push(k); continue }
         // "The Death Benefit is the higher of:" then bullets: the bullets are the value.
@@ -364,6 +388,8 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
       }
       // A long paragraph: keep its first sentence or two.
       if (rest.length > 240) rest = rest.slice(0, 240).replace(/\s+\S*$/, '') + '…'
+      // A hit the caller finds too thin (a label in a diagram): the search goes on to the next place it is written.
+      if (ok && !ok({ value: rest, page: lines[i].page })) continue
       for (const x of mine) used.add(x)
       return { value: rest, page: lines[i].page }
     }
@@ -372,7 +398,7 @@ function find(lines: Line[], re: RegExp, used: Set<number>): Hit | null {
 }
 
 /** The document as running text, one paragraph per bullet or list item, for the facts said in a sentence. */
-function sentencesOf(lines: Line[]): { s: string; page: number }[] {
+export function sentencesOf(lines: Line[]): { s: string; page: number }[] {
   const out: { s: string; page: number }[] = []
   let cur = '', page = 0
   const flush = () => { if (cur) for (const s of cur.split(/(?<=[.!?])\s+(?=[A-Z(])/)) out.push({ s: s.trim(), page }); cur = '' }
@@ -398,6 +424,14 @@ const SENTENCE_RULES: { key: string; re: RegExp }[] = [
   { key: 'modes', re: /\b(?:premiums?\b[^.]{0,40}\b(?:pay|paid|payable)|(?:choose|choice|option) to pay)\b[^.]{0,30}\b(?:monthly|quarterly|half[- ]yearly|yearly|annually)\b[^.]*\b(?:monthly|quarterly|half[- ]yearly|yearly|annually)\b/i },
   { key: 'cash', re: /\b(?:no|not have any|does not have(?: any)?)\s+cash (?:surrender )?values?\b/i },
   { key: 'minRate', re: /\b(?:guaranteed minimum|minimum guaranteed) crediting (?:interest )?rate\b[^.]{0,20}?\b(?:is|of)\s+\d+(?:\.\d+)?\s*%/i },
+  // "... available without medical underwriting.", "No medical examination is required."
+  { key: 'uw', re: /\b(?:available|offered|issued) without (?:any )?(?:medical|full) (?:underwriting|examinations?)\b|\bno medical (?:underwriting|examinations?) (?:is|are) (?:required|needed)\b/i },
+  // "Premium payments are flexible, subject to the premium requirements and limit."
+  { key: 'premTerm', re: /\bpremium payments? (?:are|is) flexible\b/i },
+  // "You will have a 61-day Grace Period during which ...", "A grace period of 30 days is given ..."
+  { key: 'grace', re: /\b(?:\d{1,3}|thirty|sixty)[- ]days? grace period\b|\bgrace period (?:of|is) (?:\d{1,3}|thirty|sixty)(?: \(\d+\))? (?:calendar )?days\b/i },
+  // "You may return the policy to us ... within 14 days after you receive the policy."
+  { key: 'freelook', re: /\b(?:cancel|return) (?:the|this|your) policy\b[^.]{0,90}\bwithin (?:\d{1,2}|fourteen|twenty[- ]one|thirty) days\b/i },
   { key: 'account', re: /^(?:the |your )?(?:policy|account) value (?:at any time )?is the sum of\b/i },
 ]
 
@@ -627,18 +661,24 @@ export function readSummary(doc: ReadDoc): SummaryResult {
   // Facts. A fact found in a rider's own summary (later in the same file) says which rider it is from.
   const from = riderLabel(cdoc, record.name ?? '')
   for (const r of FACT_RULES) {
-    const h = find(lines, r.re, used)
-    // The other plan types' labels also turn up in diagrams ("Account Value" / "Less  Less"): their value must read
-    // as a phrase (three words or more) or hold a number.
-    if (h && OTHER_PLAN_FACTS.has(r.key) && !(h.value.match(/[A-Za-z]{2,}/g)?.length! >= 3 || /\d/.test(h.value))) continue
+    // The other plan types' labels also turn up in diagrams ("Account Value" / "Less  Less", "Surrender Charge" /
+    // "(decreasing)"): their value must read as a phrase (three words or more) or hold a number, else the next
+    // place the label is written is tried.
+    const phrase = (x: Hit) => (x.value.match(/[A-Za-z]{2,}/g)?.length ?? 0) >= 3 || /\d/.test(x.value)
+    // "Maturity date" is also written in diagrams of index segments: as a fact it says how long the cover lasts.
+    const lasts = (x: Hit) => /\b(?:age|years?|lifetime|whole (?:of )?life|no maturity|terms?)\b/i.test(x.value) && !/^\(?[\d,.]+\)/.test(x.value)
+    const h = find(lines, r.re, used, r.key === 'coverTo' ? lasts : OTHER_PLAN_FACTS.has(r.key) || r.key === 'fees' ? phrase : undefined)
     if (h) facts[r.key] = { v: from(h.page, h.value), page: h.page }
   }
   for (const r of SENTENCE_RULES) {
     // A rate given as a definition ("Minimum interest rate used to ... shown in the Policy Schedule") gives way to a
     // sentence that states it ("The Guaranteed Minimum Crediting Rate is 2.00%").
-    if (facts[r.key] && !(r.key === 'minRate' && !/\d/.test(facts[r.key].v))) continue
+    // Same for a free-look or grace period whose label gives no number of days ("You have the right to cancel the
+    // policy within the Free-look Period") when a sentence gives it ("... within 14 days after you receive the policy").
+    if (facts[r.key] && !(['minRate', 'freelook', 'grace'].includes(r.key) && !/\d/.test(facts[r.key].v))) continue
     const h = sentences.find((x) => r.re.test(x.s) && x.s.length <= 300)
-    if (h) facts[r.key] = { v: from(h.page, h.s), page: h.page }
+    // The tail of a wrapped table label can sit in front of the sentence ("the policy  You may return ..."): left out.
+    if (h) facts[r.key] = { v: from(h.page, h.s.replace(/^[a-z][a-z ]{0,30}\s(?=[A-Z][a-z])/, '')), page: h.page }
   }
   const yes = (k: string) => !!facts[k] && !isNegative(facts[k].v)
   if (facts.tpd) record.has_tpd = yes('tpd')

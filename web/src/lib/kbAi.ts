@@ -13,7 +13,7 @@
 // Rate sheets are not given to the AI: a rate that is written in the sheet can still be put in the wrong age, gender
 // or smoker cell, and no check against the text can catch that. The rate reader's table rules stay alone there.
 // This file holds the prompts and the checks, shared by the browser and the Node tests (tests/kb-extract).
-import { amounts, currenciesIn, ints, isNegative, residencyOf, riderLabel, summaryPages, type ReadDoc, type SummaryResult } from './kbExtract.ts'
+import { amounts, currenciesIn, ints, isNegative, residencyOf, riderLabel, sentencesOf, summaryPages, type ReadDoc, type SummaryResult } from './kbExtract.ts'
 import type { ProductRecord } from './kbAdmin'
 import { parseAnswer } from './piAi.ts'
 import { plain } from './num.ts'
@@ -28,12 +28,12 @@ type RecKey = (typeof KB_AI_RECORD)[number]
  *  Exclusions, special provisions, fees, investment and "important considerations" are left out: their text is
  *  too open for a check to tell a right quote from a wrong one. */
 export const KB_AI_FACTS: { key: string; ask: string; find: RegExp; must: RegExp[]; not?: RegExp }[] = [
-  { key: 'uw', ask: 'the underwriting (medical checks, health questions, guaranteed acceptance)', find: /underwrit|medical (?:exam|evidence|check)|health (?:declaration|question)|guaranteed acceptance/i, must: [/underwrit|medical (?:exam|evidence|check|question)|health (?:declaration|question)|guaranteed acceptance|simplified issue/i], not: /spouse|convert|conversion|renew|increase the sum|without any underwriting|(?:may|can|will) (?:vary|change|differ)|depending on (?:our )?underwriting/i },
+  { key: 'uw', ask: 'the underwriting (medical checks, health questions, guaranteed acceptance)', find: /underwrit|medical (?:exam|evidence|check)|health (?:declaration|question)|guaranteed acceptance/i, must: [/underwrit|medical (?:exam|evidence|check|question)|health (?:declaration|question)|guaranteed acceptance|simplified issue/i], not: /spouse|convert|conversion|renew|increase the sum|without any underwriting|(?:may|can|will) (?:vary|change|differ)|depending on (?:our )?underwriting|underwritten by|underwriter|financial strength|rating/i },
   { key: 'premTerm', ask: 'how long premiums are paid (premium payment term)', find: /premium/i, must: [/premium/i, /payable|pay(?:ing|ment)? |term|until|years?|age/i], not: /grace|free[- ]?look|renewal|discount/i },
   { key: 'guaranteed', ask: 'whether the premium rates are guaranteed or can change', find: /guarantee|reviewable|revis/i, must: [/guaranteed|not guaranteed|reviewable|may (?:be )?(?:change|revise|review)|can (?:change|be revised)/i, /premium|rate/i], not: /conversion|convert|insurability|renew/i },
   { key: 'modes', ask: 'how often premiums can be paid (monthly, quarterly, half-yearly, yearly)', find: /monthly|quarterly|half[- ]yearly|semi[- ]annual|annually|yearly|payment (?:mode|frequenc)/i, must: [/monthly|quarterly|half[- ]yearly|semi[- ]annual|annual(?:ly)?|yearly/i, /pay|premium|mode|frequenc/i], not: /grace|for a period of|diagnos/i },
   { key: 'coverTo', ask: 'how long the cover lasts: the policy terms or the age cover ends', find: /policy term|coverage term|cover(?:age)? (?:until|up to|period)|expir|matur|to age|up to age/i, must: [/policy term|coverage (?:term|period)|cover(?:age)? (?:until|up to|ends)|expiry|maturity|term of/i, /\d/], not: /spouse|renew|convert|conversion|rider|grace|days|increase|premium/i },
-  { key: 'eci', ask: 'the early or multi-stage critical illness benefit', find: /early|multi[- ]?stage|intermediate/i, must: [/early|multi[- ]?stage|intermediate/i, /critical illness|stage/i, /pay|benefit|cover|sum/i] },
+  { key: 'eci', ask: 'the early or multi-stage critical illness benefit', find: /early|multi[- ]?stage|intermediate/i, must: [/\bearly(?:[- ]stage| and intermediate| critical| ci\b)|multi[- ]?stage|intermediate[- ]stage/i, /critical illness|stage/i, /pay|benefit|cover|sum/i] },
   { key: 'ci', ask: 'the critical illness benefit', find: /critical illness|dread disease/i, must: [/critical illness|dread disease|\bci\b/i, /pay|benefit|cover|sum (?:assured|insured)/i], not: /early|multi[- ]?stage|intermediate|exclu|definition/i },
   { key: 'tpd', ask: 'the total and permanent disability (TPD) benefit', find: /disab|\btpd\b/i, must: [/disab|\btpd\b/i, /pay|benefit|cover|sum (?:assured|insured)/i] },
   { key: 'ti', ask: 'the terminal illness benefit', find: /terminal illness/i, must: [/terminal illness|\bti\b/i, /pay|benefit|cover|sum (?:assured|insured)/i] },
@@ -122,6 +122,144 @@ export function kbQuestions(doc: ReadDoc, blank: { record: string[]; facts: stri
   return out
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Picking a line (26 Nov 2026). On real Product Summaries in formats the reader does not know, a small model asked
+// to copy a quote mostly echoed the question or copied a line about something else (2 fills of 50 asked on the five
+// real Singapore summaries). So for the facts, the rules now do the copying: they list the document's own sentences
+// that could state the fact (each already passes that fact's checks), and the model only picks one by its number, or
+// 0 for none. It is asked twice, with the lines in opposite order: only a line picked both times is used.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The most lines a pick question shows, and the fewest (made up with lines about something else). */
+const PICK_MAX = 6, PICK_MIN = 3
+/** One fact to pick a line for. `options`: the lines shown; `value`: what is kept when that line is picked (null for
+ *  a line about something else, put in so that a model that always picks something is caught). */
+export interface KbPick { key: string; options: { s: string; page: number; value: string | null }[]; ask: [KbQuestion['messages'], KbQuestion['messages']] }
+
+const PICK_SYSTEM = 'You check lines taken from an insurance Product Summary. You answer with one number only.'
+const pickMessages = (ask: string, lines: string[]): KbQuestion['messages'] => [{ role: 'system', content: PICK_SYSTEM }, {
+  role: 'user',
+  content: `Lines from the document:\n${lines.map((l, i) => `${plain(i + 1)}. ${l}`).join('\n')}\n\nWhich one line states ${ask} of this policy? A line that only mentions the words, defines a term, or is about something else does not count.\nAnswer with the number of the line, or 0 if no line states it.`,
+}]
+
+const tidy = (q: string) => q.replace(/^[\s•\-–*·]+/, '').replace(/^\(?(?:\d{1,2}|[a-z]|[ivx]{1,4})[.)]\s+/i, '').trim()
+
+/** The document's sentences and table rows that could state each blank fact, best first, for the model to pick from. */
+export function kbPicks(doc: ReadDoc, blank: { facts: string[] }, known: SummaryResult): KbPick[] {
+  const sents = sentencesOf(summaryPages(doc).flatMap((p) => p.lines)).map((x) => {
+    // A table row comes as its cells two spaces apart: the first is the label, the rest the value.
+    const cells = x.s.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+    return cells.length >= 2 ? { page: x.page, s: `${cells[0].replace(/\s*:$/, '')}: ${cells.slice(1).join(' ')}`, value: cells.slice(1).join(' '), row: true }
+      : { page: x.page, s: tidy(x.s), value: tidy(x.s), row: false }
+  })
+  const usedQuotes = Object.values(known.facts).map((f) => flat(f.v.replace(/^Rider \([^)]*\):\s*/, '').replace(/…$/, '')))
+  const clash = (q: string) => usedQuotes.some((u) => u.length >= 20 && (u.includes(q) || q.includes(u)))
+  // Whole sentences only: one that starts in small letters is the tail of a list item or of a sentence cut by a page.
+  const whole = (x: { s: string; row: boolean }) => x.row ? x.s.length >= 8 && x.s.length <= 300 : x.s.length >= 12 && x.s.length <= 400 && /^["“(]?[A-Z0-9]/.test(x.s) && !/[,;:(]$|\b(?:and|or|the|of|to)$/i.test(x.s)
+  const out: KbPick[] = []
+  for (const rule of KB_AI_FACTS) {
+    if (!blank.facts.includes(rule.key)) continue
+    const seen = new Set<string>()
+    const cands = sents.filter((x) => {
+      const f = flat(x.s)
+      if (!whole(x) || /\?\s*$/.test(x.s) || seen.has(f)) return false
+      if (!rule.must.every((re) => re.test(x.s)) || (rule.not && rule.not.test(x.s)) || clash(flat(x.value))) return false
+      seen.add(f)
+      return true
+    })
+    if (!cands.length) continue
+    const score = (x: { s: string; row: boolean }) => (rule.find.test(x.s.slice(0, 40)) ? 3 : 0) + (x.row ? 1 : 0) + (/\d/.test(x.s) ? 1 : 0) + (/\b(?:means|refers to|is defined as|definition)\b/i.test(x.s) ? -2 : 0) + (x.s.length > 300 ? -1 : 0)
+    const options: KbPick['options'] = cands.map((x, i) => ({ x, i, n: score(x) })).sort((a, b) => b.n - a.n || a.i - b.i).slice(0, PICK_MAX).map((c) => ({ s: c.x.s, page: c.x.page, value: c.x.value }))
+    // With one or two lines to choose from, lines about something else are added: picking one of those drops the fact.
+    if (options.length < PICK_MIN) {
+      const pool = sents.filter((x) => !x.row && whole(x) && x.s.length >= 40 && x.s.length <= 220 && !rule.find.test(x.s) && !rule.must.some((re) => re.test(x.s)))
+      for (let k = 1; options.length < PICK_MIN && k <= 2 && pool.length >= 3; k++) {
+        const d = pool[Math.floor((pool.length * k) / 3)]
+        if (!options.some((o) => o.s === d.s)) options.splice(k === 1 ? 0 : options.length, 0, { s: d.s, page: d.page, value: null })
+      }
+    }
+    const lines = options.map((o) => o.s)
+    out.push({ key: rule.key, options, ask: [pickMessages(rule.ask, lines), pickMessages(rule.ask, [...lines].reverse())] })
+  }
+  return out
+}
+
+/** The number a pick answer gives ("3", "Line 3.", "0"), or null when it is not a number in range. */
+export function pickNumber(text: string, n: number): number | null {
+  const m = text.trim().match(/^(?:line\s*)?(\d{1,2})\b/i)
+  const v = m ? Number(m[1]) : NaN
+  return Number.isInteger(v) && v >= 0 && v <= n ? v : null
+}
+
+/** The facts picked: a line counts only when both askings (lines in opposite order) point to it. */
+export function checkKbPicks(doc: ReadDoc, picks: KbPick[], answers: [string, string][], known: SummaryResult): KbAiFill {
+  const fill: KbAiFill = { record: {}, facts: {}, filled: [], dropped: [] }
+  const label = riderLabel({ ...doc, pages: summaryPages(doc) }, known.record.name ?? '')
+  picks.forEach((p, i) => {
+    const n = p.options.length
+    const a = pickNumber(answers[i]?.[0] ?? '', n), b = pickNumber(answers[i]?.[1] ?? '', n)
+    if (a === 0 && b === 0) return
+    // The second asking shows the lines in reverse order.
+    if (a === null || b === null || a === 0 || b === 0 || a !== n + 1 - b) { fill.dropped.push(p.key); return }
+    const o = p.options[a - 1]
+    if (o.value === null) { fill.dropped.push(p.key); return }
+    fill.facts[p.key] = { v: label(o.page, o.value), page: o.page }
+  })
+  const byQuote = new Map<string, string[]>()
+  for (const [k, f] of Object.entries(fill.facts)) byQuote.set(flat(f.v), [...(byQuote.get(flat(f.v)) ?? []), k])
+  for (const ks of byQuote.values()) if (ks.length > 1) for (const k of ks) { delete fill.facts[k]; fill.dropped.push(k) }
+  const n = Object.keys(fill.facts).length
+  if (n) fill.filled.push(`${plain(n)} fact${n === 1 ? '' : 's'}`)
+  return fill
+}
+
+/** What the AI helper would be asked about for one document (record fields and fact keys). */
+export function kbAskKeys(doc: ReadDoc, blank: { record: string[]; facts: string[] }, known: SummaryResult): string[] {
+  return [...new Set([...kbQuestions(doc, blank).flatMap((q) => q.keys), ...kbPicks(doc, blank, known).map((p) => p.key)])]
+}
+
+/** Asks the model everything for one document and keeps what passes the checks. `ask` runs one question and gives
+ *  the model's text. In order: the record's fields (one question, it quotes the sentence); each blank fact as a pick
+ *  (two short questions); then the facts still blank the older way, a few at a time, each answer an exact quote
+ *  (that way reads "label, value" tables better, picking reads written-out sentences better). */
+export async function askKbAi(doc: ReadDoc, blank: { record: string[]; facts: string[] }, known: SummaryResult,
+  ask: (messages: KbQuestion['messages'], maxTokens: number, step: number, steps: number) => Promise<string>,
+  log?: (line: string) => void): Promise<KbAiFill & { asked: string[] }> {
+  const record = kbQuestions(doc, { record: blank.record, facts: [] })
+  const picks = kbPicks(doc, blank, known)
+  const quoteQs = (left: string[]) => kbQuestions(doc, { record: [], facts: left })
+  // The number of steps is only known after the picks: say the most it can be.
+  let steps = record.length + picks.length * 2 + quoteQs(blank.facts).length, step = 0
+  const run = (m: KbQuestion['messages'], n: number) => ask(m, n, ++step, steps)
+  const recText = record.length ? await run(record[0].messages, record[0].maxTokens) : ''
+  if (record.length) log?.(`[${record[0].keys.join(',')}] ${recText.replace(/\s+/g, ' ').slice(0, 900)}`)
+  const rec = record.length ? checkKbAnswers(doc, record, [parseAnswer(recText)], known) : null
+  const answers: [string, string][] = []
+  for (const p of picks) {
+    const a = await run(p.ask[0], 4)
+    // "None of them" the first time: the second asking can't change that.
+    const b = pickNumber(a, p.options.length) === 0 ? (steps--, '0') : await run(p.ask[1], 4)
+    answers.push([a, b])
+    log?.(`[${p.key}] picked ${JSON.stringify([a, b])} of ${plain(p.options.length)}: ${p.options.map((o, j) => `\n     ${plain(j + 1)}. ${o.value === null ? '(other) ' : ''}p${plain(o.page)} ${o.s.slice(0, 200)}`).join('')}`)
+  }
+  const picked = checkKbPicks(doc, picks, answers, known)
+  const left = blank.facts.filter((k) => !picked.facts[k])
+  const qs = quoteQs(left)
+  steps = step + qs.length
+  const texts: string[] = []
+  for (const q of qs) { texts.push(await run(q.messages, q.maxTokens)); log?.(`[${q.keys.join(',')}] ${texts.at(-1)!.replace(/\s+/g, ' ').slice(0, 900)}`) }
+  // A quote may not repeat a line already picked for another fact.
+  const quoted = checkKbAnswers(doc, qs, texts.map(parseAnswer), { ...known, facts: { ...known.facts, ...picked.facts } })
+  const facts = { ...quoted.facts, ...picked.facts }
+  const n = Object.keys(facts).length
+  return {
+    record: rec?.record ?? {}, facts,
+    filled: [...(rec?.filled ?? []), ...(n ? [`${plain(n)} fact${n === 1 ? '' : 's'}`] : [])],
+    dropped: [...new Set([...(rec?.dropped ?? []), ...picked.dropped, ...quoted.dropped])].filter((k) => !facts[k]),
+    asked: [...new Set([...record.flatMap((q) => q.keys), ...picks.map((p) => p.key), ...quoteQs(blank.facts).flatMap((q) => q.keys)])],
+  }
+}
+
 /** What the reader's rules left blank, for kbQuestions. */
 export function blankOf(s: SummaryResult): { record: string[]; facts: string[] } {
   const r = s.record
@@ -191,7 +329,6 @@ function sentenceAround(raw: string, from: number, to: number): string {
 }
 const quoteOf = (v: unknown): string => (typeof v === 'string' ? v : v && typeof v === 'object' && typeof (v as { quote?: unknown }).quote === 'string' ? (v as { quote: string }).quote : '').replace(/\s+/g, ' ').trim()
 const isNull = (v: unknown) => v == null || v === '' || (typeof v === 'string' && /^(?:null|n\/?a|none|unknown|not stated)$/i.test(v.trim()))
-const tidy = (q: string) => q.replace(/^[\s•\-–*·]+/, '').replace(/^\(?\d{1,2}[.)]\s+/, '').trim()
 
 /** Checks the model's answers and keeps those that pass. `answers`: the parsed JSON of each question, in order. */
 export function checkKbAnswers(doc: ReadDoc, questions: KbQuestion[], answers: (Record<string, unknown> | null)[], known: SummaryResult): KbAiFill {

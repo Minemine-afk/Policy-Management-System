@@ -5,7 +5,7 @@
 // free AI helper (kbAi.ts, in the browser too) is asked about what the rules left blank; what it fills is tagged "AI".
 import { supabase } from './supabase'
 import { readFile, readRates, readSummary, readableName, type ReadDoc, type RatesResult, type SummaryResult } from './kbExtract'
-import { blankOf, checkKbAnswers, kbQuestions, mergeKbFill, parseAnswer } from './kbAi'
+import { askKbAi, blankOf, kbAskKeys, mergeKbFill } from './kbAi'
 import { fmtNum, plain } from './num'
 import { AI_SWITCHED, AI_SWITCH_TEXT } from './aiConfig'
 import { aiHow } from './aiSay'
@@ -75,7 +75,7 @@ export function autoPayload(r: Reading, target: Target) {
  *  with nothing on them to ask. Any plan type. */
 export function aiAskCount(r: Reading | null): number {
   if (!r?.summary || !r.doc || r.ai) return 0
-  return kbQuestions(r.doc, blankOf(r.summary)).reduce((n, q) => n + q.keys.length, 0)
+  return kbAskKeys(r.doc, blankOf(r.summary), r.summary).length
 }
 
 /** Asks the free AI helper about what the rules left blank and adds what passes the checks. The model is shared
@@ -83,20 +83,17 @@ export function aiAskCount(r: Reading | null): number {
 export async function fillWithAi(r: Reading, onText?: (t: string) => void): Promise<Reading> {
   if (!r.summary || !r.doc) return r
   const { runAi } = await import('./aiModel')
-  const qs = kbQuestions(r.doc, blankOf(r.summary))
-  const answers = []
   let how = '', pre = ''
-  for (let i = 0; i < qs.length; i++) {
-    const step = qs.length > 1 ? `, question ${plain(i + 1)} of ${plain(qs.length)}` : ''
-    onText?.(`The AI helper is reading the document${how}${step}…`)
-    answers.push(parseAnswer(await runAi(qs[i].messages, (p) => {
+  const fill = await askKbAi(r.doc, blankOf(r.summary), r.summary, async (messages, maxTokens, i, n) => {
+    const step = n > 1 ? `, question ${plain(i)} of up to ${plain(n)}` : ''
+    onText?.(`${pre}The AI helper is reading the document${how}${step}…`)
+    return runAi(messages, (p) => {
       if (p.stage === 'download') { onText?.(`${pre}Downloading the AI model (first time only): ${fmtNum(Math.round((p.pct ?? 0) * 100))}%`); return }
       if (p.model) how = ` (${p.model}${p.device === 'webgpu' ? ', graphics chip' : ', processor: slower'})`
       if (p.stage === 'switch') { how = ''; pre = AI_SWITCHED; onText?.(AI_SWITCH_TEXT); return }
       onText?.(`${pre}The AI helper is reading the document${how}${step}${aiHow({ tokens: p.tokens })}…`)
-    }, qs[i].maxTokens)))
-  }
-  const fill = checkKbAnswers(r.doc, qs, answers, r.summary)
+    }, maxTokens)
+  })
   const { summary, aiKeys } = mergeKbFill(r.summary, fill)
   return { ...r, summary, ai: aiKeys }
 }

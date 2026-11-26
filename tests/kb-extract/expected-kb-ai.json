@@ -7,6 +7,16 @@
     "entry_age": "", "sum_assured": "", "residency": "", "uw": "", "ad": "", "reinstate": "", "eci": "",
     "premTerm": ["~premium term", "~Premium Term"], "grace": ["~Grace Period"]
   },
+  "Genesis_III_IUL_Product_Summary.pdf": {
+    "inc": "~without the need to go for further medical", "cash": "~The surrender value will be the Net Cash Value",
+    "residency": "", "uw": "", "guaranteed": "", "modes": "", "eci": "", "reinstate": ""
+  },
+  "HSBC_Indexed_Flexi_Income_Product_Summary.pdf": {
+    "entry_age": "", "sum_assured": "", "residency": "", "guaranteed": "", "modes": "", "coverTo": "", "eci": "", "conversion": "", "inc": "", "reinstate": ""
+  },
+  "Manulife_Signature_IUL_Select_III_Product_Summary.pdf": {
+    "entry_age": "", "sum_assured": "", "residency": "", "uw": "", "guaranteed": "", "modes": "", "coverTo": "", "eci": "", "conversion": "", "inc": "", "grace": "", "reinstate": ""
+  },
   "Orchard_TermShield_Product_Summary.pdf (all blank)": {
     "entry_age": "18-60", "sum_assured": "100000-5000000", "currencies": "SGD,USD", "residency": "Singapore citizen,Singapore PR,Foreigner living in Singapore",
     "uw": "Full medical underwriting", "premTerm": "Same as the policy term", "guaranteed": "Not guaranteed; the insurer may revise them",
