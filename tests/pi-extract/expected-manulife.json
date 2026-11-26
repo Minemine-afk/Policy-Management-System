@@ -1,0 +1,9 @@
+{
+  "_about": "Truths for check-ocr.mjs on the Manulife layout (scanned copy, insurer's name blanked out), checked by hand against the pages on 26 Nov 2026. The file is in the project files (pi-samples/), not in git. Usage: node tests/pi-extract/check-ocr.mjs <folder with only this PDF> tests/pi-extract/expected-manulife.json",
+  "SG_Manulife_ManuProtectTermII_500k.pdf": {
+    "insured_name": "Mr VIP", "date_of_birth": "", "gender": "Male", "residency": "", "underwriting_class": "Non-Smoker", "currency": "SGD", "cover_age": "85",
+    "insurer": "Manulife", "policy_name": "Term (II) (Renewable and Convertible)", "policy_term": "5", "premium_term": "5",
+    "annual_premium": "502.50", "total_premium": "241067.00", "death_sa": "500000", "terminal_illness": "Included", "accidental_death": "NA",
+    "base_premium": "502.50", "tpd_sa": "NA", "tpd_premium": "NA", "ci_sa": "NA", "ci_premium": "NA", "cash_value": "NA", "campaigns": "NA"
+  }
+}
