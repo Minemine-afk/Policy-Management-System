@@ -204,7 +204,6 @@ const SG_LABELS = {
   await cmp.getByRole('button', { name: 'Read the PIs again' }).click()
   await cmp.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
   await check(cmp.getByRole('alert').filter({ hasText: /could not be read/ }).count().then((n) => n === 0), 'read again, it is read normally')
-<<<<<<< HEAD
   // A graphics chip that never answers (Kumar, 26 Nov 2026: "AI helper working…" for 10 minutes with nothing): the run is
   // watched, moves to the processor by itself, and can be stopped. The chip is pretended here (__AI_FORCE.hangGpu).
   {
@@ -222,8 +221,6 @@ const SG_LABELS = {
     await check(seen0(aiBtn0), 'and the AI helper button is back')
     await olivia.evaluate(() => { delete globalThis.__AI_FORCE; localStorage.removeItem('pws-ai-no-gpu') })
   }
-=======
->>>>>>> origin/claude/project-thread-emib86
   // A page opened before an app update can't fetch the parts it had not loaded yet (Kumar, 26 Nov 2026: "Failed to fetch
   // dynamically imported module …/aiModel-….js"). It now says to reload, with a button.
   const staleSeen = await olivia.evaluate(async () => {

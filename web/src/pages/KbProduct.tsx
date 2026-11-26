@@ -210,12 +210,8 @@ export default function KbProduct() {
       setMsg(put.size ? `The AI helper filled ${plain(put.size)} more detail${put.size === 1 ? '' : 's'}, marked "AI". Each was checked against the document's own words, but check them before you save.`
         : 'The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
     } catch (e) {
-<<<<<<< HEAD
       if ((e as Error)?.message === AI_STOPPED) setMsg('AI helper stopped. Nothing was filled.')
       else setError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}`))
-=======
-      setError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}`))
->>>>>>> origin/claude/project-thread-emib86
     } finally {
       setAiState('')
     }
