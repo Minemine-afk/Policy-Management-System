@@ -413,6 +413,70 @@ function readPlanRows(lines: Line[]): { rows: PlanRow[]; total: { value: string;
   return null
 }
 
+/** Manulife's layout (ManuProtect Term (II), 26 Nov 2026): a block "Specially prepared for : Mr VIP ... Plan : ...
+ *  Male, Non-Smoker ... Basic Sum Insured : $500,000 ... Premium Frequency : Annually", then a "Premium Summary" table
+ *  "Policy Term (years) | Premium Term (years) | Sum Insured ($) | Premium ($)" with one row per plan (base plan first,
+ *  then riders) and a "Total Premium ($)" row, and small tables "Monthly ($) | Quarterly ($) | Semi-Annually ($) |
+ *  Annually ($)" under "Total Premium" and "Basic Premium". Works on OCR text too (the roman numeral of the plan name
+ *  is often misread: "Term (Il)"). */
+interface PremiumSummary {
+  rows: PlanRow[]; total: { value: string; page: number; line: string } | null
+  name?: { value: string; line: Line }; sex?: { gender: string; smoker: string; line: Line }
+  /** The Annually column of the "Total Premium" and "Basic Premium" tables. */
+  annualTotal?: { value: string; line: Line }; annualBasic?: { value: string; line: Line }
+  /** The plan name on the "Plan :" line, roman numerals put right. */
+  plan?: { value: string; line: Line }
+  /** Manulife's illustration system names itself in the footer ("AWS / Version 98.3"). */
+  aws: boolean
+}
+const ROMAN = /\(([Il1|]{1,3})\)/
+function readPremiumSummary(lines: Line[]): PremiumSummary | null {
+  const head = lines.findIndex((l) => /policy\s+term\s+premium\s+term\s+sum\s+(?:insured|assured)\s+premium\s*$/i.test(l.text.replace(/\s+/g, ' ').trim()))
+  const prepared = lines.find((l) => /^specially\s+prepared\s+for\b/i.test(l.text.trim()))
+  if (head < 0 || !prepared) return null
+  const out: PremiumSummary = { rows: [], total: null, aws: lines.some((l) => /\bAWS\s*\/\s*Version\b/i.test(l.text)) }
+  const freq = lines.map((l) => l.text.match(/premium\s+frequency\s*:?\s*(annual(?:ly)?|yearly|monthly|quarterly|half[\s-]?yearly|semi[\s-]?annual(?:ly)?|single)\b/i)?.[1]).find(Boolean) ?? ''
+  for (const l of lines.slice(head + 1, head + 14).filter((x) => x.page === lines[head].page)) {
+    const ps = l.text.split(/\s{2,}/).map((x) => x.trim()).filter(Boolean)
+    const t = /^total\s+premium\b/i.test(ps[0] ?? '') && ps[ps.length - 1].match(CUR_AMT)
+    if (t) { out.total = { value: amount(t[1]), page: l.page, line: l.text }; break }
+    // The last four cells: policy term, premium term, sum insured, premium. The name (if OCR kept it on the row) is before.
+    if (ps.length < 4) continue
+    const [pt, prt, sa, pm] = ps.slice(-4)
+    const a = /^\d{1,3}$/.test(pt) ? pt : null, b = /^\d{1,3}$/.test(prt) ? prt : null
+    const sm = sa.match(CUR_AMT), pmm = pm.match(CUR_AMT)
+    if (!a || !b || !sm || !pmm) { if (out.rows.length) break; continue }
+    out.rows.push({ name: ps.slice(0, -4).join(' '), premium: amount(pmm[1]), freq, sa: amount(sm[1]), policyTerm: a, premiumTerm: b, page: l.page, line: l.text })
+  }
+  if (!out.rows.length) return null
+  const nm = prepared.text.split(/\s{2,}/)[0].replace(/^specially\s+prepared\s+for\s*:?\s*/i, '').trim()
+  // OCR may drop the space after the title ("MrVIP").
+  if (nm && !/\d/.test(nm)) out.name = { value: nm.replace(/^(Mr|Mrs|Ms|Mdm|Miss|Dr)\.?(?=[A-Z])/, '$1 '), line: prepared }
+  for (const l of lines) {
+    const m = l.text.match(/\b(male|female)\s*[,\/]\s*(non[\s-]?smoker|smoker)\b/i)
+    if (m) { out.sex = { gender: /^m/i.test(m[1]) ? 'Male' : 'Female', smoker: /^non/i.test(m[2]) ? 'Non-Smoker' : 'Smoker', line: l }; break }
+  }
+  // "Monthly ($)  Quarterly ($)  Semi-Annually ($)  Annually ($)" with its four amounts on the next line.
+  for (let i = 1; i + 1 < lines.length; i++) {
+    if (!/^monthly\b.*\bquarterly\b.*\bannually\b/i.test(lines[i].text.trim())) continue
+    const nums = lines[i + 1].text.split(/\s{2,}/).map((x) => x.trim().match(CUR_AMT)?.[1])
+    if (lines[i + 1].page !== lines[i].page || nums.length !== 4 || nums.some((x) => !x)) continue
+    const title = lines[i - 1].page === lines[i].page ? lines[i - 1].text.trim() : ''
+    const hit = { value: amount(nums[3]!), line: lines[i + 1] }
+    if (/^total\s+premium$/i.test(title)) out.annualTotal ??= hit
+    else if (/^basic\s+premium$/i.test(title)) out.annualBasic ??= hit
+  }
+  // The plan name: every page repeats "Plan : Term (II) (Renewable and Convertible)"; OCR misreads the numeral on
+  // some ("(Il)", "(l)"), so the longest numeral seen wins and is written with capital I.
+  const plans = lines.map((l) => ({ l, v: l.text.match(/^plan\s*:\s*(.+?)(?:\s{2,}|$)/i)?.[1]?.trim() })).filter((x): x is { l: Line; v: string } => !!x.v)
+  if (plans.length) {
+    const numeral = Math.max(0, ...plans.map((x) => x.v.match(ROMAN)?.[1].length ?? 0))
+    const first = plans[0]
+    out.plan = { value: numeral ? first.v.replace(ROMAN, `(${'I'.repeat(numeral)})`) : first.v, line: first.l }
+  }
+  return out
+}
+
 /** A premium table with one column per payment frequency (e.g. HSBC "Your Premium"):
  *  "Plan Name  Annual  Semi-Annual  Quarterly  Monthly", then one row per plan and a "Total Premium" row.
  *  The Annual column is used, so these premiums are yearly already. */
@@ -487,12 +551,16 @@ function cellAt(items: TextItem[], y: number, c: { x: number; w: number }): stri
   if (!row.length) return undefined
   const near = row.map((i) => ({ i, d: Math.abs(i.x + i.w / 2 - c.x) })).filter((r) => r.d <= c.w + 14).sort((a, b) => a.d - b.d)[0]
   if (!near) return ''
-  const t = near.i.str.trim()
+  const t = dotsToCommas(near.i.str.trim())
   return /^(?:S\$|\$)?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?$/.test(t) ? t.replace(/^S?\$/, '') : /^[-–—]$/.test(t) ? '' : undefined
 }
 
 /** The year-by-year tables headed "Total Premiums Paid To-date". Tables about distribution cost are left out.
  *  A new illustration starts when the policy year goes back down (main plan first, then each rider). */
+/** A rough scan's OCR reads the thousands comma as a dot ("241.067" for 241,067). In an illustration table, whose
+ *  amounts never have three decimals, a dot followed by exactly three digits is put back as a comma. */
+const dotsToCommas = (s: string) => s.replace(/\d{1,3}(?:[.,]\d{3})+(?!\d)/g, (m) => m.replace(/\./g, ','))
+
 function readIllustrations(lines: Line[], pages: Page[] = []): { segments: IllRow[][]; surrender: boolean } {
   const segments: IllRow[][] = []
   let inTable = false, surrender = false, misses = 0, skip = 0
@@ -513,7 +581,7 @@ function readIllustrations(lines: Line[], pages: Page[] = []): { segments: IllRo
     }
     if (!inTable) return
     // OCR can drop the slash ("5/51" read as "551"): split it back where the table's age-minus-year gap fits.
-    let text = l.text
+    let text = dotsToCommas(l.text)
     const prev = segments[segments.length - 1]?.slice(-1)[0]
     const joined = text.match(/^(\d{3,5})(?=\s)/)
     if (prev && joined) {
@@ -533,8 +601,8 @@ function readIllustrations(lines: Line[], pages: Page[] = []): { segments: IllRo
     if (c && c.page === l.page && l.y !== undefined) {
       const its = itemsOf(l.page)
       const t = c.total ? cellAt(its, l.y, c.total) : undefined
-      if (t) row.total = amount(t)
-      if (c.sv) row.sv = cellAt(its, l.y, c.sv)
+      if (t) row.total = amount(dotsToCommas(t))
+      if (c.sv) { const v = cellAt(its, l.y, c.sv); row.sv = v === undefined ? v : dotsToCommas(v) }
     }
     const seg = segments[segments.length - 1]
     const last = seg?.[seg.length - 1]
@@ -657,7 +725,16 @@ export function extract(pages: Page[], fileName: string): Extracted {
   // ----- Summary table -----
   let table: TableRead | null = null
   for (const p of pages) { table = readSummaryTable(p); if (table) break }
-  const planRows = table ? null : readPlanRows(lines)
+  const manu = table ? null : readPremiumSummary(lines)
+  if (manu) {
+    if (manu.name) set('insured_name', manu.name.value, manu.name.line.page, manu.name.line.text)
+    if (manu.sex) { set('gender', manu.sex.gender, manu.sex.line.page, manu.sex.line.text); set('underwriting_class', manu.sex.smoker, manu.sex.line.page, manu.sex.line.text) }
+    // Yearly premiums straight from the "Annually ($)" columns, whatever the payment frequency chosen.
+    if (manu.annualBasic) set('base_premium', manu.annualBasic.value, manu.annualBasic.line.page, manu.annualBasic.line.text)
+    if (manu.annualTotal) set('annual_premium', manu.annualTotal.value, manu.annualTotal.line.page, manu.annualTotal.line.text)
+    if (manu.plan) { plan = manu.plan.value; planAt = manu.plan.line }
+  }
+  const planRows = table ? null : manu ? { rows: manu.rows, total: manu.total } : readPlanRows(lines)
   const baseRow = planRows?.rows[0]
   const factor = modeFactor(mode) ?? (baseRow ? modeFactor(baseRow.freq) : null) ?? (table && /monthly/i.test(table.premiumHeader) ? 12 : table && /annual/i.test(table.premiumHeader) ? 1 : null)
   const modeName = mode ? cap(mode) : baseRow && modeFactor(baseRow.freq) ? cap(baseRow.freq) : factor === 12 ? 'Monthly' : factor === 1 ? 'Annual' : ''
@@ -682,6 +759,8 @@ export function extract(pages: Page[], fileName: string): Extracted {
 
   // Fallbacks: "label: value" on one line (never the next line, to avoid picking up the wrong number).
   const insurer = detectInsurer(insurerRow?.value ?? '') || detectInsurer(lines.slice(0, 80).map((l) => l.text).join('\n') + '\n' + fileName.replace(/[_.-]+/g, ' '))
+    // A copy with the insurer's name blanked out: Manulife's illustration system still names itself in the footer.
+    || (manu?.aws ? 'Manulife' : '')
   const labelRules: Record<string, RegExp[]> = {
     death_sa: [/\b(?:basic\s+)?sum\s+(?:assured|insured)\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i, /^(?:basic\s+)?(?:death\s+(?:benefit|cover(?:age)?)|amount\s+of\s+cover(?:age)?|coverage\s+amount)\s*(?:\((?:S\$|SGD|US\$|USD)\))?\s*:/i],
   }
