@@ -1189,6 +1189,20 @@ const SG_LABELS = {
   await upr.getByRole('button', { name: 'Upload' }).click()
   await check(seen(olivia.getByText(/^Uploaded .*Read 172 premium rates.*The product is in search now/)), 'the rate sheet is read into the product record on upload')
   await check(q1(`select count(*)::int n, bool_or(ci_rate is not null) ci from kb_rates where product_id = $1`, [orchard.id]).then((r) => r[0].n === 172 && r[0].ci), 'the rates (with CI rider rates) are on the same record')
+  // "Check the Product Summary again" on a product record fills only what is blank (Kumar, 26 Nov 2026)
+  {
+    await db.query(`update kb_products set facts = facts - 'freelook' where id = $1`, [orchard.id])
+    await olivia.goto(BASE + '/kb/products/' + orchard.id)
+    const again = olivia.getByRole('button', { name: 'Check the Product Summary again for blank details (with the free AI helper)' })
+    await check(seen(again), 'a product record with a Product Summary offers to check it again for blank details')
+    const insurerBox = olivia.getByLabel('Insurer', { exact: true })
+    await insurerBox.fill('Marina Life (typed)')
+    await again.click()
+    await check(seen(olivia.getByText(/^The reader filled 1 blank detail from Orchard_TermShield_Product_Summary\.pdf, marked "From document"\. Nothing is left for the AI helper to look for/)), 'it fills the one blank detail from the document, and says the AI helper has nothing left to look for')
+    await check(insurerBox.inputValue().then((v) => v === 'Marina Life (typed)'), 'what was typed on the form is not changed')
+    await db.query(`update kb_products set facts = $2 where id = $1`, [orchard.id, JSON.stringify(orchard.facts)])
+    await olivia.goto(BASE + '/kb')
+  }
   // A new version (PDF, per S$100,000) replaces it at once and is read into the record
   await olivia.locator('tr', { hasText: 'Orchard_TermShield_Rates.xlsx' }).getByRole('button', { name: 'New version' }).click()
   const upv = olivia.getByRole('dialog', { name: /^New version of / })

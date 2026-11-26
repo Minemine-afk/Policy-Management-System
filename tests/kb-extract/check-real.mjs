@@ -45,7 +45,7 @@ const WANT = {
     },
   },
   'Genesis_III_IUL_Product_Summary.pdf': {
-    record: { name: 'Genesis III Indexed Universal Life', insurer: 'Transamerica Life', currencies: ['USD'] }, kind: 'Indexed Universal Life', planType: 'Universal life',
+    record: { name: 'Genesis III Indexed Universal Life', insurer: 'Transamerica Life', currencies: ['USD'], entry_age_min: 0, entry_age_max: 80, sa_min: 1000000 }, kind: 'Indexed Universal Life', planType: 'Universal life',
     facts: {
       ti: 'If the Insured is diagnosed with a TI while the policy is in force, we may pay the TI Benefit in a lump sum upon your request as an accelerated payment of Death Benefit',
       death: 'We will pay benefits upon the death of the Insured. The Death Benefit is the higher of (less any Policy Loan): The Sum Assured of the policy; and The Account Value on the date of the Insured’s death.',
@@ -95,7 +95,7 @@ for (const [f, want] of Object.entries(WANT)) {
   check(s.planType === want.planType, `plan type "${s.planType}" (want "${want.planType}")`)
   for (const [k, v] of Object.entries(want.record)) check(JSON.stringify(s.record[k]) === JSON.stringify(v), `${k}: ${JSON.stringify(s.record[k])} (want ${JSON.stringify(v)})`)
   // Neither term summary states entry ages or sum assured limits: they must stay blank (not guessed).
-  for (const k of ['entry_age_min', 'entry_age_max', 'sa_min', 'sa_max', 'residency']) check(s.record[k] == null, `${k} should be blank, got ${s.record[k]}`)
+  for (const k of ['entry_age_min', 'entry_age_max', 'sa_min', 'sa_max', 'residency']) if (!(k in want.record)) check(s.record[k] == null, `${k} should be blank, got ${s.record[k]}`)
   if (!want.facts) continue
   for (const [k, v] of Object.entries(want.facts)) {
     const got = s.facts[k]?.v ?? ''
