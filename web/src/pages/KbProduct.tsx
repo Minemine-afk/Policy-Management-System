@@ -182,12 +182,12 @@ export default function KbProduct() {
 
   /** Asks the free AI helper about what the reader left blank in the last Product Summary read. Only blank facts
    *  are filled (nothing typed is changed); nothing is saved until Save. */
-  async function askAi() {
-    if (!lastRead) return
+  async function askAi(read: Reading | null = lastRead, before = '') {
+    if (!read) return
     setError(''); setMsg('')
     setAiState('Starting the free AI helper…')
     try {
-      const r = await fillWithAi(lastRead, setAiState)
+      const r = await fillWithAi(read, setAiState)
       setLastRead(r)
       const docId = r.financing ? (rec.facts[r.financing.source]?.doc ?? rec.facts._ps?.doc ?? rec.facts._cof?.doc) : rec.facts._ps?.doc
       const put = new Set<string>()
@@ -207,14 +207,60 @@ export default function KbProduct() {
         return next
       })
       setAiSet((x) => new Set([...x, ...put]))
-      setMsg(put.size ? `The AI helper filled ${plain(put.size)} more detail${put.size === 1 ? '' : 's'}, marked "AI". Each was checked against the document's own words, but check them before you save.`
-        : 'The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
+      setMsg(before + (put.size ? `The AI helper filled ${plain(put.size)} more detail${put.size === 1 ? '' : 's'}, marked "AI". Each was checked against the document's own words, but check them before you save.`
+        : 'The AI helper found nothing more that passed the checks against the document, so those details stay blank.'))
     } catch (e) {
-      if ((e as Error)?.message === AI_STOPPED) setMsg('AI helper stopped. Nothing was filled.')
+      if ((e as Error)?.message === AI_STOPPED) setMsg(before + 'AI helper stopped: it filled nothing.')
       else setError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}`))
     } finally {
       setAiState('')
     }
+  }
+  /** "Check the Product Summary again": reads the record's Product Summary once more and fills ONLY what is blank on
+   *  the form (nothing typed or saved is changed), first with the reader, then with the free AI helper for what the
+   *  reader still can't find (Kumar, 26 Nov 2026). Nothing is saved until Save. */
+  const agesBlank = !row || (!!row.missing?.includes('entry_age') && String(rec.entry_age_min) === String(row.entry_age_min) && String(rec.entry_age_max) === String(row.entry_age_max))
+  async function recheck() {
+    const d = docs.find((x) => x.id === ps)
+    if (!d) return
+    setError(''); setMsg('')
+    setReading(`Reading ${d.file_name}…`)
+    let read: Reading
+    let said = ''
+    try {
+      if (!d.storage_path) throw new Error('This document has no file.')
+      const dl = await supabase.storage.from('kb-docs').download(d.storage_path)
+      if (dl.error || !dl.data) throw new Error(dl.error?.message ?? 'Could not download the file')
+      const doc = await readFile(await dl.data.arrayBuffer(), d.file_name ?? '', (done, total, ocr) => setReading(`Reading ${d.file_name}: page ${plain(Math.min(total, Math.floor(done) + 1))} of ${plain(total)}${ocr ? ' (scanned, reading the picture)' : ''}…`))
+      const r = readSummary(doc)
+      const none = (v: unknown) => v == null || String(v).trim() === ''
+      const keys = new Set<string>()
+      const next: ProductRecord = { ...rec, facts: { ...rec.facts } }
+      if (agesBlank && r.record.entry_age_min != null && r.record.entry_age_max != null) { next.entry_age_min = r.record.entry_age_min; next.entry_age_max = r.record.entry_age_max; keys.add('entry_age_min'); keys.add('entry_age_max') }
+      if (none(rec.sa_min) && r.record.sa_min != null) { next.sa_min = r.record.sa_min; keys.add('sa_min') }
+      if (none(rec.sa_max) && r.record.sa_max != null) { next.sa_max = r.record.sa_max; keys.add('sa_max') }
+      if (!rec.currencies.length && r.record.currencies?.length) { next.currencies = r.record.currencies; keys.add('currencies') }
+      if (!rec.residency.length && r.record.residency?.length) { next.residency = r.record.residency; keys.add('residency') }
+      for (const [k, f] of Object.entries(r.facts)) if (!rec.facts[k]?.v?.trim()) { next.facts[k] = { v: f.v, doc: d.id, page: doc.kind === 'pdf' ? f.page : undefined }; keys.add(k) }
+      setRec(next)
+      setFromDoc((x) => new Set([...x, ...keys]))
+      setReadNotes(r.notes.filter((n) => !/entry age/i.test(n) || keys.has('entry_age_min')))
+      // What the AI is asked about: only what is still blank on the form (the form's own values count as known).
+      const known: typeof r = { ...r, record: { ...r.record, currencies: next.currencies, residency: next.residency, sa_min: none(next.sa_min) ? undefined : Number(next.sa_min), sa_max: none(next.sa_max) ? undefined : Number(next.sa_max),
+        entry_age_min: agesBlank && !keys.has('entry_age_min') ? undefined : Number(next.entry_age_min), entry_age_max: agesBlank && !keys.has('entry_age_max') ? undefined : Number(next.entry_age_max) }, facts: { ...r.facts } }
+      for (const [k, f] of Object.entries(next.facts)) if (!k.startsWith('_') && f?.v?.trim() && !known.facts[k]) known.facts[k] = { v: f.v, page: Number(f.page) || 1 }
+      read = { kind: 'summary', summary: known, doc }
+      setLastRead(read)
+      const names = [...keys].filter((k) => k !== 'entry_age_max').length
+      said = names ? `The reader filled ${plain(names)} blank detail${names === 1 ? '' : 's'} from ${d.file_name}, marked "From document". ` : `The reader found nothing more in ${d.file_name}. `
+    } catch (e) {
+      setError(sayError(e, (x) => `Couldn't read ${d.file_name}: ${x.message}`))
+      return
+    } finally {
+      setReading('')
+    }
+    if (aiAskCount(read) > 0) await askAi(read, said)
+    else setMsg(said + 'Nothing is left for the AI helper to look for. Check the values, then save.')
   }
   const stopAi = () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }
   const aiCount = aiAskCount(lastRead)
@@ -311,9 +357,17 @@ export default function KbProduct() {
       {reading && <div className="notice" role="status">{reading}</div>}
       {aiState && <div className="notice" role="status">{aiState} <button type="button" className="btn small" onClick={stopAi}>Stop the AI helper</button></div>}
       {msg && <div className="notice ok" role="status">{msg}</div>}
+      {!fin && ps && !reading && !aiState && readableName(docs.find((x) => x.id === ps)?.file_name ?? '') && (
+        <div className="row small" style={{ gap: 8 }}>
+          <button type="button" className="btn small" onClick={recheck}
+            title="Reads this record's Product Summary again and fills only the blank details: first the reader, then the free AI helper (it runs in this browser, the document never leaves this computer) for what the reader can't find. Nothing you typed is changed, and nothing is saved until you press Save.">
+            Check the Product Summary again for blank details (with the free AI helper)</button>
+          <span className="muted">Fills blanks only. The AI part can take several minutes; you can stop it.</span>
+        </div>
+      )}
       {aiCount > 0 && !reading && !aiState && (
         <div className="row small" style={{ gap: 8 }}>
-          <button type="button" className="btn small" onClick={askAi}
+          <button type="button" className="btn small" onClick={() => askAi()}
             title={`A free, open AI model runs in this browser: the document never leaves this computer. It is asked only about what the reader missed, must quote the document for every answer, and anything it gives that is not in the document is dropped. The first time, the browser downloads the model (about ${fmtNum(AI_MODELS.small.mb / 1000, 1)}–${fmtNum(AI_MODELS.gpu.mb / 1000, 1)} GB) and keeps it.`}>
             Ask the free AI helper about {plain(aiCount)} detail{aiCount === 1 ? '' : 's'} the reader missed</button>
           <span className="muted">Optional. Runs in your browser, nothing is sent. Values it fills are marked "AI".</span>

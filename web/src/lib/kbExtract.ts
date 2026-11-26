@@ -539,6 +539,19 @@ export function riderLabel(doc: ReadDoc, recordName: string): (page: number, v: 
 /** A fact that says the cover is not there ("No", "Not covered"). */
 export const isNegative = (v: string) => NEGATIVE.test(v.replace(/^Rider \([^)]*\):\s*/, ''))
 
+/** A table row whose label is wrapped over two lines: "Minimum Sum | USD1,000,000" then "Assured" under the label. */
+function wrapped(lines: Line[], first: RegExp, used: Set<number>): { value: string } | null {
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (used.has(i)) continue
+    const raw = rawPieces(lines[i]).map(clean)
+    if (raw.length < 2 || !first.test(raw[0]) || lines[i + 1].page !== lines[i].page) continue
+    if (!/^(?:assured|insured)\b/i.test(clean(rawPieces(lines[i + 1])[0] ?? ''))) continue
+    used.add(i)
+    return { value: raw.slice(1).join(' ') }
+  }
+  return null
+}
+
 export function readSummary(doc: ReadDoc): SummaryResult {
   // Two-column pages are read column by column (PDF pages with positions only).
   const pages = summaryPages(doc)
@@ -567,14 +580,25 @@ export function readSummary(doc: ReadDoc): SummaryResult {
 
   const age = find(lines, REC.age, used)
   const aMin = find(lines, REC.ageMin, used), aMax = find(lines, REC.ageMax, used)
-  // Numbers in brackets are not ages ("15 days - 80 (Region 1S & Region 1)"); several ranges (by region) are not guessed.
-  const ageNums0 = age ? ints(age.value.replace(/\([^)]*\)/g, ' ')) : []
-  const ageNums = !aMin && !aMax && ageNums0.length > 2 ? [] : ageNums0
+  // Numbers in brackets are not ages ("15 days - 80 (Region 1S & Region 1)"), and the policy owner's ages are not
+  // the insured person's ("Policy Owner: Individuals: Age 18 or above").
+  const ageText = age ? age.value.split(/\b(?:policy ?owners?|policyholders?|proposers?|payors?)\b/i)[0].replace(/\([^)]*\)/g, ' ') : ''
+  const ageNums0 = ints(ageText)
+  // Several ranges, one per region or plan option ("15 days - 80", "15 days - 75"): the widest is taken, with a note
+  // (Kumar, 26 Nov 2026: Genesis III's Issue Ages were left blank). Ages in days or months count as 0.
+  const ranges = [...ageText.matchAll(/\b(\d{1,3})\s*(days?|weeks?|months?)?\s*(?:-|–|—|to)\s*(?:age\s*)?(\d{1,3})\b/gi)]
+    .map((m) => [m[2] ? 0 : +m[1], +m[3]]).filter(([a, b]) => a < b && b <= 100)
+  let ageNums = !aMin && !aMax && ageNums0.length > 2 ? [] : ageNums0
+  if (!ageNums.length && !aMin && !aMax && ranges.length > 1) {
+    ageNums = [Math.min(...ranges.map((r) => r[0])), Math.max(...ranges.map((r) => r[1]))]
+    if (new Set(ranges.map((r) => r.join('-'))).size > 1) notes.push(`The document gives several entry age ranges (${ranges.map((r) => `${plain(r[0])} to ${plain(r[1])}`).join(', ')}), for example by region: the widest, ${plain(ageNums[0])} to ${plain(ageNums[1])}, was taken. Check this.`)
+  }
   const min = aMin ? ints(aMin.value)[0] : ageNums[0]
   const max = aMax ? ints(aMax.value)[0] : ageNums.length > 1 ? ageNums[ageNums.length - 1] : undefined
   if (min != null && max != null && min < max) { record.entry_age_min = min; record.entry_age_max = max; filled.push('entry age') }
 
-  const sMin = find(lines, REC.saMin, used), sMax = find(lines, REC.saMax, used)
+  const sMin = find(lines, REC.saMin, used) ?? wrapped(lines, /^(?:minimum|min\.?) sum$/i, used)
+  const sMax = find(lines, REC.saMax, used) ?? wrapped(lines, /^(?:maximum|max\.?) sum$/i, used)
   const sa = !sMin || !sMax ? find(lines, REC.sa, used) : null
   const saNums = sa ? amounts(sa.value) : []
   const lo = sMin ? amounts(sMin.value)[0] : saNums[0]
