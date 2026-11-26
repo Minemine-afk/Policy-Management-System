@@ -18,7 +18,7 @@ import { ratesCsv, readFile, readRates, readSummary, readableName } from '../lib
 import { loadProducts } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
 import { aiAskCount, aiKeysOf, fillWithAi, type Reading } from '../lib/kbAuto'
-import { AI_MODELS } from '../lib/aiConfig'
+import { AI_MODELS, AI_STOPPED } from '../lib/aiConfig'
 import { FINANCING_NOTE, GROUPS, groupLabel, groupOf, isFinancing, planLabel, plansIn } from '../lib/families'
 import { FIN_CURRENCIES, FIN_RATES_HEADER, finRatesCsv, parseFinRates, readFinancing } from '../lib/kbFinancing'
 import { rowApplies } from '../lib/kb'
@@ -210,11 +210,13 @@ export default function KbProduct() {
       setMsg(put.size ? `The AI helper filled ${plain(put.size)} more detail${put.size === 1 ? '' : 's'}, marked "AI". Each was checked against the document's own words, but check them before you save.`
         : 'The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
     } catch (e) {
-      setError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}`))
+      if ((e as Error)?.message === AI_STOPPED) setMsg('AI helper stopped. Nothing was filled.')
+      else setError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}`))
     } finally {
       setAiState('')
     }
   }
+  const stopAi = () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }
   const aiCount = aiAskCount(lastRead)
   const aiTag = (k: string) => aiSet.has(k) && <span className="pill warn tag" title="Filled by the free AI helper from the document's own words. Check it against the document.">AI</span>
 
@@ -307,7 +309,7 @@ export default function KbProduct() {
         searchable, but the age filter skips it and Compare products says the ages are not stated. The {plain(18)} and {plain(65)} in the entry age boxes are only
         a starting point: type the real entry ages before you save, because saving counts them as the product's ages.</div>}
       {reading && <div className="notice" role="status">{reading}</div>}
-      {aiState && <div className="notice" role="status">{aiState}</div>}
+      {aiState && <div className="notice" role="status">{aiState} <button type="button" className="btn small" onClick={stopAi}>Stop the AI helper</button></div>}
       {msg && <div className="notice ok" role="status">{msg}</div>}
       {aiCount > 0 && !reading && !aiState && (
         <div className="row small" style={{ gap: 8 }}>

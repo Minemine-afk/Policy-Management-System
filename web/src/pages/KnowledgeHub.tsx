@@ -16,7 +16,7 @@ import {
   type KbDoc, type KbProductRow,
 } from '../lib/kbAdmin'
 import { fmtNum, plain } from '../lib/num'
-import { AI_MODELS } from '../lib/aiConfig'
+import { AI_MODELS, AI_STOPPED } from '../lib/aiConfig'
 
 export function KbHeader({ tab, actions }: { tab: 'documents' | 'products'; actions?: React.ReactNode }) {
   const { has } = useAuth()
@@ -268,17 +268,21 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
   const target = mode === 'version' ? (doc?.product_id ?? '') : f.product_id
   const needName = reads && mode === 'new' && !target
 
+  const [aiBusy, setAiBusy] = useState(false)
+  const stopAi = () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }
   async function askAi() {
     if (!reading) return
     setAiError('')
+    setAiBusy(true)
     setProgress('Starting the free AI helper…')
     try {
       const r = await fillWithAi(reading, setProgress)
       setReading(r)
       if (!r.ai?.length) setAiError('The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
     } catch (e) {
-      setAiError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}. What the reader found is kept.`))
+      setAiError((e as Error)?.message === AI_STOPPED ? 'AI helper stopped. What the reader found is kept.' : sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}. What the reader found is kept.`))
     } finally {
+      setAiBusy(false)
       setProgress('')
     }
   }
@@ -437,7 +441,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
             <input type="date" value={f.valid_until} onChange={(e) => set('valid_until', e.target.value)} />
           </label>
         </div>
-        {progress && <div className="notice" role="status">{progress}</div>}
+        {progress && <div className="notice" role="status">{progress}{aiBusy && <> <button type="button" className="btn small" onClick={stopAi}>Stop the AI helper</button></>}</div>}
         {reads && reading && !progress && <div className="notice filename" role="status">{readingLine(reading)}</div>}
         {reads && reading && !progress && aiAskCount(reading) > 0 && (
           <div className="row small" style={{ gap: 8 }}>

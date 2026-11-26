@@ -5,7 +5,8 @@ import { says } from '../lib/options'
 import { FIELDS, SECTIONS, ReadStopped, extract, labelWith, readPdf, type Found, type Page } from '../lib/piExtract'
 import { applyLearned, learn } from '../lib/piTeach'
 import { blankKeys, pictureCrossChecks, pictureKeys } from '../lib/piAi'
-import { AI_MODELS } from '../lib/aiConfig'
+import { AI_MODELS, AI_STOPPED, AI_SWITCHED, AI_SWITCH_TEXT } from '../lib/aiConfig'
+import { aiElapsed, aiHow } from '../lib/aiSay'
 import { loadRules, saveRules, type SavedRule } from '../lib/teach'
 import { TEMPLATE_URL, buildWorkbook, preloadExcel, commonCurrency, isComparisonFile, type ExportColumn } from '../lib/piExcel'
 import { buildPack, packFileName, packState, preloadPdf, sha256 } from '../lib/piPdf'
@@ -210,16 +211,21 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
     try {
       const { askAi, readOutPicture } = await import('../lib/aiModel')
       const { pagePictures, picturePages } = await import('../lib/piPictures')
-      let filled = 0, fromPictures = 0
+      let filled = 0, fromPictures = 0, model = '', pre = ''
       for (const [i, c] of cols.entries()) {
         const keys = aiTodo(c)
         if (!keys.length) continue
         const text = hasText(c)
         const got: Record<string, Found> = {}
         const dropped: string[] = []
-        const say = (what: string) => (p: { stage: string; pct?: number; device?: string; model?: string }) => setAiState({ busy: true, error: '',
-          text: p.stage === 'download' ? `Downloading the AI model, first time only: ${plain(Math.round((p.pct ?? 0) * 100))}%`
-            : `The AI (${p.model}) is ${what} of PI${plain(i + 1)} (${c.fileName})${p.device === 'wasm' ? ', on the processor: this can take several minutes' : ''}…` })
+        const say = (what: string) => (p: { stage: string; pct?: number; device?: string; model?: string; tokens?: number }) => {
+          if (p.model) model = p.model
+          if (p.stage === 'switch') pre = AI_SWITCHED
+          setAiState({ busy: true, error: '',
+            text: p.stage === 'download' ? `${pre}Downloading the AI model, first time only: ${plain(Math.round((p.pct ?? 0) * 100))}%`
+              : p.stage === 'switch' ? AI_SWITCH_TEXT
+                : `${pre}The AI${model ? ` (${model})` : ''} is ${what} of PI${plain(i + 1)} (${c.fileName})${aiHow(p)}…` })
+        }
         if (text) {
           const res = await askAi(c.pages!, keys, c.values, say('reading the text'))
           Object.assign(got, res.found); dropped.push(...res.dropped)
@@ -269,9 +275,21 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       setChecked(false); setSaved('')
       setAiState({ busy: false, error: '', text: filled ? `The AI filled ${fmtNum(filled)} of ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'}${fromPictures ? ` (${fmtNum(fromPictures)} from page pictures)` : ''}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PIs: the blank cells stay blank.' })
     } catch (e) {
+      if ((e as Error)?.message === AI_STOPPED) { setAiState({ busy: false, error: '', text: 'AI helper stopped. Cells it had already filled are kept; press the button to run it again.' }); return }
       setAiState({ busy: false, text: '', error: sayError(e, (x) => 'The AI helper could not run in this browser: ' + x.message + '. Fill the blank cells by hand.') })
     }
   }
+
+  const stopAi = () => { import('../lib/aiModel').then((m) => m.releaseAi()).catch(() => {}) }
+  // While the AI works, the time so far is shown: a sign of life even while it reads a long PI before answering.
+  const [aiSecs, setAiSecs] = useState(0)
+  useEffect(() => {
+    if (!aiState.busy) return
+    const t0 = Date.now()
+    setAiSecs(0)
+    const t = setInterval(() => setAiSecs(Math.round((Date.now() - t0) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [aiState.busy])
 
   const badDates = cols.filter((c) => c.issueDate.trim() && !toDmy(c.issueDate)).length
 
@@ -435,7 +453,9 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
                   {aiState.busy ? 'AI helper working…' : `Fill ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'} with the free AI helper`}
                 </button>
               )}
+              {aiState.busy && <button className="btn small" onClick={stopAi} title="Stops the AI helper. Cells it has already filled are kept.">Stop the AI helper</button>}
               {aiState.text && <span className="small" role="status">{aiState.text}</span>}
+              {aiState.busy && <span className="small muted" aria-label="Time so far">{aiElapsed(aiSecs)} so far</span>}
               {aiState.error && <span className="error small" role="alert">{aiState.error}</span>}
               {aiCells > 0 && !aiState.busy && !aiState.text && <span className="small muted">Runs in your browser, nothing is sent. First use downloads about {fmtNum(AI_MODELS.small.mb / 1000, 1)} GB.</span>}
             </div>

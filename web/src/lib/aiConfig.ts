@@ -17,3 +17,10 @@ export const AI_MODELS: { gpu: AiModel; small: AiModel } = {
 export const AI_MODEL = ID
 export const AI_DTYPE_CPU = 'q4'
 export const MAX_NEW_TOKENS = 300
+
+/** The error text a stopped run ends with (aiModel.ts releaseAi, the Stop buttons). */
+export const AI_STOPPED = 'the AI helper was stopped'
+/** Shown when the graphics chip gave no sign of life and the processor takes over (aiModel.ts, the watchdog). */
+export const AI_SWITCH_TEXT = "This computer's graphics chip did not answer, so the AI helper is starting again on the processor (slower, but it finishes). This browser will go straight to the processor from now on…"
+/** ...and put in front of the lines after it (the processor's model is a separate download). */
+export const AI_SWITCHED = "This computer's graphics chip did not answer, so the AI helper moved to the processor. "

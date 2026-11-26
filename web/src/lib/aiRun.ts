@@ -15,11 +15,15 @@ export async function loadModel(t: T, id: string, opts: { device?: string; dtype
   return { processor, model, vision }
 }
 
-/** The model's answer to `messages`; `images` (one per {type: 'image'} part, in order) are RawImages. */
-export async function generate(m: Loaded, messages: ChatMsg[], images: unknown[], maxTokens: number): Promise<string> {
+/** The model's answer to `messages`; `images` (one per {type: 'image'} part, in order) are RawImages. `onToken` is
+ *  called as each piece of the answer is written (with the count so far): a sign of life for the screen. */
+export async function generate(m: Loaded, messages: ChatMsg[], images: unknown[], maxTokens: number, onToken?: (n: number) => void): Promise<string> {
   const text = m.processor.apply_chat_template(messages, { add_generation_prompt: true })
   const inputs = images.length ? await m.processor(text, images.length === 1 ? images[0] : images) : await m.processor(text)
+  // generate() hands the streamer the prompt first, then each new piece.
+  let n = -1
+  const streamer = onToken ? { put: () => { if (++n > 0) onToken(n) }, end: () => {} } : undefined
   // A page picture's read-out: a light penalty on repeats keeps a small model from looping on empty table rows.
-  const out = await m.model.generate({ ...inputs, max_new_tokens: maxTokens, do_sample: false, ...(images.length ? { repetition_penalty: 1.05 } : {}) })
+  const out = await m.model.generate({ ...inputs, max_new_tokens: maxTokens, do_sample: false, ...(streamer ? { streamer } : {}), ...(images.length ? { repetition_penalty: 1.05 } : {}) })
   return m.processor.batch_decode(out.slice(null, [inputs.input_ids.dims.at(-1), null]), { skip_special_tokens: true })[0] ?? ''
 }

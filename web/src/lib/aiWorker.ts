@@ -5,12 +5,14 @@
 import { AI_MODELS, MAX_NEW_TOKENS } from './aiConfig'
 import { generate, loadModel, type ChatMsg, type Loaded } from './aiRun'
 
-type Ask = { id: number; messages: ChatMsg[]; images?: Blob[]; maxTokens?: number; force?: { device?: string; dtype?: string; model?: string } }
+type Ask = { id: number; messages: ChatMsg[]; images?: Blob[]; maxTokens?: number; force?: { device?: string; dtype?: string; model?: string; hangGpu?: boolean } }
 
 let gen: Promise<Loaded> | null = null
 let device = ''
 let label = ''
 let RawImage: any = null
+
+let onDevice: (d: string) => void = () => {}
 
 async function load(onProgress: (pct: number) => void, force: Ask['force'] = {}, noGpu = false, vision = false): Promise<Loaded> {
   const t = await import('@huggingface/transformers')
@@ -24,6 +26,7 @@ async function load(onProgress: (pct: number) => void, force: Ask['force'] = {},
   const f16 = !!adapter?.features?.has?.('shader-f16')
   const gpu = force.device ? force.device === 'webgpu' : !!adapter && f16 && !noGpu
   device = gpu ? 'webgpu' : 'wasm'
+  onDevice(device)
   const m = gpu ? AI_MODELS.gpu : AI_MODELS.small
   label = m.label
   const files = new Map<string, { loaded: number; total: number }>()
@@ -41,6 +44,7 @@ async function load(onProgress: (pct: number) => void, force: Ask['force'] = {},
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
   const { id, messages, images = [], force, maxTokens } = e.data
+  onDevice = (d) => self.postMessage({ id, starting: d })
   try {
     // Page pictures need the model's picture reader too: the text-only model is swapped for the whole one (one model
     // in memory at a time; the browser keeps the files, so this is quick after the first time).
@@ -49,6 +53,12 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
       const old = await gen.catch(() => null)
       gen = null
       await old?.model?.dispose?.()
+    }
+    // A test's stand-in for a graphics chip that never answers (see aiModel.ts, the watchdog).
+    if (force?.hangGpu && force.device !== 'wasm') {
+      self.postMessage({ id, starting: 'webgpu' })
+      self.postMessage({ id, thinking: true, device: 'webgpu', model: 'test' })
+      await new Promise(() => {})
     }
     gen ??= load((pct) => self.postMessage({ id, loading: pct }), force, false, vision).catch((err) => {
       // Page pictures are not read on the processor: far too slow there (over 10 minutes a page).
@@ -61,14 +71,14 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
     const pics = await Promise.all(images.map((b) => RawImage.fromBlob(b)))
     let out: string
     try {
-      out = await generate(g, messages, pics, maxTokens ?? MAX_NEW_TOKENS)
+      out = await generate(g, messages, pics, maxTokens ?? MAX_NEW_TOKENS, (n) => self.postMessage({ id, tokens: n }))
     } catch (err) {
       // A graphics chip that loads the model but can't run it: once more on the processor.
       if (device !== 'webgpu' || force?.device || vision) throw err
       gen = load((pct) => self.postMessage({ id, loading: pct }), force, true, vision)
       const g2 = await gen
       self.postMessage({ id, thinking: true, device, model: label })
-      out = await generate(g2, messages, pics, maxTokens ?? MAX_NEW_TOKENS)
+      out = await generate(g2, messages, pics, maxTokens ?? MAX_NEW_TOKENS, (n) => self.postMessage({ id, tokens: n }))
     }
     self.postMessage({ id, text: out })
   } catch (err) {
