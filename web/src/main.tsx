@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App'
 import { AuthProvider } from './lib/auth'
+import UpdateNotice from './components/UpdateNotice'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -11,6 +12,7 @@ createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <App />
       </AuthProvider>
+      <UpdateNotice />
     </BrowserRouter>
   </StrictMode>,
 )

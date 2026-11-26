@@ -1,6 +1,7 @@
 // One Knowledge Bank product record: its facts (each naming a document and page) and premium rates. No check step
 // (Kumar, 25 Nov 2026): saving puts it in search at once; changing it is optional. What the reader filled in is marked
 // "From document" (or "AI", when the free AI helper filled it) until someone saves the record or marks it as reviewed.
+import { sayError } from '../lib/update'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -209,7 +210,7 @@ export default function KbProduct() {
       setMsg(put.size ? `The AI helper filled ${plain(put.size)} more detail${put.size === 1 ? '' : 's'}, marked "AI". Each was checked against the document's own words, but check them before you save.`
         : 'The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
     } catch (e) {
-      setError(`The AI helper could not run in this browser: ${e instanceof Error ? e.message : String(e)}`)
+      setError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}`))
     } finally {
       setAiState('')
     }

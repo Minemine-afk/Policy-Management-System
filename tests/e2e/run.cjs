@@ -204,6 +204,20 @@ const SG_LABELS = {
   await cmp.getByRole('button', { name: 'Read the PIs again' }).click()
   await cmp.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
   await check(cmp.getByRole('alert').filter({ hasText: /could not be read/ }).count().then((n) => n === 0), 'read again, it is read normally')
+  // A page opened before an app update can't fetch the parts it had not loaded yet (Kumar, 26 Nov 2026: "Failed to fetch
+  // dynamically imported module …/aiModel-….js"). It now says to reload, with a button.
+  const staleSeen = await olivia.evaluate(async () => {
+    const u = await import('/src/lib/update.ts')
+    const kumar = new TypeError('Failed to fetch dynamically imported module: https://policy-management-systems.pages.dev/assets/aiModel-DRUHyQvM.js')
+    return { stale: u.isStaleApp(kumar), other: u.isStaleApp(new Error('no available backend found')), text: u.sayError(kumar, (x) => 'The AI helper could not run in this browser: ' + x.message) }
+  })
+  await check(Promise.resolve(staleSeen.stale && !staleSeen.other), "an old page's missing file is told apart from a real AI helper error")
+  await check(Promise.resolve(/^This page is from before the latest update of the app\. Reload the page/.test(staleSeen.text)), 'and its message says to reload the page, not that the browser cannot run the AI helper')
+  const notice = olivia.getByRole('alert').filter({ hasText: 'The app was updated.' })
+  await check(notice.getByRole('button', { name: 'Reload the page' }).waitFor({ timeout: 5000 }).then(() => true, () => false), 'a bar at the bottom offers to reload the page')
+  await notice.getByRole('button', { name: 'Reload the page' }).click()
+  await cmp.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
+  await check(notice.count().then((n) => n === 0), 'after reloading, the bar is gone')
   // The PIs are in SGD, USD and an unknown currency, so the money labels carry no currency code.
   const val = (f, i) => olivia.getByLabel(`${f} for PI ${i}`, { exact: true }).inputValue()
   await check(val('Insurer', 1).then((v) => v === 'Great Eastern'), 'reads the insurer from the cover page')
