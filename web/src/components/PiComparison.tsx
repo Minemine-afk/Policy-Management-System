@@ -275,7 +275,10 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       setChecked(false); setSaved('')
       setAiState({ busy: false, error: '', text: filled ? `The AI filled ${fmtNum(filled)} of ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'}${fromPictures ? ` (${fmtNum(fromPictures)} from page pictures)` : ''}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PIs: the blank cells stay blank.' })
     } catch (e) {
+<<<<<<< HEAD
       if ((e as Error)?.message === AI_STOPPED) { setAiState({ busy: false, error: '', text: 'AI helper stopped. Cells it had already filled are kept; press the button to run it again.' }); return }
+=======
+>>>>>>> origin/claude/project-thread-emib86
       setAiState({ busy: false, text: '', error: sayError(e, (x) => 'The AI helper could not run in this browser: ' + x.message + '. Fill the blank cells by hand.') })
     }
   }
