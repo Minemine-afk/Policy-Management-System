@@ -7,6 +7,11 @@ import { generate, loadModel, type ChatMsg, type Loaded } from './aiRun'
 
 type Ask = { id: number; messages: ChatMsg[]; images?: Blob[]; maxTokens?: number; force?: { device?: string; dtype?: string; model?: string; hangGpu?: boolean } }
 
+// The processor engine has 4 GB at most (32-bit WebAssembly). Its memory arena grabs ever larger blocks and keeps them,
+// which ran a long PI (about 2,000 tokens) out of memory: "std::bad_alloc" (Kumar, 26 Nov 2026). Without the arena
+// each piece of memory is given back when done with.
+const WASM_SESSION = { enableCpuMemArena: false, enableMemPattern: false }
+
 let gen: Promise<Loaded> | null = null
 let device = ''
 let label = ''
@@ -31,7 +36,7 @@ async function load(onProgress: (pct: number) => void, force: Ask['force'] = {},
   label = m.label
   const files = new Map<string, { loaded: number; total: number }>()
   return loadModel(t, force.model ?? m.id, {
-    device: gpu ? 'webgpu' : 'wasm', dtype: force.dtype ? (force.dtype.startsWith('{') ? JSON.parse(force.dtype) : force.dtype) : m.dtype,
+    device: gpu ? 'webgpu' : 'wasm', ...(gpu ? {} : { session_options: WASM_SESSION }), dtype: force.dtype ? (force.dtype.startsWith('{') ? JSON.parse(force.dtype) : force.dtype) : m.dtype,
     progress_callback: (e: any) => {
       if (e.status !== 'progress' || !e.total) return
       files.set(e.file, { loaded: e.loaded, total: e.total })

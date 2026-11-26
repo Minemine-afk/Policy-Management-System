@@ -51,6 +51,10 @@ export const aiGroups = (keys: string[]): string[][] =>
 
 /** About 2,000 tokens: enough for the pages that hold a PI's summary, small enough to read quickly on a laptop. */
 export const MAX_CHARS = 7000
+/** On the processor the engine has 4 GB of memory at most (32-bit WebAssembly), and a PI is dense with numbers (more
+ *  tokens for the same length): 7,000 characters of one ran it out of memory, "std::bad_alloc" (Kumar, 26 Nov 2026).
+ *  So less text there; and less again if it still does not fit (aiModel.ts askAi). */
+export const MAX_CHARS_CPU = [5000, 3500, 2500]
 
 const KEYWORDS = /premium|sum\s+(?:assured|insured)|coverage|benefit|death|term|plan|policy|product|insur|age\b|annual|month|year|disab|critical|illness|rider|amount|cost|face/i
 
@@ -84,14 +88,14 @@ export function promptText(pages: Page[], max = MAX_CHARS): string {
 }
 
 /** The chat messages for the model: the PI text and the fields still blank. */
-export function buildMessages(pages: Page[], keys: string[]): { role: 'system' | 'user'; content: string }[] {
+export function buildMessages(pages: Page[], keys: string[], max = MAX_CHARS): { role: 'system' | 'user'; content: string }[] {
   const ask = AI_FIELDS.filter((f) => keys.includes(f.key))
   const shape = ask.map((f) => f.kind === 'annual' ? `"${f.key}": {"amount": "...", "per": "year|month|quarter|half-year"}` : `"${f.key}": "..."`).join(', ')
   return [
     { role: 'system', content: 'You read life insurance policy illustrations and quotes. You copy values exactly as the document writes them. When the document does not clearly state a value, you answer null. You never guess or calculate.' },
     {
       role: 'user',
-      content: `Document:\n"""\n${promptText(pages)}\n"""\n\nFrom the document, give:\n${ask.map((f) => `- ${f.key}: ${f.ask}`).join('\n')}\n\n`
+      content: `Document:\n"""\n${promptText(pages, max)}\n"""\n\nFrom the document, give:\n${ask.map((f) => `- ${f.key}: ${f.ask}`).join('\n')}\n\n`
         + `Answer with one JSON object only, like {${shape}}. Copy numbers as written. Use null for anything the document does not state.`,
     },
   ]

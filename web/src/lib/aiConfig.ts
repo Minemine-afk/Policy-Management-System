@@ -24,3 +24,5 @@ export const AI_STOPPED = 'the AI helper was stopped'
 export const AI_SWITCH_TEXT = "This computer's graphics chip did not answer, so the AI helper is starting again on the processor (slower, but it finishes). This browser will go straight to the processor from now on…"
 /** ...and put in front of the lines after it (the processor's model is a separate download). */
 export const AI_SWITCHED = "This computer's graphics chip did not answer, so the AI helper moved to the processor. "
+/** Shown when the browser has no memory left for the model even with the least text. */
+export const AI_NO_MEMORY = 'this browser ran out of memory for the AI model. Close other tabs and windows, reload this page and try again'

@@ -7,7 +7,7 @@ import { supabase } from './supabase'
 import { readFile, readRates, readSummary, readableName, type ReadDoc, type RatesResult, type SummaryResult } from './kbExtract'
 import { askKbAi, blankOf, kbAskKeys, mergeKbFill } from './kbAi'
 import { fmtNum, plain } from './num'
-import { AI_SWITCHED, AI_SWITCH_TEXT } from './aiConfig'
+import { AI_NO_MEMORY, AI_SWITCHED, AI_SWITCH_TEXT } from './aiConfig'
 import { aiHow } from './aiSay'
 import { missingText } from './kbAdmin'
 import { FINANCING, TERM, planLabel } from './families'
@@ -82,7 +82,7 @@ export function aiAskCount(r: Reading | null): number {
  *  with the PI comparison (aiModel.ts): loaded once per page. `onText`: a line on how far it has got. */
 export async function fillWithAi(r: Reading, onText?: (t: string) => void): Promise<Reading> {
   if (!r.summary || !r.doc) return r
-  const { runAi } = await import('./aiModel')
+  const { runAi, isOutOfMemory, releaseAi } = await import('./aiModel')
   let how = '', pre = ''
   const fill = await askKbAi(r.doc, blankOf(r.summary), r.summary, async (messages, maxTokens, i, n) => {
     const step = n > 1 ? `, question ${plain(i)} of up to ${plain(n)}` : ''
@@ -93,6 +93,11 @@ export async function fillWithAi(r: Reading, onText?: (t: string) => void): Prom
       if (p.stage === 'switch') { how = ''; pre = AI_SWITCHED; onText?.(AI_SWITCH_TEXT); return }
       onText?.(`${pre}The AI helper is reading the document${how}${step}${aiHow({ tokens: p.tokens })}…`)
     }, maxTokens)
+  }).catch((e) => {
+    // Out of memory: the engine is let go (a reload starts it afresh), and the screen says so in plain words.
+    if (!isOutOfMemory(e)) throw e
+    releaseAi()
+    throw new Error(AI_NO_MEMORY)
   })
   const { summary, aiKeys } = mergeKbFill(r.summary, fill)
   return { ...r, summary, ai: aiKeys }

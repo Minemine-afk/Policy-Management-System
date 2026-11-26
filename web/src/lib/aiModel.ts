@@ -2,15 +2,15 @@
 // Knowledge Bank's Product Summary reader (kbAi.ts). One worker and one model (aiConfig.ts) for all of them, so a
 // model change applies everywhere. Each reader writes its own prompt and checks its own answers against the
 // document's text; only answers that pass are used.
-import { READ_OUT_TOKENS, aiGroups, buildMessages, checkAnswer, parseAnswer, readOutMessages, readOutPage, type AiFill } from './piAi'
+import { MAX_CHARS, MAX_CHARS_CPU, READ_OUT_TOKENS, aiGroups, buildMessages, checkAnswer, parseAnswer, readOutMessages, readOutPage, type AiFill } from './piAi'
 import type { ChatMsg } from './aiRun'
-import { AI_STOPPED } from './aiConfig'
+import { AI_NO_MEMORY, AI_STOPPED } from './aiConfig'
 import type { Page } from './piExtract'
 
 type Reply = { id: number; loading?: number; starting?: string; thinking?: boolean; tokens?: number; device?: string; model?: string; text?: string; error?: string }
 /** `tokens`: pieces of the answer written so far. 'switch': the graphics chip did not answer, the processor takes over. */
 export type AiProgress = (p: { stage: 'download' | 'read' | 'switch'; pct?: number; device?: string; model?: string; tokens?: number }) => void
-type Force = { device?: string; dtype?: string; model?: string; hangGpu?: boolean; stallMs?: number; pictures?: boolean; picturePages?: number }
+type Force = { device?: string; dtype?: string; model?: string; hangGpu?: boolean; stallMs?: number; pictures?: boolean; picturePages?: number; cpuChars?: number[] }
 /** Tests (check-ai-browser.cjs, the e2e) can pick the device and model file through globalThis.__AI_FORCE. */
 const testForce = (): Force => (globalThis as { __AI_FORCE?: Force }).__AI_FORCE ?? {}
 
@@ -100,12 +100,30 @@ export function runAi(messages: ChatMsg[], progress?: AiProgress, maxTokens?: nu
   })
 }
 
+/** Which of MAX_CHARS_CPU's sizes the PI text is cut to; -1 = not decided (the full size on a graphics chip). */
+let cpuStep = -1
+export const isOutOfMemory = (e: unknown) => /bad_alloc|out of memory|memory access out of bounds|Array buffer allocation failed/i.test((e as Error)?.message ?? '')
+
 /** Asks the AI about `keys` (blank cells) of one PI; `known` holds the cells already filled, for cross-checks. Resolves with the values that passed the checks. */
 export async function askAi(pages: Page[], keys: string[], known: Record<string, string>, progress?: AiProgress): Promise<AiFill> {
   const out: AiFill = { found: {}, dropped: [] }
   // One question per group (the plan's numbers, then the rest), each checked with what is known so far.
   for (const group of aiGroups(keys)) {
-    const res = checkAnswer(parseAnswer(await runAi(buildMessages(pages, group), progress)), pages, group,
+    let text = ''
+    for (;;) {
+      // Less of the PI's text on the processor: its engine has little memory (piAi.ts MAX_CHARS_CPU).
+      const sizes = testForce().cpuChars ?? MAX_CHARS_CPU
+      const full = cpuStep < 0 && await aiOnGraphics()
+      if (!full && cpuStep < 0) cpuStep = 0
+      try { text = await runAi(buildMessages(pages, group, full ? MAX_CHARS : sizes[cpuStep]), progress); break } catch (e) {
+        // Out of memory: the engine is started afresh and asked again with less text, down to the least.
+        if (!isOutOfMemory(e)) throw e
+        if (cpuStep + 1 >= sizes.length) throw new Error(AI_NO_MEMORY)
+        cpuStep++
+        worker?.terminate(); worker = null
+      }
+    }
+    const res = checkAnswer(parseAnswer(text), pages, group,
       { ...known, ...Object.fromEntries(Object.entries(out.found).map(([k, v]) => [k, v.value])) })
     Object.assign(out.found, res.found)
     out.dropped.push(...res.dropped)
