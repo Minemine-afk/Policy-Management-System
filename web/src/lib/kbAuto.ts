@@ -7,6 +7,8 @@ import { supabase } from './supabase'
 import { readFile, readRates, readSummary, readableName, type ReadDoc, type RatesResult, type SummaryResult } from './kbExtract'
 import { blankOf, checkKbAnswers, kbQuestions, mergeKbFill, parseAnswer } from './kbAi'
 import { fmtNum, plain } from './num'
+import { AI_SWITCHED, AI_SWITCH_TEXT } from './aiConfig'
+import { aiHow } from './aiSay'
 import { missingText } from './kbAdmin'
 import { FINANCING, TERM, planLabel } from './families'
 import { readFinancing, type FinancingResult } from './kbFinancing'
@@ -83,14 +85,15 @@ export async function fillWithAi(r: Reading, onText?: (t: string) => void): Prom
   const { runAi } = await import('./aiModel')
   const qs = kbQuestions(r.doc, blankOf(r.summary))
   const answers = []
-  let how = ''
+  let how = '', pre = ''
   for (let i = 0; i < qs.length; i++) {
     const step = qs.length > 1 ? `, question ${plain(i + 1)} of ${plain(qs.length)}` : ''
     onText?.(`The AI helper is reading the document${how}${step}…`)
     answers.push(parseAnswer(await runAi(qs[i].messages, (p) => {
-      if (p.stage === 'download') { onText?.(`Downloading the AI model (first time only): ${fmtNum(Math.round((p.pct ?? 0) * 100))}%`); return }
+      if (p.stage === 'download') { onText?.(`${pre}Downloading the AI model (first time only): ${fmtNum(Math.round((p.pct ?? 0) * 100))}%`); return }
       if (p.model) how = ` (${p.model}${p.device === 'webgpu' ? ', graphics chip' : ', processor: slower'})`
-      onText?.(`The AI helper is reading the document${how}${step}…`)
+      if (p.stage === 'switch') { how = ''; pre = AI_SWITCHED; onText?.(AI_SWITCH_TEXT); return }
+      onText?.(`${pre}The AI helper is reading the document${how}${step}${aiHow({ tokens: p.tokens })}…`)
     }, qs[i].maxTokens)))
   }
   const fill = checkKbAnswers(r.doc, qs, answers, r.summary)

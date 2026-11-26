@@ -204,6 +204,23 @@ const SG_LABELS = {
   await cmp.getByRole('button', { name: 'Read the PIs again' }).click()
   await cmp.getByLabel('Insurer for PI 2', { exact: true }).waitFor()
   await check(cmp.getByRole('alert').filter({ hasText: /could not be read/ }).count().then((n) => n === 0), 'read again, it is read normally')
+  // A graphics chip that never answers (Kumar, 26 Nov 2026: "AI helper working…" for 10 minutes with nothing): the run is
+  // watched, moves to the processor by itself, and can be stopped. The chip is pretended here (__AI_FORCE.hangGpu).
+  {
+    const aiBtn0 = cmp.getByRole('button', { name: /^Fill \d+ blank cells? with the free AI helper$/ })
+    await check(seen0(aiBtn0), 'the AI helper button is offered for the blank cells')
+    await olivia.evaluate(() => { globalThis.__AI_FORCE = { hangGpu: true, stallMs: 2500 } })
+    await aiBtn0.click()
+    const stopBtn = cmp.getByRole('button', { name: 'Stop the AI helper' })
+    await check(seen0(stopBtn), 'while the AI helper works, a Stop button is shown')
+    await check(seen0(cmp.getByLabel('Time so far').filter({ hasText: /^\d+ s so far$/ })), 'with the time it has taken so far')
+    await check(seen0(cmp.getByRole('status').filter({ hasText: /graphics chip did not answer, so the AI helper (is starting again on|moved to) the processor/ })), 'a graphics chip that never answers: the AI helper moves to the processor by itself and says so')
+    await check(olivia.evaluate(() => Number(localStorage.getItem('pws-ai-no-gpu')) > 0), 'and this browser remembers to skip that graphics chip')
+    await stopBtn.click()
+    await check(seen0(cmp.getByRole('status').filter({ hasText: /^AI helper stopped\. Cells it had already filled are kept/ })), 'Stop ends the run with a plain message, not an error')
+    await check(seen0(aiBtn0), 'and the AI helper button is back')
+    await olivia.evaluate(() => { delete globalThis.__AI_FORCE; localStorage.removeItem('pws-ai-no-gpu') })
+  }
   // A page opened before an app update can't fetch the parts it had not loaded yet (Kumar, 26 Nov 2026: "Failed to fetch
   // dynamically imported module …/aiModel-….js"). It now says to reload, with a button.
   const staleSeen = await olivia.evaluate(async () => {
