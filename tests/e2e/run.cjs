@@ -1415,7 +1415,7 @@ const SG_LABELS = {
     await olivia.waitForURL(/\/kb\/products$/)
     await olivia.locator('tr', { hasText: 'Maple Term' }).first().waitFor()
     await olivia.getByLabel('Plan type').selectOption('Premium financing')
-    await check(seen(olivia.locator('tr', { hasText: 'iFAST Global Bank Premium Financing' })).then(() => olivia.locator('table[aria-label="Product records"] tbody tr').count()).then((n) => n === 2), 'the category filter lists the 2 financing records')
+    await check(seen(olivia.locator('tr', { hasText: 'iFAST Global Bank Premium Financing' })).then(() => olivia.waitForFunction(() => document.querySelectorAll('table[aria-label="Product records"] tbody tr').length === 2, null, { timeout: 5000 })).then(() => true, () => false), 'the category filter lists the 2 financing records')
     await check(seen(olivia.locator('tr', { hasText: 'CIMB Premium Financing' }).getByText('Saved · auto-read, not yet reviewed')), 'listed as saved, not as unsearchable')
     await olivia.locator('tr', { hasText: 'iFAST Global Bank Premium Financing' }).getByRole('link', { name: /^Open/ }).click()
     await olivia.waitForURL(/\/kb\/products\/[0-9a-f-]{36}$/)
