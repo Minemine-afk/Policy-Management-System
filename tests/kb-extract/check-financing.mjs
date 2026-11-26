@@ -110,18 +110,13 @@ if (args.includes('--ai')) {
   for (const { f, doc } of docs) {
     const s = fin.readFinancing(doc)
     const known = { ...s, record: { name: s.record.name, product_type: s.record.product_type }, facts: {} }
-    const qs = ai.kbQuestions(doc, ai.blankOf(known))
-    const answers = []
-    for (const q of qs) {
-      const out = await gen(q.messages, { max_new_tokens: q.maxTokens, do_sample: false })
-      const text = out[0].generated_text.at(-1).content
-      if (args.includes('--verbose')) console.log(`  [${q.keys.join(',')}] ${text.replace(/\s+/g, ' ').slice(0, 900)}`)
-      answers.push(ai.parseAnswer(text))
-    }
-    const fill = ai.checkKbAnswers(doc, qs, answers, known)
+    const fill = await ai.askKbAi(doc, ai.blankOf(known), known, async (messages, maxTokens) => {
+      const out = await gen(messages, { max_new_tokens: maxTokens, do_sample: false })
+      return out[0].generated_text.at(-1).content
+    }, args.includes('--verbose') ? (l) => console.log('  ' + l) : undefined)
     const got = Object.fromEntries(Object.entries(fill.facts).map(([k, x]) => [k, x.v]))
     if (fill.record.currencies) got.currencies = fill.record.currencies.join(',')
-    console.log(`${f} (AI, every fact blank): asked ${qs.reduce((a, q) => a + q.keys.length, 0)}, kept ${Object.keys(got).length}, dropped ${fill.dropped.length}`)
+    console.log(`${f} (AI, every fact blank): asked ${fill.asked.length}, kept ${Object.keys(got).length}, dropped ${fill.dropped.length}`)
     const want = AI_WANT[f]
     for (const [k, v] of Object.entries(got)) {
       const w = want[k]

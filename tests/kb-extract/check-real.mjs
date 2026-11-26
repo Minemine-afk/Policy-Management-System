@@ -50,6 +50,10 @@ const WANT = {
       ti: 'If the Insured is diagnosed with a TI while the policy is in force, we may pay the TI Benefit in a lump sum upon your request as an accelerated payment of Death Benefit',
       death: 'We will pay benefits upon the death of the Insured. The Death Benefit is the higher of (less any Policy Loan): The Sum Assured of the policy; and The Account Value on the date of the Insured’s death.',
       minRate: '2.00% p.a. for the first 10 Policy Years and thereafter, 1.50% p.a.',
+      premTerm: 'Genesis III Indexed Universal Life offers two premium payment options: 1. Single Premium payment', coverTo: 'Lifetime - no maturity',
+      surrCharge: 'Surrender Charges are applicable in the first 15 Policy Years', fees: 'A Premium Charge of 6.00% will be deducted from each Gross Premium',
+      freelook: 'You may return the policy to us or the authorised representative through whom you bought it within 14 days after you receive the policy.',
+      grace: 'You will have a 61-day Grace Period during which you may make any necessary payments to keep your policy in force.',
       consider: 'We may use fixed and non-fixed income assets',
     },
   },
@@ -57,6 +61,8 @@ const WANT = {
     record: { name: 'HSBC Life Indexed Flexi Income', insurer: 'HSBC Life', currencies: ['USD'] }, kind: 'Universal Life', planType: 'Universal life',
     facts: {
       ad: 'We’ll pay the Accidental Death Benefit when the Life Insured dies as a result of an Accident before reaching age 80.',
+      ti: 'We’ll pay the TI Benefit when the Life Insured is diagnosed as suffering from Terminal Illness.', uw: '~available without medical underwriting.',
+      premTerm: 'Premium payments are flexible, subject to the premium requirements and limit.',
       death: 'We’ll pay the Death Benefit when the Life Insured dies.',
       cash: 'The value acquired by the Policy over time.',
       minRate: 'The Guaranteed Minimum Crediting Rate is 2.00%.',
@@ -73,6 +79,7 @@ const WANT = {
   'Manulife_Signature_IUL_Select_III_Product_Summary.pdf': {
     record: { name: 'Signature Indexed Universal Life Select (III)', insurer: 'Manulife', currencies: ['USD'] }, kind: 'Indexed Universal Life', planType: 'Universal life',
     facts: {
+      ti: 'If the life insured is diagnosed with a TI, we will pay the TI benefit as an acceleration of the death benefit', premTerm: 'Premium payments are flexible, subject to the premium requirements and limit.',
       death: 'If the life insured dies during the policy term, we will pay the death benefit (as determined at the date of death) being the higher of: (a) the face amount; or (b) the policy value.',
       cash: 'If you surrender your policy, we will pay you the net surrender value',
       account: 'Your policy value is the sum of the values in the Fixed Account and the Index Account.',

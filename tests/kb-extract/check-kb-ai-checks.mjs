@@ -1,5 +1,5 @@
 // Checks the Knowledge Bank AI helper's safety checks (web/src/lib/kbAi.ts) without a model: made-up model answers,
-// right and wrong, against real and made-up Product Summaries. Every wrong answer must be dropped; right ones kept.
+// right and wrong (quotes and picked line numbers), against real and made-up Product Summaries. Every wrong answer must be dropped; right ones kept.
 // Usage: node tests/kb-extract/check-kb-ai-checks.mjs [folder with the real PDFs]   (needs `npm ci` in web/)
 import fs from 'node:fs'
 import path from 'node:path'
@@ -97,6 +97,36 @@ for (const file of ['FWD_Future_First_Term_Product_Summary.pdf', 'Singlife_Elite
   // A quote made up by the model (not in the document) is always dropped.
   f = ai.checkKbAnswers(doc, [{ kind: 'facts', keys: ['grace'], messages: [], maxTokens: 0 }], [{ grace: 'A grace period of 31 days is given to pay each premium.' }], s)
   check(!f.facts.grace, `${file}: a made-up quote is dropped`)
+}
+// Picking a line (kbPicks, checkKbPicks): the model only gives a number; both askings must point to the same line.
+{
+  const doc = textDoc(VARIANTS['variant-entry-age-sentence'])
+  const s0 = kb.readSummary(doc)
+  const known = { ...s0, facts: {} }
+  const picks = ai.kbPicks(doc, { facts: ['grace', 'reinstate', 'freelook'] }, known)
+  const p = picks.find((x) => x.key === 'reinstate')
+  check(!!p && p.options.length >= 3 && p.options.some((o) => o.value === null), 'a fact with one possible line is shown with lines about something else')
+  check(picks.every((x) => x.options.every((o) => o.value === null || ai.KB_AI_FACTS.find((r) => r.key === x.key).must.every((re) => re.test(o.s)))), 'every line offered passes its fact\'s checks')
+  if (p) {
+    const n = p.options.length, real = p.options.findIndex((o) => o.value !== null) + 1, other = p.options.findIndex((o) => o.value === null) + 1
+    const one = (a, b) => ai.checkKbPicks(doc, [p], [[a, b]], known)
+    check(/restored within 2 years/.test(one(String(real), String(n + 1 - real)).facts.reinstate?.v ?? ''), 'a line picked both times is kept, in the document\'s words')
+    check(!one(String(real), String(real === n + 1 - real ? real + 1 : real)).facts.reinstate, 'a different line the second time is dropped')
+    check(!one(String(real), '0').facts.reinstate && !one('0', '0').facts.reinstate, '"none" either time fills nothing')
+    check(!one(String(other), String(n + 1 - other)).facts.reinstate, 'picking a line about something else fills nothing')
+    check(!one('the second one', 'yes').facts.reinstate && !one(String(n + 3), '1').facts.reinstate, 'an answer that is not a line number fills nothing')
+    check(/restored within 2 years/.test(one(`Line ${real}.`, `${n + 1 - real}`).facts.reinstate?.v ?? ''), '"Line 2." is read as 2')
+  }
+  // A table row: the value kept is the cell after the label.
+  const t = textDoc('Acme Term Product Summary\nGrace period    30 days\nSome other line about nothing in particular here.\nAnother plain sentence that says very little at all.\nA third sentence, also about nothing much, for good measure.')
+  const tp = ai.kbPicks(t, { facts: ['grace'] }, { record: {}, facts: {}, filled: [], notes: [] })[0]
+  const at = tp ? tp.options.findIndex((o) => o.value === '30 days') + 1 : 0
+  check(at > 0, 'a table row is offered with its value cell')
+  if (at) check(ai.checkKbPicks(t, [tp], [[String(at), String(tp.options.length + 1 - at)]], { record: {}, facts: {}, filled: [], notes: [] }).facts.grace?.v === '30 days', 'a picked table row keeps the value cell only')
+  // Tails of list items and cut sentences are never offered.
+  const c = textDoc('Acme Term Product Summary\nThe policy is available:\na. with a policy term of 5 years; or\nb. with a policy term of 2 years.\nYou may choose a policy term of 10 or 20 years.')
+  const cp = ai.kbPicks(c, { facts: ['coverTo'] }, { record: {}, facts: {}, filled: [], notes: [] })[0]
+  check(!cp || cp.options.every((o) => !/^with a policy term/.test(o.s)), 'the tail of a list item is not offered as a line')
 }
 console.log(`${ok} right, ${bad} wrong`)
 process.exit(bad ? 1 : 0)
