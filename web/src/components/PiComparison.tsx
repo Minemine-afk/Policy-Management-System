@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { sayError } from '../lib/update'
 import { supabase } from '../lib/supabase'
 import { says } from '../lib/options'
 import { FIELDS, SECTIONS, ReadStopped, extract, labelWith, readPdf, type Found, type Page } from '../lib/piExtract'
@@ -174,7 +175,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
           out.push(withForm({ fileName: doc.file_name, docId: doc.id, found, notes, discounted, values: {},
             issueDate: issueFound?.value ?? '', issueFound, pages, ocrPages: [...ocrPages], partial: !!stopped }))
         } catch (e) {
-          out.push(withForm(failed(doc.file_name, 'Could not read this PDF: ' + (e as Error).message, files.current.has(doc.id) ? doc.id : undefined)))
+          out.push(withForm(failed(doc.file_name, sayError(e, (x) => 'Could not read this PDF: ' + x.message), files.current.has(doc.id) ? doc.id : undefined)))
         }
       }
       if (!cancelled) { setCols(out); setProgress(null) }
@@ -268,7 +269,7 @@ export default function PiComparison({ req, docs, userId, isBsd, onSaved }: {
       setChecked(false); setSaved('')
       setAiState({ busy: false, error: '', text: filled ? `The AI filled ${fmtNum(filled)} of ${fmtNum(aiCells)} blank ${aiCells === 1 ? 'cell' : 'cells'}${fromPictures ? ` (${fmtNum(fromPictures)} from page pictures)` : ''}, tagged “AI”. Check them against the PIs.` : 'The AI found nothing it could confirm in the PIs: the blank cells stay blank.' })
     } catch (e) {
-      setAiState({ busy: false, text: '', error: 'The AI helper could not run in this browser: ' + (e as Error).message + '. Fill the blank cells by hand.' })
+      setAiState({ busy: false, text: '', error: sayError(e, (x) => 'The AI helper could not run in this browser: ' + x.message + '. Fill the blank cells by hand.') })
     }
   }
 

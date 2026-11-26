@@ -1,6 +1,7 @@
 // Knowledge Hub module: the Knowledge Bank's documents and product records.
 // Ops and BSD keep it (upload, edit). No check step: an upload is in use at once, and a Product Summary or rate sheet
 // is read into a product record that is searchable straight away. Introducers given the module see current documents.
+import { sayError } from '../lib/update'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -276,7 +277,7 @@ export function DocDialog({ mode, doc, docs, products, preset, read = true, onCl
       setReading(r)
       if (!r.ai?.length) setAiError('The AI helper found nothing more that passed the checks against the document, so those details stay blank.')
     } catch (e) {
-      setAiError(`The AI helper could not run in this browser: ${e instanceof Error ? e.message : String(e)}. What the reader found is kept.`)
+      setAiError(sayError(e, (x) => `The AI helper could not run in this browser: ${x.message}. What the reader found is kept.`))
     } finally {
       setProgress('')
     }

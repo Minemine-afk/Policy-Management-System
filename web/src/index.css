@@ -284,3 +284,7 @@ ul.changes { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction:
 
 /* "From document": a value the Knowledge Bank reader filled in, for the maker to check. */
 .pill.tag { margin-left: 6px; font-size: 11px; vertical-align: middle; text-transform: none; letter-spacing: 0; }
+
+/* Shown when this page is from before the app's latest update (components/UpdateNotice.tsx). */
+.update-notice { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 1000; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 10px; padding: 14px 18px; font-size: 15px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.update-notice strong { color: var(--warn); }
